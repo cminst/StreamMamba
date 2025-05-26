@@ -133,7 +133,7 @@ class LayerScale(nn.Module):
         self.gamma = nn.Parameter(init_values * torch.ones(dim))
         self.force_fp32 = force_fp32
 
-    @torch.cuda.amp.autocast(enabled=False)
+    @torch.amp.autocast('cuda', enabled=False)
     def forward(self, x):
         if self.force_fp32:
             output_type = x.dtype
@@ -364,6 +364,11 @@ class InternVideo2(nn.Module):
         self.embed_dim = embed_dim
         self.T = num_frames // tubelet_size
 
+        # Added so that WindowInternVideo2 can access
+        self.num_heads = num_heads
+        self.mlp_ratio = mlp_ratio
+        self.qkv_bias = qkv_bias
+
         if False:
             norm_layer_for_blocks = partial(DropoutAddRMSNorm, eps=1e-6, prenorm=True)
         else:
@@ -528,4 +533,8 @@ class InternVideo2(nn.Module):
         x = self.clip_projector(x)
 
         x = self.fc_norm(x)
+
+        # print('---- InternVideo2.forward() ----')
+        # print(f'Function executed successfully, x is shaped {x.shape}')
+
         return x
