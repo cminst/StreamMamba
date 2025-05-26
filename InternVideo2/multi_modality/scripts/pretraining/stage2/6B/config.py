@@ -1,18 +1,6 @@
 from configs.data import *
 from configs.model import *
 
-# ========================= data ==========================
-train_file = available_corpus["pretrain_example_data_1B"]
-
-
-test_file = dict(msrvtt_1k_test=available_corpus["msrvtt_1k_test"],
-                 didemo_ret_test=available_corpus["didemo_ret_test"])
-
-test_types = ["msrvtt_1k_test", "didemo_ret_test"]
-num_workers = 6
-
-best_key = ["msrvtt_1k_test_match", "t2v_r1"]
-
 # ========================= input ==========================
 num_frames = 4
 num_frames_test = 4
@@ -143,7 +131,7 @@ optimizer = dict(
 
 scheduler = dict(sched="cosine", epochs=5, min_lr_multi=0.01, warmup_epochs=1)
 
-evaluate = False
+evaluate = True
 deep_fusion = False
 evaluation = dict(
     eval_frame_ensemble="concat",  # [concat, max, mean, lse]
