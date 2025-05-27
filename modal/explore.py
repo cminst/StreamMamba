@@ -63,7 +63,7 @@ image = image.run_commands(
 app = modal.App(image=image, name="InternVideo2 Experiments")
 
 # Define a Modal function named 'runwithgpu' that will be executed on Modal cloud.
-@app.function(gpu="L4:1", timeout=86400)
+@app.function(gpu="A100-40GB:1", timeout=86400)
 def runwithgpu():
     import os
     import subprocess
