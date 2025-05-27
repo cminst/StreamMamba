@@ -52,20 +52,24 @@ def get_vid_feat(frames, vlm):
     return vlm.get_vid_features(frames)
 
 tensor_cache = {}
-def retrieve_text(frames,
-                  texts,
-                  model,
-                  topk:int=5,
-                  config: dict={},
-                  device=torch.device('cuda'),
-                  log:bool = False):
-    # print(texts)
+def retrieve_text(
+    frames,
+    texts,
+    model,
+    topk:int=5,
+    config: dict={},
+    device=torch.device('cuda'),
+    log:bool = False
+):
     vlm = model
     vlm = vlm.to(device)
-    # print(texts)
+
     fn = config.get('num_frames', 8)
     size_t = config.get('size_t', 224)
     frames_tensor = frames2tensor(frames, fnum=fn, target_size=(size_t, size_t), device=device)
+
+    if log: print(f"The frames tensor is {frames_tensor.shape} shape")
+
     vid_feat = vlm.get_vid_feat(frames_tensor)
 
     if log:
@@ -89,14 +93,156 @@ def retrieve_text(frames,
         text_feats_tensor = torch.stack([tensor_cache[x] for x in texts])
 
     probs, idxs = vlm.predict_label(vid_feat, text_feats_tensor, top=topk)
-    # print("-" * 30)
-    # print(probs)
-    # print(idxs)
-    # print("-" * 30)
+
     ret_texts = [texts[i] for i in idxs.long().numpy()[0].tolist()]
-    # print(texts)
+
     return ret_texts, probs.float().numpy()[0]
 
+def retrieve_text_streaming(
+    new_frame, # Expected: a single numpy array (HxWx3)
+    texts,
+    model,
+    prev_hidden_state, # Expected: model-specific hidden state object (tensor or tuple)
+    topk:int=5,
+    config: dict={},
+    device=torch.device('cuda'),
+    log:bool = False
+):
+    """
+    Performs text retrieval for a single new video frame in a streaming fashion.
+    Includes added logging.
+    """
+    if log:
+        print("\n--- retrieve_text_streaming START ---")
+        print(f"Input new_frame type: {type(new_frame)}")
+        if hasattr(new_frame, 'shape'):
+            print(f"Input new_frame shape: {new_frame.shape}")
+        print(f"Input texts type: {type(texts)}")
+        print(f"Input texts list length: {len(texts)}")
+        print(f"Input prev_hidden_state type: {type(prev_hidden_state)}")
+        if isinstance(prev_hidden_state, torch.Tensor):
+             print(f"Input prev_hidden_state shape: {prev_hidden_state.shape}")
+        elif isinstance(prev_hidden_state, (list, tuple)) and len(prev_hidden_state) > 0 and isinstance(prev_hidden_state[0], torch.Tensor):
+             print(f"Input prev_hidden_state (first element) shape: {prev_hidden_state[0].shape}")
+        print(f"Input topk: {topk}")
+        print(f"Input config: {config}")
+        print(f"Input device: {device}")
+
+
+    vlm = model
+    vlm = vlm.to(device)
+
+    size_t = config.get('size_t', 224)
+
+    # New frame is a list with one frame. Pass a list containing the new_frame
+    # to frames2tensor.
+    frames_list_for_tensor = [new_frame]
+    if log:
+        print(f"Passing list of length {len(frames_list_for_tensor)} to frames2tensor.")
+        if len(frames_list_for_tensor) > 0:
+            print(f"Type of element being passed to frames2tensor: {type(frames_list_for_tensor[0])}")
+            if hasattr(frames_list_for_tensor[0], 'shape'):
+                 print(f"Shape of element being passed to frames2tensor: {frames_list_for_tensor[0].shape}")
+
+
+    frames_tensor = frames2tensor(frames_list_for_tensor, fnum=1, target_size=(size_t, size_t), device=device)
+
+    if frames_tensor is None: # Handle case where frames2tensor returned None
+         if log: print("frames_tensor is None, returning empty results and prev_hidden_state.")
+         return [], np.array([]), prev_hidden_state # Or None for hidden state? Depends on model
+
+
+    # frames2tensor with fnum=1 returns shape [1, 1, C, H, W].
+    # Squeeze out the batch (1) and time (1) dimensions resulting in [C, H, W]
+    # or potentially [1, C, H, W] if the model expects a batch dimension for streaming.
+    # Let's assume the model expects [1, C, H, W] for get_streaming_vid_feat input tensor.
+    # So, squeeze(0) twice would result in [C, H, W], squeeze(1) once results in [1, C, H, W].
+    # The original code had frames_tensor.squeeze(0) which is ambiguous if shape is [1, 1, C, H, W].
+    # Let's explicitly squeeze dimension 1 to get [1, C, H, W]
+    if frames_tensor.ndim == 5: # Ensure it's the expected B, T, C, H, W
+         frames_tensor_input = frames_tensor.squeeze(1) # Result: [1, C, H, W]
+    elif frames_tensor.ndim == 4: # Might already be [1, C, H, W] if B=1, T=1 handled internally by frames2tensor
+         frames_tensor_input = frames_tensor
+    else:
+         if log: print(f"Unexpected frames_tensor dims {frames_tensor.ndim}: {frames_tensor.shape}")
+         frames_tensor_input = frames_tensor # Proceed but potentially error
+
+    if log: print(f"frames_tensor shape after squeeze for streaming input: {frames_tensor_input.shape}")
+
+
+    # Get video features for the current frame, utilizing the previous hidden state
+    if log: print("Getting streaming video features...")
+    vid_feat, new_hidden_state = vlm.get_streaming_vid_feat(frames_tensor_input, prev_hidden_state = prev_hidden_state)
+    if log:
+        print(f"vid_feat shape: {vid_feat.shape}")
+        print(f"new_hidden_state type: {type(new_hidden_state)}")
+        if isinstance(new_hidden_state, torch.Tensor):
+             print(f"new_hidden_state shape: {new_hidden_state.shape}")
+        elif isinstance(new_hidden_state, (list, tuple)) and len(new_hidden_state) > 0 and isinstance(new_hidden_state[0], torch.Tensor):
+             print(f"new_hidden_state (first element) shape: {new_hidden_state[0].shape}")
+
+
+    # Check if text features need to be calculated or if cached versions can be used
+    calculate = False
+    for t in texts:
+        if t not in tensor_cache:
+            calculate = True
+            break
+    if log: print(f"Text feature calculation needed: {calculate}")
+
+
+    if calculate:
+        if log: print("Calculating text features...")
+        text_feat_d = {}
+        text_feat_d = get_text_feat_dict(texts, vlm, text_feat_d)
+        text_feats = [text_feat_d[t] for t in texts]
+        text_feats_tensor = torch.cat(text_feats, 0)
+        if log: print(f"Calculated text_feats_tensor shape: {text_feats_tensor.shape}")
+
+        # Cache calculated text features on CPU
+        for j in range(len(texts)):
+            tensor_cache[texts[j]] = text_feats_tensor[j].detach().cpu()
+        if log: print("Cached text features.")
+
+    else:
+        if log: print("Using Cached text features.")
+        # Stack cached text features into a tensor, move to device
+        cached_tensors = [tensor_cache[x].to(device) for x in texts]
+        text_feats_tensor = torch.stack(cached_tensors)
+        if log: print(f"Stacked cached text_feats_tensor shape: {text_feats_tensor.shape}")
+
+
+    # print(f"Video feature is of shape {vid_feat.shape}") # Debug print
+    # print(f"Text feature is of shape {text_feats_tensor.shape}") # Debug print
+
+    # Predict probabilities and get topk indices by comparing video and text features
+    if log: print(f"Predicting labels with vid_feat shape {vid_feat.shape} and text_feats_tensor shape {text_feats_tensor.shape}")
+    probs, idxs = vlm.predict_label(vid_feat, text_feats_tensor, top=topk)
+
+    if log:
+        print(f"probs shape: {probs.shape}, type: {type(probs)}")
+        print(f"idxs shape: {idxs.shape}, type: {type(idxs)}")
+
+    # Map indices back to the original text strings
+    # idxs is typically [B, topk], so [0] gets the results for the first item in the batch (which is the only item)
+    ret_texts = [texts[i] for i in idxs.long().numpy()[0].tolist()]
+
+    # probs is typically [B, N] where N is number of texts. [0] gets probs for the first batch item.
+    ret_probs = probs.float().numpy()[0]
+
+    if log:
+        print(f"Returning ret_texts type: {type(ret_texts)}, length: {len(ret_texts)}")
+        print(f"Returning ret_probs type: {type(ret_probs)}, shape: {ret_probs.shape}")
+        print(f"Returning new_hidden_state type: {type(new_hidden_state)}")
+        if isinstance(new_hidden_state, torch.Tensor):
+             print(f"Returning new_hidden_state shape: {new_hidden_state.shape}")
+        elif isinstance(new_hidden_state, (list, tuple)) and len(new_hidden_state) > 0 and isinstance(new_hidden_state[0], torch.Tensor):
+             print(f"Returning new_hidden_state (first element) shape: {new_hidden_state[0].shape}")
+        print("--- retrieve_text_streaming END ---")
+
+
+    # Return top texts, their probabilities, and the updated hidden state
+    return ret_texts, ret_probs, new_hidden_state
 
 def setup_internvideo2(config: dict):
     if "bert" in config.model.text_encoder.name:
@@ -336,3 +482,56 @@ class InternVideo2_Stage2(nn.Module):
         label_probs = (100.0 * vid_feat @ txt_feat.T)
         top_probs, top_labels = label_probs.float().cpu().topk(top, dim=-1)
         return top_probs, top_labels
+
+def print_config(config):
+    """Prints a formatted table of the model configuration parameters.
+
+    Args:
+        config (dict): A dictionary containing the model configuration.
+                       It is expected to have a 'model' key, which itself is a
+                       dictionary with various configuration parameters.
+
+    Returns:
+        None: This function prints to the console and does not return a value.
+    """
+    try:
+        from tabulate import tabulate
+    except ImportError:
+        print("Please install the 'tabulate' package to print the configuration table.")
+        return
+    model_config = config.model
+    vision_config = model_config.get('vision_encoder', {}) # Safely get vision_encoder dict
+
+    table_data = [
+        ["Parameter", "Value"],
+        ["--- General Model ---", "---"],
+        ["Model Class", model_config.get('model_cls', 'N/A')],
+        ["Main Checkpoint", os.path.basename(model_config.get('extra_ckpt_path', 'N/A')) if model_config.get('extra_ckpt_path') else 'N/A'],
+        ["Temperature", model_config.get('temp', 'N/A')],
+        ["--- Vision Encoder ---", "---"],
+        ["VE Name", vision_config.get('name', 'N/A')],
+        ["VE Image Size", vision_config.get('img_size', 'N/A')],
+        ["VE Patch Size", vision_config.get('patch_size', 'N/A')],
+        ["VE Embedding Dim", vision_config.get('embed_dim', 'N/A')],
+        ["VE Depth", vision_config.get('depth', 'N/A')],
+        ["VE Num Heads", vision_config.get('num_heads', 'N/A')],
+        ["VE Num Frames (Tubelet)", f"{vision_config.get('num_frames', 'N/A')} (x{vision_config.get('tubelet_size', 'N/A')})"],
+        ["VE Checkpoint", os.path.basename(model_config.get('vision_ckpt_path', 'N/A')) if model_config.get('vision_ckpt_path') else 'N/A'],
+        ["--- MobileCLIP ---", "---"],
+        ["MobileCLIP Type", model_config.get('mobileclip_type', {}).get('name', 'N/A')],
+        ["MobileCLIP Checkpoint", os.path.basename(model_config.get('mobileclip_ckpt_path', 'N/A')) if model_config.get('mobileclip_ckpt_path') else 'N/A'],
+        ["--- Freeze Flags ---", "---"],
+        ["Freeze Vision Encoder", model_config.get('freeze_vision', 'N/A')],
+        ["Freeze MobileCLIP Vision", model_config.get('freeze_mobileclip_vision', 'N/A')],
+        ["Freeze MobileCLIP Text", model_config.get('freeze_mobileclip_text', 'N/A')],
+        ["--- LoRA/Projection Flags ---", "---"], # Added some more potentially interesting flags
+        ["Open Text LoRA", model_config.get('open_text_lora', 'N/A')],
+        ["Open Text Projection", model_config.get('open_text_projection', 'N/A')],
+    ]
+
+    # Remove the header row from data if you want to use tabulate's headers argument
+    headers = table_data[0]
+    data_rows = table_data[1:]
+
+    print("\n📋 Model Configuration Summary:")
+    print(tabulate(data_rows, headers=headers, tablefmt="fancy_grid"))
