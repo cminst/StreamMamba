@@ -140,8 +140,8 @@ evaluation = dict(
     eval_offload=True,  # offload gpu tensors to cpu to save memory.
 )
 
-use_half_precision = True
-use_bf16 = True
+use_half_precision = False
+use_bf16 = False
 
 gradient_checkpointing = True # for text encoder
 use_flash_sdp = False
