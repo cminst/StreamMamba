@@ -133,9 +133,12 @@ def setup_internvideo2(config: dict):
 
     if config.get('use_bf16', False):
         model_without_ddp = model_without_ddp.to(torch.bfloat16)
+        print("Bfloat 16 mode")
     elif config.get('use_half_precision', False):
+        print("Float 16 mode")
         model_without_ddp = model_without_ddp.to(torch.float16)
     else:
+        print("Float 32 mode")
         model_without_ddp = model_without_ddp.to(torch.float32)
 
     model_without_ddp.eval()
