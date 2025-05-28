@@ -71,7 +71,7 @@ def runwithgpu():
     os.chdir("/root/")
 
     # Generate a secure random token for JupyterLab access authentication.
-    token = 'tesslate'
+    token = 'internvideo2'
 
     with modal.forward(8888) as tunnel:
         # Construct the URL to access JupyterLab, including the generated token.

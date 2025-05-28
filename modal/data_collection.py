@@ -71,7 +71,7 @@ def runwithgpu():
     os.chdir("/root/")
 
     # Generate a secure random token for JupyterLab access authentication.
-    token = 'tesslate'
+    token = 'internvideo2'
 
     os.system('huggingface-cli download qingy2024/InternVideo2-Data InternVideo2_6B_V5_ACT75_eval.py --local-dir /root/ --repo-type dataset')
 
