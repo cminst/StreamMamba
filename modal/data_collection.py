@@ -54,6 +54,7 @@ image = image.run_commands(
 
 # Install requirements from IV2 repo.
 image = image.run_commands(
+    "echo Starting Install reqs",
     "curl -s -o reqs.txt https://raw.githubusercontent.com/qingy1337/IV2/refs/heads/main/reqs.txt && pip install -r reqs.txt",
     "rm reqs.txt"
 )

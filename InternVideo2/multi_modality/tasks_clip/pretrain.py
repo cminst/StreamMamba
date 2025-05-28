@@ -122,7 +122,7 @@ def preprocess_frame(frame_bgr_np, transform, device):
 
     return frame_tensor_batch
 
-# --- Evaluation Function ---
+# –––––––––––– Evaluation Function ––––––––––––
 def evaluate_streaming_similarity(
     model,
     device,
@@ -297,14 +297,7 @@ def evaluate_streaming_similarity(
 
     return avg_similarity
 
-
-# Assuming the imports and helper functions (_frame_from_video, get_inference_transform,
-# preprocess_frame, create_dummy_video, evaluate_streaming_similarity,
-# MetricLogger, SmoothedValue, MetaLoader_rs, get_media_types, CosineEmbeddingLoss,
-# is_main_process, log_dict_to_wandb, save_debug_step_data, logger) are defined above.
-# Also assuming InternVideo2_CLIP_Small class and its methods are available.
-
-# --- The main training function ---
+# –––––––––––– The main training function ––––––––––––
 def train(
     model,
     train_loaders, # List of DataLoaders
@@ -408,6 +401,7 @@ def train(
     cosine_loss_base_fn = CosineEmbeddingLoss()
 
     def cosine_sim_loss(student_embedding, teacher_embedding):
+        # [B, 768]
         B = student_embedding.shape[0]
         target = torch.ones(B, dtype=student_embedding.dtype, device=student_embedding.device)
         return cosine_loss_base_fn(student_embedding, teacher_embedding, target)
@@ -605,9 +599,6 @@ def train(
     logger.info(f"Averaged stats for Epoch [{epoch}]: {metric_logger.global_avg()}")
     if is_main_process() and config.wandb.enable:
         log_dict_to_wandb(metric_logger.get_global_avg_dict(), step=global_step, prefix=f"epoch_{epoch}/")
-        # Optionally, log to train/ prefix as well, as in original (might overwrite last step's train/log or be desired as summary)
-        # log_dict_to_wandb(metric_logger.get_global_avg_dict(), step=global_step, prefix="train/")
-
 
     return global_step
 
