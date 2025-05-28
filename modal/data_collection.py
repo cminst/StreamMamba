@@ -73,9 +73,11 @@ def runwithgpu():
     # Generate a secure random token for JupyterLab access authentication.
     token = 'internvideo2'
 
-    os.system('huggingface-cli download qingy2024/InternVideo2-Data InternVideo2_6B_V5_ACT75_eval.py --local-dir /root/ --repo-type dataset')
+    script_name = "ViCLIP-B16-Eval.py"
 
-    command = "cd /root/ && python3 InternVideo2_6B_V5_ACT75_eval.py --num_frames 8"
+    os.system(f'huggingface-cli download qingy2024/InternVideo2-Data {script_name} --local-dir /root/ --repo-type dataset')
+
+    command = f"cd /root/ && python3 {script_name}"
     process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = process.communicate()
 

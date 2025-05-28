@@ -10,6 +10,10 @@ import modal
 image = (
     modal.Image.debian_slim()
     # core Jupyter stack
+    .pip_install("jupyterlab")
+    .pip_install("ipywidgets")
+    .pip_install("hf_transfer")
+    .pip_install("jupyter")
     .pip_install(
         "httpx",
         "tqdm",
