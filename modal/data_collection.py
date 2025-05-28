@@ -75,7 +75,7 @@ def runwithgpu():
 
     os.system('huggingface-cli download qingy2024/InternVideo2-Data InternVideo2_6B_V5_ACT75_eval.py --local-dir /root/ --repo-type dataset')
 
-    command = "cd /root/ && python3 InternVideo2_6B_V5_ACT75_eval.py"
+    command = "cd /root/ && python3 InternVideo2_6B_V5_ACT75_eval.py --num_frames 8"
     process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = process.communicate()
 
