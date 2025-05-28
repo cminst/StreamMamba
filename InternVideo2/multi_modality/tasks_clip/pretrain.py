@@ -679,8 +679,8 @@ def setup_dataloaders(config, mode="pt"):
             print("Batches are not the same!")
             # You could break or log details here
             break
-    else:
-        print("Loaders appear to yield the same data batches.")
+        else:
+            print("Loaders appear to yield the same data batches.")
 
     print("Loaders appear to yield the same data batches.")
     print("Sanity check complete. Data loaders seem to be working as expected.")
