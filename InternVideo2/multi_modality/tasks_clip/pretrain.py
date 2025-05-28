@@ -308,7 +308,6 @@ def evaluate_streaming_similarity(
 def train(
     model,
     train_loaders, # List of DataLoaders
-    mobileclip_train_loaders, # List of DataLoaders for MobileCLIP data
     optimizer,
     tokenizer, # Placeholder, not used in this specific loss
     epoch,
@@ -366,40 +365,24 @@ def train(
     metric_logger.add_meter("temperature", SmoothedValue(window=1, fmt="{value:.4f}"))
     metric_logger.add_meter("eval_avg_sim", SmoothedValue(window=1, fmt="{value:.4f}")) # For periodic eval
 
-    # The original code implicitly added these via metric_logger.update()
-    # For clarity, they could be added here, but MetricLogger handles on-the-fly creation.
-    # metric_logger.add_meter("video-stream-target-loss", SmoothedValue(window=1, fmt="{value:.4f}"))
-    # metric_logger.add_meter("video-stream-target-sim", SmoothedValue(window=1, fmt="{value:.4f}"))
-
     header = f"Train Epoch: [{epoch}]"
     log_freq = config.log_freq
 
     media_types = get_media_types(train_loaders) # Defined here for use in MetaLoader_rs
-    mc_media_types = ["mobileclip"] # As per original usage for mobileclip_loader_agg
 
     if config.distributed:
         for loader in train_loaders: loader.sampler.set_epoch(epoch)
-        for loader in mobileclip_train_loaders: loader.sampler.set_epoch(epoch)
 
     # Aggregate loaders
     train_loader_agg = MetaLoader_rs(name2loader=dict(list(zip(media_types, train_loaders))), skip_num=skip_num)
-    mobileclip_loader_agg = MetaLoader_rs(name2loader=dict(list(zip(mc_media_types, mobileclip_train_loaders))), skip_num=skip_num)
 
     num_batches_train = len(train_loader_agg)
-    num_batches_mc = len(mobileclip_loader_agg)
 
-    num_batches_to_iterate = min(num_batches_train, num_batches_mc)
-    if num_batches_train != num_batches_mc:
-        logger.warning(
-            f"Train loaders have {num_batches_train} batches, MobileCLIP loaders have {num_batches_mc} batches. "
-            f"Iterating for {num_batches_to_iterate} batches (the minimum)."
-        )
-
-    combined_iterable = zip(train_loader_agg, mobileclip_loader_agg)
+    logger.info(f"Training loader set up, {num_batches_train} batches.")
 
     progress_bar = tqdm(
-        combined_iterable,
-        total=num_batches_to_iterate,
+        train_loader_agg,
+        total=num_batches_train,
         desc=header,
         disable=not is_main_process()
     )
@@ -413,33 +396,30 @@ def train(
         return cosine_loss_base_fn(student_embedding, teacher_embedding, target)
 
     for i, data_pair in enumerate(progress_bar):
-        (media_type_orig_data, (image, text, idx)), (mc_media_type_data, (mc_image, mc_text, mc_idx)) = data_pair # Renamed for clarity
+        media_type_orig_data, (image, text, idx) = data_pair # Renamed for clarity
 
         image = image.to(device, non_blocking=True)
-        mc_image = mc_image.to(device, non_blocking=True)
 
         if log_debug and i == 0 :
             logger.info(f"Original data: image shape: {image.shape}, text: {text}")
-            logger.info(f"MobileCLIP data: mc_image shape: {mc_image.shape}, mc_text: {mc_text}")
 
         # Autocast context covers the per-window forward and backward passes
         with torch.cuda.amp.autocast(enabled=config.use_half_precision, dtype=data_type):
             image = image.permute(0, 2, 1, 3, 4)
-            B_orig, C_orig, T_orig, H_orig, W_orig = image.shape
-            assert T_orig >= MODEL_MAX_FRAMES, f"Video (orig) has {T_orig} frames, needs {MODEL_MAX_FRAMES}."
+            B, C, T, H, W = image.shape
 
-            mc_image = mc_image.permute(0, 2, 1, 3, 4)
-            B_mc, C_mc, T_mc, H_mc, W_mc = mc_image.shape
-            assert T_mc >= MODEL_MAX_FRAMES, f"Video (MC) has {T_mc} frames, needs {MODEL_MAX_FRAMES}."
+            mc_image = image # <----- Change this later ==================================================++++++++++++++++++++++++==
 
-            curr_hidden_state = model.streaming_vision_encoder.init_hidden(batch_size=B_mc, device=device)
+            assert T >= MODEL_MAX_FRAMES, f"Video (orig) has {T} frames, needs {MODEL_MAX_FRAMES}."
+
+            curr_hidden_state = model.streaming_vision_encoder.init_hidden(batch_size=B, device=device)
             with torch.no_grad(): # Warm-up phase does not require gradients
                 for frame_idx in range(MODEL_MAX_FRAMES - 1):
                     initial_frame_mc = mc_image[:, :, frame_idx, :, :].unsqueeze(2)
                     _, curr_hidden_state = model.streaming_vision_encoder(initial_frame_mc, curr_hidden_state)
 
-            num_sliding_windows = T_orig - (MODEL_MAX_FRAMES - 1)
-            assert num_sliding_windows == T_mc - (MODEL_MAX_FRAMES - 1), "Video lengths mismatch between original and mc data streams!"
+            num_sliding_windows = T - (MODEL_MAX_FRAMES - 1)
+
             assert num_sliding_windows >= 1, "Number of sliding windows must be at least 1 for loss calculation."
 
             batch_total_loss_for_logging = 0.0
@@ -630,7 +610,6 @@ def clone_collate_fn(batch):
 def setup_dataloaders(config, mode="pt"):
     logger.info(f"Creating dataset for {mode}")
     train_datasets = create_dataset(f"{mode}_train", config)
-    mobileclip_train_datasets = create_dataset(f"{mode}_train", config) # Assuming same dataset source for simplicity, adjust if different
     media_types = get_media_types(train_datasets)
 
     if not config.distributed:
@@ -639,14 +618,9 @@ def setup_dataloaders(config, mode="pt"):
         # For now, keeping original check.
         raise NotImplementedError("Non-distributed training path might need adjustments for samplers.")
 
-
     # one GPU-batch size per media type
     batch_size = [config.inputs.batch_size[k] for k in media_types]
-    # Create separate samplers if mobileclip_train_datasets can have different structure or epoch synchronization needs
-    # Assuming they can share samplers if their lengths and distribution requirements are identical.
     samplers   = create_stateful_sampler(train_datasets, batch_size)
-    mobileclip_samplers = create_stateful_sampler(mobileclip_train_datasets, batch_size) # Potentially use same 'samplers' if appropriate
-
 
     train_loaders = create_loader(
         train_datasets,
@@ -657,38 +631,7 @@ def setup_dataloaders(config, mode="pt"):
         collate_fns  = [clone_collate_fn] * len(media_types),
     )
 
-    mobileclip_train_loaders = create_loader(
-        mobileclip_train_datasets,
-        mobileclip_samplers, # Use samplers specific to mobileclip_train_datasets
-        batch_size   = batch_size, # Assuming same batch_size structure
-        num_workers  = [config.num_workers] * len(media_types), # Assuming same num_workers structure
-        is_trains    = [True] * len(media_types),
-        collate_fns  = [clone_collate_fn] * len(media_types),
-    )
-
-
-    # ===================== Sanity Check ======================
-    loader1 = train_loaders[0]
-    loader2 = mobileclip_train_loaders[0]
-
-    for batch1, batch2 in zip(loader1, loader2):
-        # Compare batch1 and batch2
-        # This depends on the structure of your batches (e.g., comparing tensors)
-        # Example: Check if images tensors are equal
-        if not torch.equal(batch1[0], batch2[0]):
-            print("Batches are not the same!")
-            # You could break or log details here
-            break
-        else:
-            print("Loaders appear to yield the same data batches.")
-
-    print("Loaders appear to yield the same data batches.")
-    print("Sanity check complete. Data loaders seem to be working as expected.")
-    print("Exiting early after data loader sanity check, as requested.")
-    import sys
-    sys.exit(0)
-
-    # =======================================================
+    # =============================================================
 
     # eval side stays the same
     test_datasets, test_dataset_names = create_dataset(f"{mode}_eval", config)
@@ -702,7 +645,7 @@ def setup_dataloaders(config, mode="pt"):
     )
 
     test_name2loaders = dict(zip(test_dataset_names, test_loaders))
-    return train_loaders, test_name2loaders, media_types, mobileclip_train_loaders
+    return train_loaders, test_name2loaders, media_types
 
 def main(config):
     if is_main_process() and config.wandb.enable:
@@ -715,7 +658,7 @@ def main(config):
     setup_seed(config.seed + get_rank())
     device = torch.device(config.device)
 
-    train_loaders, test_name2loaders, train_media_types, mobileclip_train_loaders = setup_dataloaders(
+    train_loaders, test_name2loaders, train_media_types = setup_dataloaders(
         config, mode=config.mode
     )
     num_steps_per_epoch = sum(len(d) for d in train_loaders) * 247 # Using each individual frame for training
@@ -759,7 +702,6 @@ def main(config):
             global_step = train(
                 model,
                 train_loaders,
-                mobileclip_train_loaders,
                 optimizer,
                 tokenizer,
                 epoch,
