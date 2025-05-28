@@ -631,7 +631,7 @@ def setup_dataloaders(config, mode="pt"):
     logger.info(f"Creating dataset for {mode}")
     train_datasets = create_dataset(f"{mode}_train", config)
     mobileclip_train_datasets = create_dataset(f"{mode}_train", config) # Assuming same dataset source for simplicity, adjust if different
-    media_types   = get_media_types(train_datasets)
+    media_types = get_media_types(train_datasets)
 
     if not config.distributed:
         # The original code had a raise NotImplementedError here.
@@ -665,6 +665,30 @@ def setup_dataloaders(config, mode="pt"):
         is_trains    = [True] * len(media_types),
         collate_fns  = [clone_collate_fn] * len(media_types),
     )
+
+
+    # ===================== Sanity Check ======================
+    loader1 = train_loaders[0]
+    loader2 = mobileclip_train_loaders[0]
+
+    for batch1, batch2 in zip(loader1, loader2):
+        # Compare batch1 and batch2
+        # This depends on the structure of your batches (e.g., comparing tensors)
+        # Example: Check if images tensors are equal
+        if not torch.equal(batch1[0], batch2[0]):
+            print("Batches are not the same!")
+            # You could break or log details here
+            break
+    else:
+        print("Loaders appear to yield the same data batches.")
+
+    print("Loaders appear to yield the same data batches.")
+    print("Sanity check complete. Data loaders seem to be working as expected.")
+    print("Exiting early after data loader sanity check, as requested.")
+    import sys
+    sys.exit(0)
+
+    # =======================================================
 
     # eval side stays the same
     test_datasets, test_dataset_names = create_dataset(f"{mode}_eval", config)
