@@ -365,7 +365,7 @@ def train(
     metric_logger.add_meter("temperature", SmoothedValue(window=1, fmt="{value:.4f}"))
     metric_logger.add_meter("eval_avg_sim", SmoothedValue(window=1, fmt="{value:.4f}")) # For periodic eval
 
-    header = f"Train Epoch: [{epoch}]"
+    header = f"Training: [Epoch {epoch}]"
     log_freq = config.log_freq
 
     media_types = get_media_types(train_loaders) # Defined here for use in MetaLoader_rs
@@ -543,7 +543,7 @@ def train(
             progress_bar.set_postfix(log_payload)
 
             if is_main_process():
-                logger.info(f"{header} [{i}] {metric_logger}")
+                logger.info(f"{header} [Step {i}] {metric_logger}")
 
             if is_main_process() and config.wandb.enable:
                 # Original W&B logging used metric_logger.get_global_avg_dict()
