@@ -81,24 +81,24 @@ class MetaLoader_rs(object):
             # make sure all processes have the same order so that
             # each step they will have data from the same loader
             dist.broadcast(iter_order, src=0)
-        
+
         if skip_num > 0:
             iter_order_skip = iter_order[:skip_num]
             for k, v in index2name.items():
                 media_step = (iter_order_skip == k).sum().item()
                 name2loader[v].sampler.set_start_iter(media_step)
-                logger.info(f"{v} dataloder skip steps: {media_step}")
+                logger.info(f"{v} dataloader skip steps: {media_step}")
             iter_order = iter_order[skip_num:]
             self.name2loader = name2loader
         else:
             logger.info("Do not skip steps for any dataloader!")
             for k, v in index2name.items():
                 name2loader[v].sampler.set_start_iter(0)
-                
+
         self.name2iter = {name: iter(l) for name, l in name2loader.items()}
         self.iter_idx = iter_order
         self.iter_order = [index2name[int(e.item())] for e in iter_order.cpu()]
-        
+
         logger.info(str(self))
 
     def __str__(self):

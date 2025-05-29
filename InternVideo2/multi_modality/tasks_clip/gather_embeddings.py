@@ -166,6 +166,7 @@ def main(config):
     resume = getattr(config, "resume", True)
     api_endpoints = getattr(config, "api_endpoints", [])
     gather_embeddings(train_loaders, media_types, device, output_dir, api_endpoints, resume)
+    gather_embeddings(train_loaders, media_types, device, output_dir, resume)
 
 
 if __name__ == "__main__":
