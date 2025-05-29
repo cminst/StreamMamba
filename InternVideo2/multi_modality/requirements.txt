@@ -25,3 +25,5 @@ torchvision==0.14.1+cu117
 tqdm==4.66.1
 transformers==4.28.1
 wandb==0.16.1
+Flask==2.2.5
+aiohttp==3.9.1
