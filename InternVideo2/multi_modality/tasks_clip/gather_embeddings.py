@@ -3,6 +3,8 @@ import logging
 from os.path import join
 
 import torch
+import asyncio
+import aiohttp
 from tqdm import tqdm
 
 from dataset.serialize import local_broadcast_process_authkey
@@ -16,7 +18,7 @@ from utils.distributed import get_rank
 logging.getLogger().setLevel(logging.DEBUG)
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG) # Add this line to explicitly set the level
+logger.setLevel(logging.DEBUG)
 
 
 def dummy_internvideo6b_api(video_tensor):
@@ -30,6 +32,22 @@ def dummy_internvideo6b_api(video_tensor):
     """
     B = video_tensor.size(0)
     return torch.randn(B, 768, device=video_tensor.device)
+
+
+async def _infer_windows(windows, endpoints):
+    """Query embedding servers for a list of windows."""
+    async with aiohttp.ClientSession() as session:
+        tasks = []
+        for i, win in enumerate(windows):
+            endpoint = endpoints[i % len(endpoints)]
+            payload = {"shape": list(win.shape)}
+            tasks.append(session.post(endpoint, json=payload))
+        responses = await asyncio.gather(*tasks)
+        embeds = []
+        for resp in responses:
+            data = await resp.json()
+            embeds.append(torch.tensor(data["embeddings"]))
+        return embeds
 
 
 def clone_collate_fn(batch):
@@ -95,7 +113,7 @@ def _get_resume_step(output_dir):
     return max(completed) + 1 if completed else 0
 
 
-def gather_embeddings(train_loaders, media_types, device, output_dir, resume=True):
+def gather_embeddings(train_loaders, media_types, device, output_dir, api_endpoints=None, resume=True):
     os.makedirs(output_dir, exist_ok=True)
 
     start_step = _get_resume_step(output_dir) if resume else 0
@@ -123,9 +141,13 @@ def gather_embeddings(train_loaders, media_types, device, output_dir, resume=Tru
 
         save_dict = {int(i.item()): {} for i in idx}
 
-        for frame_idx in range(3, num_frames):
-            window = images[:, :, frame_idx - 3 : frame_idx + 1]
-            embeddings = dummy_internvideo6b_api(window).cpu()
+        windows = [images[:, :, i - 3 : i + 1] for i in range(3, num_frames)]
+        if api_endpoints:
+            embeddings_list = asyncio.run(_infer_windows(windows, api_endpoints))
+        else:
+            embeddings_list = [dummy_internvideo6b_api(w).cpu() for w in windows]
+
+        for frame_idx, embeddings in enumerate(embeddings_list, start=3):
             for vid_id, emb in zip(idx, embeddings):
                 save_dict[int(vid_id.item())][frame_idx + 1] = emb
 
@@ -142,6 +164,8 @@ def main(config):
     output_dir = join(config.output_dir, "kinetics-embeddings")
 
     resume = getattr(config, "resume", True)
+    api_endpoints = getattr(config, "api_endpoints", [])
+    gather_embeddings(train_loaders, media_types, device, output_dir, api_endpoints, resume)
     gather_embeddings(train_loaders, media_types, device, output_dir, resume)
 
 
