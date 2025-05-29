@@ -13,7 +13,10 @@ from utils.basic_utils import setup_seed
 from utils.config_utils import setup_main
 from utils.distributed import get_rank
 
+logging.getLogger().setLevel(logging.DEBUG)
+
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG) # Add this line to explicitly set the level
 
 
 def dummy_internvideo6b_api(video_tensor):
