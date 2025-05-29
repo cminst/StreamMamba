@@ -20,7 +20,6 @@ logging.getLogger().setLevel(logging.DEBUG)
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
-
 def dummy_internvideo6b_api(video_tensor):
     """Simulate a call to an external InternVideo2-6B model.
 
@@ -33,16 +32,25 @@ def dummy_internvideo6b_api(video_tensor):
     B = video_tensor.size(0)
     return torch.randn(B, 768, device=video_tensor.device)
 
-
 async def _infer_windows(windows, endpoints):
-    """Query embedding servers for a list of windows."""
+    """Query embedding servers for a list of windows.
+
+    Args:
+        windows (list[Tensor]):
+            - A list of 4-frame tensors
+            - Each tensor would be in the shape [B, C, 4, H, W]
+
+    Returns:
+        embeds (list[Tensor]): A list of embeddings of those windows.
+    """
     async with aiohttp.ClientSession() as session:
         tasks = []
         for i, win in enumerate(windows):
             endpoint = endpoints[i % len(endpoints)]
-            payload = {"shape": list(win.shape)}
+            payload = {"window_tensor": win.tolist()}
             tasks.append(session.post(endpoint, json=payload))
         responses = await asyncio.gather(*tasks)
+        # same as responses = await asyncio.gather(tasks[0], tasks[1], etc...)
         embeds = []
         for resp in responses:
             data = await resp.json()
@@ -132,29 +140,46 @@ def gather_embeddings(train_loaders, media_types, device, output_dir, api_endpoi
         images = images.permute(0, 2, 1, 3, 4)  # [B, C, T, H, W]
         num_frames = images.size(2)
         if num_frames < 4:
+            # Should not go here because of dataset filtering.
             global_step += 1
             continue
 
+        # Directory to save embeddings for this step
         step_dir = os.path.join(output_dir, f"step-{global_step}")
         os.makedirs(step_dir, exist_ok=True)
+        # Path for the embeddings file
         save_path = os.path.join(step_dir, "embeddings.pt")
 
+        # Initialize dictionary to store embeddings.
+        # Keys are video IDs, values are dictionaries mapping frame index to embedding.
         save_dict = {int(i.item()): {} for i in idx}
 
+        # Extract sliding windows of 4 frames each.
+        # Each window is like [frame i-3, frame i-2, frame i-1, frame i].
+        # The loop starts from i=3 because we need 4 frames (0, 1, 2, 3).
         windows = [images[:, :, i - 3 : i + 1] for i in range(3, num_frames)]
-        if api_endpoints:
+
+        # Get embeddings for the windows using the API or a dummy function.
+        if api_endpoints: # api_endpoints is provided in config.api_endpoints
+            # Use external API endpoints for inference if provided
             embeddings_list = asyncio.run(_infer_windows(windows, api_endpoints))
         else:
+            # Use dummy function for inference (e.g., during development or testing)
             embeddings_list = [dummy_internvideo6b_api(w).cpu() for w in windows]
 
-        for frame_idx, embeddings in enumerate(embeddings_list, start=3):
+        # Store embeddings in the save_dict.
+        # The frame index in the save_dict is the *last* frame index in the window.
+        # Since windows are [i-3, i-2, i-1, i] and the loop for windows is range(3, num_frames),
+        # the window index `frame_idx` (starting from 0 in enumerate) corresponds to
+        # the frame index `i` in the original loop `range(3, num_frames)`.
+        # So the last frame index is `i`, which is `frame_idx + 3`.
+        for frame_idx, embeddings in enumerate(embeddings_list, start=3): # Start=3 aligns with 'i' from window creation
             for vid_id, emb in zip(idx, embeddings):
-                save_dict[int(vid_id.item())][frame_idx + 1] = emb
+                # Store embedding keyed by video ID and the last frame index in the window
+                save_dict[int(vid_id.item())][frame_idx] = emb # corrected frame index
 
         torch.save(save_dict, save_path)
         global_step += 1
-
-
 
 def main(config):
     setup_seed(config.seed + get_rank())
@@ -166,7 +191,6 @@ def main(config):
     resume = getattr(config, "resume", True)
     api_endpoints = getattr(config, "api_endpoints", [])
     gather_embeddings(train_loaders, media_types, device, output_dir, api_endpoints, resume)
-
 
 if __name__ == "__main__":
     cfg = setup_main()
