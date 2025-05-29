@@ -71,12 +71,44 @@ def setup_dataloaders(config, mode="pt"):
     return train_loaders, media_types
 
 
-def gather_embeddings(train_loaders, media_types, device, output_dir):
-    os.makedirs(output_dir, exist_ok=True)
-    loader = MetaLoader_rs(name2loader=dict(list(zip(media_types, train_loaders))))
+def _get_resume_step(output_dir):
+    """Return the step index from which to resume.
 
-    global_step = 0
-    progress_bar = tqdm(loader, total=len(loader))
+    The function scans ``output_dir`` for subfolders following the
+    ``step-<idx>`` pattern and checks whether ``embeddings.pt`` exists in
+    each folder. The next step after the largest completed one is returned.
+    """
+
+    if not os.path.isdir(output_dir):
+        return 0
+
+    completed = []
+    for d in os.listdir(output_dir):
+        if not d.startswith("step-"):
+            continue
+        try:
+            step = int(d.split("-", 1)[1])
+        except ValueError:
+            continue
+        if os.path.isfile(os.path.join(output_dir, d, "embeddings.pt")):
+            completed.append(step)
+    return max(completed) + 1 if completed else 0
+
+
+def gather_embeddings(train_loaders, media_types, device, output_dir, resume=True):
+    os.makedirs(output_dir, exist_ok=True)
+
+    start_step = _get_resume_step(output_dir) if resume else 0
+    if start_step > 0:
+        logger.info(f"Resuming from step {start_step}")
+
+    loader = MetaLoader_rs(
+        name2loader=dict(list(zip(media_types, train_loaders))), skip_num=start_step
+    )
+
+    total_steps = start_step + len(loader)
+    global_step = start_step
+    progress_bar = tqdm(loader, total=total_steps, initial=start_step)
     for media_type, (images, text, idx) in progress_bar:
         images = images.to(device, non_blocking=True)
         images = images.permute(0, 2, 1, 3, 4)  # [B, C, T, H, W]
@@ -109,7 +141,8 @@ def main(config):
     train_loaders, media_types = setup_dataloaders(config, mode=config.mode)
     output_dir = join(config.output_dir, "kinetics-embeddings")
 
-    gather_embeddings(train_loaders, media_types, device, output_dir)
+    resume = getattr(config, "resume", True)
+    gather_embeddings(train_loaders, media_types, device, output_dir, resume)
 
 
 if __name__ == "__main__":
