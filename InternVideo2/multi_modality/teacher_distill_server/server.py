@@ -11,7 +11,7 @@ class InferRequest(BaseModel):
 class InferResponse(BaseModel):
     embeddings: list[list[float]]
 
-def dummy_internvideo6b_api(video_tensor):
+def embed_video_6b(video_tensor):
     """
     Implements the InternVideo-6B API.
 
@@ -67,18 +67,13 @@ async def infer(request_data: InferRequest):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid tensor data: {e}")
 
-
-    # Get the shape of the input tensor.
-    shape = window_tensor_input.shape
     # Validate the shape: ensure it's not None and has at least one dimension (batch size).
+    shape = window_tensor_input.shape
     if not shape or len(shape) < 1:
          raise HTTPException(status_code=400, detail='invalid shape: tensor must have at least one dimension')
 
-    # Create a dummy tensor with the same shape as the input.
-    # The dummy_internvideo6b_api function only uses the shape, not the content.
-    dummy_tensor = torch.empty(shape)
     # Call the dummy API to get simulated embeddings.
-    embeddings = dummy_internvideo6b_api(dummy_tensor)
+    embeddings = embed_video_6b(window_tensor_input)
 
     # Return the embeddings using the Pydantic response model.
     return InferResponse(embeddings=embeddings)
