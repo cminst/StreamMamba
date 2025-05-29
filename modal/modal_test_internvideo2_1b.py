@@ -139,7 +139,7 @@ def runwithgpu():
     pass
 
     # Generate a secure random token for JupyterLab access authentication.
-    token = 'tesslate'
+    token = 'internvideo2'
     # Set up port forwarding to access JupyterLab running inside the Modal container from the local machine.
     with modal.forward(8888) as tunnel:
         # Construct the URL to access JupyterLab, including the generated token.

@@ -1,18 +1,6 @@
 from configs.data import *
 from configs.model import *
 
-# ========================= data ==========================
-train_file = available_corpus["pretrain_example_data_1B"]
-
-
-test_file = dict(msrvtt_1k_test=available_corpus["msrvtt_1k_test"],
-                 didemo_ret_test=available_corpus["didemo_ret_test"])
-
-test_types = ["msrvtt_1k_test", "didemo_ret_test"]
-num_workers = 6
-
-best_key = ["msrvtt_1k_test_match", "t2v_r1"]
-
 # ========================= input ==========================
 num_frames = 4
 num_frames_test = 4
@@ -56,7 +44,8 @@ model = dict(
         num_frames="${num_frames}",
         tubelet_size=1,
         patch_size=14, 
-        d_model=3200,
+        d_model=768,
+        embed_dim=768,
         clip_embed_dim=768,
         clip_teacher_embed_dim=3200,
         clip_teacher_final_dim=768,
@@ -66,9 +55,9 @@ model = dict(
         pretrained='your_model_path/6B_pt.pth',
         use_checkpoint=True,
         checkpoint_num=48,
-        use_flash_attn=True,
-        use_fused_rmsnorm=True,
-        use_fused_mlp=True,
+        use_flash_attn=False,
+        use_fused_rmsnorm=False,
+        use_fused_mlp=False,
         # clip teacher
         clip_teacher=None,
         clip_input_resolution=224,
@@ -86,6 +75,7 @@ model = dict(
     multimodal=dict(enable=True),
     contra_dim=768,
     av_concat_dim=768,
+    embed_dim=768,
     temp=0.07,
     find_unused_parameters=False,
     freeze_vision=False,
@@ -141,7 +131,7 @@ optimizer = dict(
 
 scheduler = dict(sched="cosine", epochs=5, min_lr_multi=0.01, warmup_epochs=1)
 
-evaluate = False
+evaluate = True
 deep_fusion = False
 evaluation = dict(
     eval_frame_ensemble="concat",  # [concat, max, mean, lse]
@@ -150,8 +140,8 @@ evaluation = dict(
     eval_offload=True,  # offload gpu tensors to cpu to save memory.
 )
 
-use_half_precision = True
-use_bf16 = True
+use_half_precision = False
+use_bf16 = False
 
 gradient_checkpointing = True # for text encoder
 use_flash_sdp = False

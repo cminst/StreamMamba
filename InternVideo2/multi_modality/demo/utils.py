@@ -5,7 +5,7 @@ import io
 import copy
 import torch
 from torch import nn
-from models.backbones.internvideo2 import pretrain_internvideo2_1b_patch14_224
+from models.backbones.internvideo2 import pretrain_internvideo2_1b_patch14_224, pretrain_internvideo2_6b_patch14_224
 from models.backbones.bert.builder import build_bert
 from models.criterions import get_sim
 from models.backbones.internvideo2.pos_embed import interpolate_pos_embed_internvideo2_new
@@ -72,6 +72,8 @@ def retrieve_text(
 
     vid_feat = vlm.get_vid_feat(frames_tensor)
 
+    if log:
+        print(f"Shape of video feats: {vid_feat[0].shape}")
     calculate = False
     for t in texts:
         if t not in tensor_cache:
@@ -81,6 +83,8 @@ def retrieve_text(
         text_feat_d = {}
         text_feat_d = get_text_feat_dict(texts, vlm, text_feat_d)
         text_feats = [text_feat_d[t] for t in texts]
+        if log:
+            print(f"Shape of text feats: {text_feats[0].shape}")
         text_feats_tensor = torch.cat(text_feats, 0)
         for j in range(len(texts)):
             tensor_cache[texts[j]] = text_feats_tensor[j]
@@ -252,11 +256,11 @@ def setup_internvideo2(config: dict):
         torch.set_float32_matmul_precision('high')
         model = torch.compile(model)
 
-    model = model.to(torch.device(config.device))
+    model = model.to_empty(device=config.device)
     model_without_ddp = model
 
     if (config.pretrained_path.strip() and (os.path.isfile(config.pretrained_path)) or "s3://" in config.pretrained_path):
-        checkpoint = torch.load(config.pretrained_path, map_location="cpu")
+        checkpoint = torch.load(config.pretrained_path, map_location="cpu", weights_only = False)
         try:
             if "model" in checkpoint.keys():
                 state_dict = checkpoint["model"]
@@ -275,9 +279,12 @@ def setup_internvideo2(config: dict):
 
     if config.get('use_bf16', False):
         model_without_ddp = model_without_ddp.to(torch.bfloat16)
+        print("Bfloat 16 mode")
     elif config.get('use_half_precision', False):
+        print("Float 16 mode")
         model_without_ddp = model_without_ddp.to(torch.float16)
     else:
+        print("Float 32 mode")
         model_without_ddp = model_without_ddp.to(torch.float32)
 
     model_without_ddp.eval()
@@ -394,7 +401,7 @@ class InternVideo2_Stage2(nn.Module):
         if encoder_name == 'pretrain_internvideo2_1b_patch14_224':
             vision_encoder = pretrain_internvideo2_1b_patch14_224(self.config.model)
         else:
-            raise ValueError(f"Not implemented: {encoder_name}")
+            vision_encoder = pretrain_internvideo2_6b_patch14_224(self.config.model)
 
         # parameters for mask
         img_size = self.config.model.vision_encoder.img_size
