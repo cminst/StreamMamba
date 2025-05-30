@@ -18,3 +18,20 @@ And then
 ```
 $ python3 server.py
 ```
+
+## Testing the server
+
+The script starts a FastAPI service bound to `0.0.0.0:8008`. To query the
+service from another machine, replace `<server-ip>` with the address of the
+server and send requests to `http://<server-ip>:8008/infer`.
+
+Example request:
+
+```bash
+curl -X POST -H "Content-Type: application/json" \
+     -d '{"window_tensor":[[[[0]]]]}' \
+     http://<server-ip>:8008/infer
+```
+
+If the command fails or times out, verify that the server is running and that
+firewall rules allow access to port `8008`.
