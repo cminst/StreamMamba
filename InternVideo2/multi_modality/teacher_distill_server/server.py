@@ -7,7 +7,7 @@ from demo.utils import setup_internvideo2
 
 # Initialize Ray as the head node
 ray.init(dashboard_host="0.0.0.0")
-print(f"Ray dashboard available at: http://{ray.get_webui_url()}")
+print(f"Ray dashboard available at: http://{ray.dashboard.serve.get_webui_url()}")
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
