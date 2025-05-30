@@ -137,50 +137,46 @@ def gather_embeddings(train_loaders, media_types, device, output_dir, api_endpoi
     total_steps = start_step + len(loader)
     global_step = start_step
     progress_bar = tqdm(loader, total=total_steps, initial=start_step)
+
+    # Define a window batch size to process windows in chunks
+    window_batch_size = 32 # Adjust this based on your available memory and batch size
+
     for media_type, (images, text, idx) in progress_bar:
         images = images.to(device, non_blocking=True)
         images = images.permute(0, 2, 1, 3, 4)  # [B, C, T, H, W]
         num_frames = images.size(2)
         if num_frames < 4:
-            # Should not go here because of dataset filtering.
             global_step += 1
             continue
 
         logger.info(f"Processing {idx}")
-        # Directory to save embeddings for this step
         step_dir = os.path.join(output_dir, f"step-{global_step}")
         os.makedirs(step_dir, exist_ok=True)
-        # Path for the embeddings file
         save_path = os.path.join(step_dir, "embeddings.pt")
 
-        # Initialize dictionary to store embeddings.
-        # Keys are video IDs, values are dictionaries mapping frame index to embedding.
         save_dict = {int(i.item()): {} for i in idx}
 
-        # Extract sliding windows of 4 frames each.
-        # Each window is like [frame i-3, frame i-2, frame i-1, frame i].
-        # The loop starts from i=3 because we need 4 frames (0, 1, 2, 3).
-        windows = [images[:, :, i - 3 : i + 1] for i in range(3, num_frames)]
+        # Process windows in batches
+        all_windows = [images[:, :, i - 3 : i + 1] for i in range(3, num_frames)]
+        num_windows = len(all_windows)
+        logger.info(f"Total windows to process: {num_windows}")
 
-        logger.info("Sending server requests...")
-        # Get embeddings for the windows using the API or a dummy function.
-        if api_endpoints: # api_endpoints is provided in config.api_endpoints
-            # Use external API endpoints for inference if provided
-            embeddings_list = asyncio.run(_infer_windows(windows, api_endpoints))
-        else:
-            # Use dummy function for inference (e.g., during development or testing)
-            embeddings_list = [dummy_internvideo6b_api(w).cpu() for w in windows]
+        for i in range(0, num_windows, window_batch_size):
+            window_batch = all_windows[i : i + window_batch_size]
+            logger.info(f"Sending server requests for window batch {i//window_batch_size + 1}/{(num_windows + window_batch_size - 1)//window_batch_size}...")
 
-        # Store embeddings in the save_dict.
-        # The frame index in the save_dict is the *last* frame index in the window.
-        # Since windows are [i-3, i-2, i-1, i] and the loop for windows is range(3, num_frames),
-        # the window index `frame_idx` (starting from 0 in enumerate) corresponds to
-        # the frame index `i` in the original loop `range(3, num_frames)`.
-        # So the last frame index is `i`, which is `frame_idx + 3`.
-        for frame_idx, embeddings in enumerate(embeddings_list, start=3): # Start=3 aligns with 'i' from window creation
-            for vid_id, emb in zip(idx, embeddings):
-                # Store embedding keyed by video ID and the last frame index in the window
-                save_dict[int(vid_id.item())][frame_idx] = emb # corrected frame index
+            if api_endpoints:
+                embeddings_batch_list = asyncio.run(_infer_windows(window_batch, api_endpoints))
+            else:
+                embeddings_batch_list = [dummy_internvideo6b_api(w).cpu() for w in window_batch]
+
+            # Store embeddings from the current window batch
+            # The corresponding frame indices start from i + 3
+            start_frame_idx = i + 3
+            for win_batch_idx, embeddings in enumerate(embeddings_batch_list):
+                 current_frame_idx = start_frame_idx + win_batch_idx
+                 for vid_id, emb in zip(idx, embeddings):
+                     save_dict[int(vid_id.item())][current_frame_idx] = emb
 
         torch.save(save_dict, save_path)
         global_step += 1
