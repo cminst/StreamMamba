@@ -49,6 +49,8 @@ async def _infer_windows(windows, endpoints):
             endpoint = endpoints[i % len(endpoints)]
             payload = {"window_tensor": win.tolist()}
             tasks.append(session.post(endpoint, json=payload))
+
+        logger.info(f"Added tasks")
         responses = await asyncio.gather(*tasks)
         # same as responses = await asyncio.gather(tasks[0], tasks[1], etc...)
         embeds = []
@@ -144,6 +146,7 @@ def gather_embeddings(train_loaders, media_types, device, output_dir, api_endpoi
             global_step += 1
             continue
 
+        logger.info(f"Processing {idx}")
         # Directory to save embeddings for this step
         step_dir = os.path.join(output_dir, f"step-{global_step}")
         os.makedirs(step_dir, exist_ok=True)
@@ -159,6 +162,7 @@ def gather_embeddings(train_loaders, media_types, device, output_dir, api_endpoi
         # The loop starts from i=3 because we need 4 frames (0, 1, 2, 3).
         windows = [images[:, :, i - 3 : i + 1] for i in range(3, num_frames)]
 
+        logger.info("Sending server requests...")
         # Get embeddings for the windows using the API or a dummy function.
         if api_endpoints: # api_endpoints is provided in config.api_endpoints
             # Use external API endpoints for inference if provided
