@@ -98,6 +98,65 @@ def retrieve_text(
 
     return ret_texts, probs.float().numpy()[0]
 
+def retrieve_text_with_tensor(
+    frames_tensor,
+    texts,
+    model,
+    topk:int=5,
+    config: dict={},
+    device=torch.device('cuda'),
+    log:bool = False
+):
+    """
+    Similar to retrieve_text but accepts a pre-processed frames_tensor directly
+    instead of raw frames.
+
+    Args:
+        frames_tensor (torch.Tensor): Pre-processed video frames tensor
+        texts (list): List of text options to match against the video
+        model: The vision-language model
+        topk (int): Number of top matches to return
+        config (dict): Configuration parameters
+        device: Device to run inference on
+        log (bool): Whether to print debug logs
+
+    Returns:
+        tuple: (matched_texts, probabilities)
+    """
+    vlm = model
+    vlm = vlm.to(device)
+
+    if log: print(f"The frames tensor is {frames_tensor.shape} shape")
+
+    vid_feat = vlm.get_vid_feat(frames_tensor)
+
+    if log:
+        print(f"Shape of video feats: {vid_feat[0].shape}")
+
+    calculate = False
+    for t in texts:
+        if t not in tensor_cache:
+            calculate = True
+            break
+    if calculate:
+        text_feat_d = {}
+        text_feat_d = get_text_feat_dict(texts, vlm, text_feat_d)
+        text_feats = [text_feat_d[t] for t in texts]
+        if log:
+            print(f"Shape of text feats: {text_feats[0].shape}")
+        text_feats_tensor = torch.cat(text_feats, 0)
+        for j in range(len(texts)):
+            tensor_cache[texts[j]] = text_feats_tensor[j]
+    else:
+        if log: print("Using Cached")
+        text_feats_tensor = torch.stack([tensor_cache[x] for x in texts])
+
+    probs, idxs = vlm.predict_label(vid_feat, text_feats_tensor, top=topk)
+
+    ret_texts = [texts[i] for i in idxs.long().numpy()[0].tolist()]
+
+    return ret_texts, probs.float().numpy()[0]
+
 def retrieve_text_streaming(
     new_frame, # Expected: a single numpy array (HxWx3)
     texts,

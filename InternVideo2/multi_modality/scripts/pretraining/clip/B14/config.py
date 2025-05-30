@@ -1,7 +1,7 @@
 from configs.data import *
 from configs.model import *
 
-# ========================= data ==========================
+# ========================= Data ==========================
 train_corpus = "slim_kinetics"
 train_file = "${available_corpus[${train_corpus}]}"  # for lazy evaluation
 test_file = dict(act_val=available_corpus["slim_kinetics_act_val"])
@@ -12,7 +12,7 @@ stop_key = None
 
 root_path = "/home/zli"
 
-# ========================= input ==========================
+# ========================= Input ==========================
 num_frames = 8
 num_frames_test = 8
 batch_size = 8      # Use 16 for 5090
@@ -135,7 +135,7 @@ dist_url = "env://"
 device = "cuda"
 mode = "pt"
 
-# ========================= others ==========================
+# ========================= Others ==========================
 output_dir = './training_outputs_window/'  # output dir
 resume = True  # if True, load optimizer and scheduler states as well
 debug = False
@@ -144,13 +144,6 @@ seed = 42
 
 save_latest = False
 save_iter = 100
-eval_freq_steps = 50
-
-# Evaluation video
-eval_video_repo_id = "qingy2024/backflip_train"
-eval_video_filename = "1.mp4"
-
-eval_plot_output_dir = 'scripts/pretraining/clip/B14/cosine_sim_graphs'
 
 auto_resume = True
 pretrained_path = ""  # path to pretrained model weights, for resume only?
@@ -160,4 +153,17 @@ deepspeed = dict(
     stage=1,
 )
 
-# hf_hub_download(repo_id="google/fleurs", filename="fleurs.py", repo_type="dataset")
+# =================== Evaluation Config ====================
+eval_freq_steps = 50
+
+# Evaluation video
+eval_video_repo_id = "qingy2024/backflip_train"
+eval_video_filename = "1.mp4"
+
+eval_plot_output_dir = 'scripts/pretraining/clip/B14/cosine_sim_graphs'
+
+# =========== InternVideo2 6B Embeddings Config ============
+
+embedding_endpoints = [
+    "http://0.0.0.0:8008/infer"
+]

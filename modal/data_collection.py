@@ -64,7 +64,7 @@ image = image.run_commands(
 app = modal.App(image=image, name="InternVideo2 Experiments")
 
 # Define a Modal function named 'runwithgpu' that will be executed on Modal cloud.
-@app.function(gpu="H200:1", timeout=86400)
+@app.function(gpu="H100:1", timeout=86400)
 def runwithgpu():
     import os
     import subprocess
@@ -74,11 +74,13 @@ def runwithgpu():
     # Generate a secure random token for JupyterLab access authentication.
     token = 'internvideo2'
 
-    script_name = "ViCLIP-B16-Eval.py"
+    script_name = "InternVideo2_6B_V5_ACT75_eval.py"
+
+    params = "--branch delta_6b_server"
 
     os.system(f'huggingface-cli download qingy2024/InternVideo2-Data {script_name} --local-dir /root/ --repo-type dataset')
 
-    command = f"cd /root/ && python3 {script_name}"
+    command = f"cd /root/ && python3 {script_name} {params}"
     process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = process.communicate()
 

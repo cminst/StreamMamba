@@ -189,7 +189,7 @@ def main(config):
     output_dir = join(config.output_dir, "kinetics-embeddings")
 
     resume = getattr(config, "resume", True)
-    api_endpoints = getattr(config, "api_endpoints", [])
+    api_endpoints = getattr(config, "embedding_endpoints", [])
     gather_embeddings(train_loaders, media_types, device, output_dir, api_endpoints, resume)
 
 if __name__ == "__main__":
