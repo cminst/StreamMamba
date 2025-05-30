@@ -18,13 +18,19 @@ MASTER_ADDRESS='192.168.68.116'
 MASTER_PORT='12345'
 
 # Parse command-line arguments
-while [[ $# -gt 0 ]]; do
+# Use [ instead of [[ for sh compatibility
+while [ $# -gt 0 ]; do
     key="$1"
     case $key in
         --rank)
+            # Check if the rank value is provided
+            if [ -z "$2" ]; then
+                echo "Error: --rank requires a value."
+                exit 1
+            fi
             NODE_RANK="$2"
-            shift # past argument
-            shift # past value
+            shift # past argument (--rank)
+            shift # past value (rank_value)
             ;;
         *)    # unknown option
             echo "Unknown option: $1"
