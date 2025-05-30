@@ -6,6 +6,7 @@ import torch
 import asyncio
 import aiohttp
 from tqdm import tqdm
+import tempfile
 
 from dataset.serialize import local_broadcast_process_authkey
 from dataset import create_dataset, create_loader, create_stateful_sampler
@@ -33,31 +34,57 @@ def dummy_internvideo6b_api(video_tensor):
     return torch.randn(B, 768, device=video_tensor.device)
 
 async def _infer_windows(windows, endpoints):
-    """Query embedding servers for a list of windows.
+    """Query embedding servers for a list of windows using file uploads.
 
     Args:
-        windows (list[Tensor]):
-            - A list of 4-frame tensors
-            - Each tensor would be in the shape [B, C, 4, H, W]
+        windows (list[Tensor]): A list of 4-frame tensors, each with shape [B, C, 4, H, W].
+        endpoints (list[str]): List of API endpoints to send requests to.
 
     Returns:
-        embeds (list[Tensor]): A list of embeddings of those windows.
+        embeds (list[Tensor]): A list of embeddings for the windows.
     """
     async with aiohttp.ClientSession() as session:
         tasks = []
+        temp_files = []
+
         for i, win in enumerate(windows):
             logger.info(f"Window tensor shape: {win.shape}, size in MB: {win.element_size() * win.nelement() / (1024*1024)}")
             endpoint = endpoints[i % len(endpoints)]
-            payload = {"window_tensor": win.tolist()}
-            tasks.append(session.post(endpoint, json=payload))
 
-        logger.info(f"Added tasks")
-        responses = await asyncio.gather(*tasks)
-        # same as responses = await asyncio.gather(tasks[0], tasks[1], etc...)
+            # Create a temporary file to store the tensor
+            with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as tmp:
+                torch.save(win, tmp.name)
+                temp_files.append(tmp.name)
+
+                # Prepare the file for upload
+                with open(tmp.name, "rb") as f:
+                    data = aiohttp.FormData()
+                    data.add_field("window_tensor", f, filename="window_tensor.pt", content_type="application/octet-stream")
+                    tasks.append(session.post(endpoint, data=data))
+
+        logger.info(f"Added {len(tasks)} tasks")
+        responses = await asyncio.gather(*tasks, return_exceptions=True)
         embeds = []
+
         for resp in responses:
+            if isinstance(resp, Exception):
+                logger.error(f"Request failed: {resp}")
+                embeds.append(None)
+                continue
+            if resp.status != 200:
+                logger.error(f"Request failed with status {resp.status}: {await resp.text()}")
+                embeds.append(None)
+                continue
             data = await resp.json()
             embeds.append(torch.tensor(data["embeddings"]))
+
+        # Clean up temporary files
+        for tmp_file in temp_files:
+            try:
+                os.unlink(tmp_file)
+            except Exception as e:
+                logger.warning(f"Failed to delete temp file {tmp_file}: {e}")
+
         return embeds
 
 
@@ -124,24 +151,7 @@ def _get_resume_step(output_dir):
     return max(completed) + 1 if completed else 0
 
 
-import ray
-import logging
-from tqdm import tqdm
-import os
-from os.path import join
-import numpy as np
-
-# Setup logging
-logging.getLogger().setLevel(logging.DEBUG)
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
-
-# Connect to Ray cluster - replace with your server's IP
-ray.init(address="ray://192.168.68.130:10001")
-
-# Rest of your imports and setup functions
-
-def gather_embeddings(train_loaders, media_types, device, output_dir, resume=True):
+def gather_embeddings(train_loaders, media_types, device, output_dir, api_endpoints=None, resume=True):
     os.makedirs(output_dir, exist_ok=True)
 
     start_step = _get_resume_step(output_dir) if resume else 0
@@ -156,11 +166,8 @@ def gather_embeddings(train_loaders, media_types, device, output_dir, resume=Tru
     global_step = start_step
     progress_bar = tqdm(loader, total=total_steps, initial=start_step)
 
-    # Get a handle to the remote service
-    services = ray.get_actor("InternVideo2Service")
-
     # Define a window batch size to process windows in chunks
-    window_batch_size = 32  # Adjust based on your memory
+    window_batch_size = 32 # Adjust this based on your available memory and batch size
 
     for media_type, (images, text, idx) in progress_bar:
         images = images.to(device, non_blocking=True)
@@ -184,28 +191,23 @@ def gather_embeddings(train_loaders, media_types, device, output_dir, resume=Tru
 
         for i in range(0, num_windows, window_batch_size):
             window_batch = all_windows[i : i + window_batch_size]
-            logger.info(f"Processing window batch {i//window_batch_size + 1}/{(num_windows + window_batch_size - 1)//window_batch_size}...")
+            logger.info(f"Sending server requests for window batch {i//window_batch_size + 1}/{(num_windows + window_batch_size - 1)//window_batch_size}...")
 
-            # Send tensors to remote Ray service and get results
-            # Convert to numpy for better serialization
-            futures = []
-            for window in window_batch:
-                # Submit tasks in parallel
-                futures.append(services.embed_video.remote(window.cpu().numpy()))
+            if api_endpoints:
+                embeddings_batch_list = asyncio.run(_infer_windows(window_batch, api_endpoints))
+            else:
+                embeddings_batch_list = [dummy_internvideo6b_api(w).cpu() for w in window_batch]
 
-            # Get results
-            embeddings_batch_list = ray.get(futures)
-
-            # Store embeddings
+            # Store embeddings from the current window batch
+            # The corresponding frame indices start from i + 3
             start_frame_idx = i + 3
             for win_batch_idx, embeddings in enumerate(embeddings_batch_list):
-                current_frame_idx = start_frame_idx + win_batch_idx
-                for vid_id, emb in zip(idx, embeddings):
-                    save_dict[int(vid_id.item())][current_frame_idx] = torch.tensor(emb)
+                 current_frame_idx = start_frame_idx + win_batch_idx
+                 for vid_id, emb in zip(idx, embeddings):
+                     save_dict[int(vid_id.item())][current_frame_idx] = emb
 
         torch.save(save_dict, save_path)
         global_step += 1
-
 
 def main(config):
     setup_seed(config.seed + get_rank())
@@ -219,7 +221,7 @@ def main(config):
 
     logger.info(f"Using API endpoints: {api_endpoints}")
 
-    gather_embeddings(train_loaders, media_types, device, output_dir, resume) #api_endpoints, resume)
+    gather_embeddings(train_loaders, media_types, device, output_dir, api_endpoints, resume)
 
 if __name__ == "__main__":
     cfg = setup_main()
