@@ -1,29 +1,18 @@
 import os
 import torch
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-import uvicorn
+import ray
 
 from demo.config import Config, eval_dict_leaf
 from demo.utils import setup_internvideo2
 
-# Define Pydantic models for request and response
-class InferRequest(BaseModel):
-    window_tensor: list  # Representing the tensor data
+# Initialize Ray as the head node
+ray.init(dashboard_host="0.0.0.0")
+print(f"Ray dashboard available at: http://{ray.get_webui_url()}")
 
-class InferResponse(BaseModel):
-    embeddings: list[list[float]]
-
-MODEL = None
-CFG = None
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-
-def _load_model():
-    global MODEL, CFG
-    if MODEL is not None:
-        return
-
+# Load model once and make it available globally
+def load_model():
     config_path = os.environ.get(
         "IV2_6B_CONFIG",
         os.path.join(
@@ -40,76 +29,43 @@ def _load_model():
     if not ckpt_path:
         raise RuntimeError("IV2_6B_CKPT environment variable must point to the model weights")
 
-    CFG = Config.from_file(config_path)
-    CFG = eval_dict_leaf(CFG)
-    CFG.model.vision_ckpt_path = ckpt_path
-    CFG.model.vision_encoder.pretrained = ckpt_path
-    CFG.pretrained_path = ckpt_path
-    CFG.device = str(DEVICE)
+    cfg = Config.from_file(config_path)
+    cfg = eval_dict_leaf(cfg)
+    cfg.model.vision_ckpt_path = ckpt_path
+    cfg.model.vision_encoder.pretrained = ckpt_path
+    cfg.pretrained_path = ckpt_path
+    cfg.device = str(DEVICE)
 
-    MODEL, _ = setup_internvideo2(CFG)
-    MODEL.eval()
+    model, _ = setup_internvideo2(cfg)
+    model.eval()
+    return model
 
+# Create a remote function for inference
+@ray.remote(num_gpus=1)
+class InternVideo2Service:
+    def __init__(self):
+        self.model = load_model()
 
-def embed_video_6b(video_tensor: torch.Tensor):
-    """Compute embeddings using InternVideo2-6B."""
-    _load_model()
-    video_tensor = video_tensor.to(DEVICE)
-    # Convert from [B, C, T, H, W] -> [B, T, C, H, W]
-    video_tensor = video_tensor.permute(0, 2, 1, 3, 4)
-    with torch.no_grad():
-        embeddings = MODEL.get_vid_feat(video_tensor)
-    return embeddings.cpu().tolist()
+    def embed_video(self, video_tensor):
+        """Compute embeddings using InternVideo2-6B."""
+        # Convert list to tensor if needed
+        if isinstance(video_tensor, list):
+            video_tensor = torch.tensor(video_tensor)
 
+        video_tensor = video_tensor.to(DEVICE)
+        # Convert from [B, C, T, H, W] -> [B, T, C, H, W]
+        video_tensor = video_tensor.permute(0, 2, 1, 3, 4)
 
+        with torch.no_grad():
+            embeddings = self.model.get_vid_feat(video_tensor)
 
-# Create a FastAPI instance
-app = FastAPI()
+        return embeddings.cpu().numpy().tolist()
 
-@app.post("/infer", response_model=InferResponse)
-async def infer(request_data: InferRequest):
-    """
-    FastAPI endpoint for simulating video inference.
+# Start the service
+service = InternVideo2Service.remote()
+print(f"\n\nInternVideo2 service started! Address: {service}")
 
-    This endpoint accepts a POST request with a JSON body containing
-    video data represented as a tensor (`window_tensor`).
-    It runs the InternVideo2 model on the window tensor and returns
-    the resulting embeddings in a JSON response.
-
-    Request JSON body:
-        {"window_tensor": list}
-
-    Response JSON body:
-        On success:
-        {
-            "embeddings": list[list[float]]  # Video embeddings
-        }
-        On failure:
-        {
-            "detail": str  # Error message
-        }, 400
-
-    Validates the input tensor shape to ensure it has at least one dimension (batch size).
-    """
-    try:
-        # Extract the 'window_tensor' list and convert it to a PyTorch tensor.
-        window_tensor_input = torch.tensor(request_data.window_tensor)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Invalid data: {e}")
-
-    # Validate the shape: ensure it's not None and has at least one dimension (batch size).
-    shape = window_tensor_input.shape
-    if not shape or len(shape) < 1:
-         raise HTTPException(status_code=400, detail='invalid shape: tensor must have at least one dimension')
-
-    batch_size = shape[0]
-
-    # Compute embeddings with the InternVideo2 model.
-    embeddings = embed_video_6b(window_tensor_input)
-
-    # Return the embeddings using the Pydantic response model.
-    return InferResponse(embeddings=embeddings)
-
-if __name__ == '__main__':
-    # Run the FastAPI application using uvicorn
-    uvicorn.run(app, host='0.0.0.0', port=8008)
+# Keep the server running
+import time
+while True:
+    time.sleep(1)

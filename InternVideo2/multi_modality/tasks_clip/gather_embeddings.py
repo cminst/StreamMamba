@@ -46,6 +46,7 @@ async def _infer_windows(windows, endpoints):
     async with aiohttp.ClientSession() as session:
         tasks = []
         for i, win in enumerate(windows):
+            logger.info(f"Window tensor shape: {win.shape}, size in MB: {win.element_size() * win.nelement() / (1024*1024)}")
             endpoint = endpoints[i % len(endpoints)]
             payload = {"window_tensor": win.tolist()}
             tasks.append(session.post(endpoint, json=payload))
@@ -123,7 +124,24 @@ def _get_resume_step(output_dir):
     return max(completed) + 1 if completed else 0
 
 
-def gather_embeddings(train_loaders, media_types, device, output_dir, api_endpoints=None, resume=True):
+import ray
+import logging
+from tqdm import tqdm
+import os
+from os.path import join
+import numpy as np
+
+# Setup logging
+logging.getLogger().setLevel(logging.DEBUG)
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
+# Connect to Ray cluster - replace with your server's IP
+ray.init(address="ray://192.168.68.130:10001")
+
+# Rest of your imports and setup functions
+
+def gather_embeddings(train_loaders, media_types, device, output_dir, resume=True):
     os.makedirs(output_dir, exist_ok=True)
 
     start_step = _get_resume_step(output_dir) if resume else 0
@@ -138,8 +156,11 @@ def gather_embeddings(train_loaders, media_types, device, output_dir, api_endpoi
     global_step = start_step
     progress_bar = tqdm(loader, total=total_steps, initial=start_step)
 
+    # Get a handle to the remote service
+    services = ray.get_actor("InternVideo2Service")
+
     # Define a window batch size to process windows in chunks
-    window_batch_size = 32 # Adjust this based on your available memory and batch size
+    window_batch_size = 32  # Adjust based on your memory
 
     for media_type, (images, text, idx) in progress_bar:
         images = images.to(device, non_blocking=True)
@@ -163,23 +184,28 @@ def gather_embeddings(train_loaders, media_types, device, output_dir, api_endpoi
 
         for i in range(0, num_windows, window_batch_size):
             window_batch = all_windows[i : i + window_batch_size]
-            logger.info(f"Sending server requests for window batch {i//window_batch_size + 1}/{(num_windows + window_batch_size - 1)//window_batch_size}...")
+            logger.info(f"Processing window batch {i//window_batch_size + 1}/{(num_windows + window_batch_size - 1)//window_batch_size}...")
 
-            if api_endpoints:
-                embeddings_batch_list = asyncio.run(_infer_windows(window_batch, api_endpoints))
-            else:
-                embeddings_batch_list = [dummy_internvideo6b_api(w).cpu() for w in window_batch]
+            # Send tensors to remote Ray service and get results
+            # Convert to numpy for better serialization
+            futures = []
+            for window in window_batch:
+                # Submit tasks in parallel
+                futures.append(services.embed_video.remote(window.cpu().numpy()))
 
-            # Store embeddings from the current window batch
-            # The corresponding frame indices start from i + 3
+            # Get results
+            embeddings_batch_list = ray.get(futures)
+
+            # Store embeddings
             start_frame_idx = i + 3
             for win_batch_idx, embeddings in enumerate(embeddings_batch_list):
-                 current_frame_idx = start_frame_idx + win_batch_idx
-                 for vid_id, emb in zip(idx, embeddings):
-                     save_dict[int(vid_id.item())][current_frame_idx] = emb
+                current_frame_idx = start_frame_idx + win_batch_idx
+                for vid_id, emb in zip(idx, embeddings):
+                    save_dict[int(vid_id.item())][current_frame_idx] = torch.tensor(emb)
 
         torch.save(save_dict, save_path)
         global_step += 1
+
 
 def main(config):
     setup_seed(config.seed + get_rank())
@@ -193,7 +219,7 @@ def main(config):
 
     logger.info(f"Using API endpoints: {api_endpoints}")
 
-    gather_embeddings(train_loaders, media_types, device, output_dir, api_endpoints, resume)
+    gather_embeddings(train_loaders, media_types, device, output_dir, resume) #api_endpoints, resume)
 
 if __name__ == "__main__":
     cfg = setup_main()
