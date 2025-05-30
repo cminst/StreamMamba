@@ -1,92 +1,20 @@
 import os
 import logging
-from os.path import join
-
 import torch
-import asyncio
-import aiohttp
+import torch.distributed as dist
+from torch.utils.data import DataLoader, DistributedSampler
 from tqdm import tqdm
-import tempfile
 
-from dataset.serialize import local_broadcast_process_authkey
-from dataset import create_dataset, create_loader, create_stateful_sampler
-from dataset import MetaLoader_rs
-from tasks_clip.shared_utils import get_media_types
+from dataset import create_dataset
 from utils.basic_utils import setup_seed
 from utils.config_utils import setup_main
-from utils.distributed import get_rank
+from utils.distributed import get_rank, get_world_size
+from demo.config import Config, eval_dict_leaf
+from demo.utils import setup_internvideo2
 
 logging.getLogger().setLevel(logging.DEBUG)
-
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
-
-def dummy_internvideo6b_api(video_tensor):
-    """Simulate a call to an external InternVideo2-6B model.
-
-    Args:
-        video_tensor (Tensor): shape [B, C, T, H, W]
-
-    Returns:
-        Tensor: random embeddings with shape [B, 768]
-    """
-    B = video_tensor.size(0)
-    return torch.randn(B, 768, device=video_tensor.device)
-
-async def _infer_windows(windows, endpoints):
-    """Query embedding servers for a list of windows using file uploads.
-
-    Args:
-        windows (list[Tensor]): A list of 4-frame tensors, each with shape [B, C, 4, H, W].
-        endpoints (list[str]): List of API endpoints to send requests to.
-
-    Returns:
-        embeds (list[Tensor]): A list of embeddings for the windows.
-    """
-    async with aiohttp.ClientSession() as session:
-        tasks = []
-        temp_files = []
-
-        for i, win in enumerate(windows):
-            logger.info(f"Window tensor shape: {win.shape}, size in MB: {win.element_size() * win.nelement() / (1024*1024)}")
-            endpoint = endpoints[i % len(endpoints)]
-
-            # Create a temporary file to store the tensor
-            with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as tmp:
-                torch.save(win, tmp.name)
-                temp_files.append(tmp.name)
-
-                # Prepare the file for upload
-                with open(tmp.name, "rb") as f:
-                    data = aiohttp.FormData()
-                    data.add_field("window_tensor", f, filename="window_tensor.pt", content_type="application/octet-stream")
-                    tasks.append(session.post(endpoint, data=data))
-
-        logger.info(f"Added {len(tasks)} tasks")
-        responses = await asyncio.gather(*tasks, return_exceptions=True)
-        embeds = []
-
-        for resp in responses:
-            if isinstance(resp, Exception):
-                logger.error(f"Request failed: {resp}")
-                embeds.append(None)
-                continue
-            if resp.status != 200:
-                logger.error(f"Request failed with status {resp.status}: {await resp.text()}")
-                embeds.append(None)
-                continue
-            data = await resp.json()
-            embeds.append(torch.tensor(data["embeddings"]))
-
-        # Clean up temporary files
-        for tmp_file in temp_files:
-            try:
-                os.unlink(tmp_file)
-            except Exception as e:
-                logger.warning(f"Failed to delete temp file {tmp_file}: {e}")
-
-        return embeds
-
 
 def clone_collate_fn(batch):
     def clone_item(x):
@@ -98,46 +26,38 @@ def clone_collate_fn(batch):
             return {k: clone_item(v) for k, v in x.items()}
         else:
             return x
-
     batch = [clone_item(sample) for sample in batch]
     from torch.utils.data._utils.collate import default_collate
     return default_collate(batch)
 
-
 def setup_dataloaders(config, mode="pt"):
     logger.info(f"Creating dataset for {mode}")
-    train_datasets = create_dataset(f"{mode}_train", config)
-    media_types = get_media_types(train_datasets)
-
-    if not config.distributed:
-        raise NotImplementedError("Non-distributed training path might need adjustments for samplers.")
-
-    batch_size = [config.inputs.batch_size[k] for k in media_types]
-    samplers = create_stateful_sampler(train_datasets, batch_size)
-
-    train_loaders = create_loader(
-        train_datasets,
-        samplers,
-        batch_size=batch_size,
-        num_workers=[config.num_workers] * len(media_types),
-        is_trains=[True] * len(media_types),
-        collate_fns=[clone_collate_fn] * len(media_types),
+    dataset = create_dataset(f"{mode}_train", config)
+    sampler = DistributedSampler(dataset, num_replicas=get_world_size(), rank=get_rank(), shuffle=False)
+    loader = DataLoader(
+        dataset,
+        batch_size=config.inputs.batch_size["video"],
+        sampler=sampler,
+        num_workers=config.num_workers,
+        collate_fn=clone_collate_fn,
+        pin_memory=True,
     )
+    return loader
 
-    return train_loaders, media_types
-
+def load_model(config, device):
+    cfg = Config.from_file(config.model_config_path)
+    cfg = eval_dict_leaf(cfg)
+    cfg.model.vision_ckpt_path = config.model_ckpt_path
+    cfg.model.vision_encoder.pretrained = config.model_ckpt_path
+    cfg.pretrained_path = config.model_ckpt_path
+    cfg.device = str(device)
+    model, _ = setup_internvideo2(cfg)
+    model.eval()
+    return model
 
 def _get_resume_step(output_dir):
-    """Return the step index from which to resume.
-
-    The function scans ``output_dir`` for subfolders following the
-    ``step-<idx>`` pattern and checks whether ``embeddings.pt`` exists in
-    each folder. The next step after the largest completed one is returned.
-    """
-
     if not os.path.isdir(output_dir):
         return 0
-
     completed = []
     for d in os.listdir(output_dir):
         if not d.startswith("step-"):
@@ -146,84 +66,62 @@ def _get_resume_step(output_dir):
             step = int(d.split("-", 1)[1])
         except ValueError:
             continue
-        if os.path.isfile(os.path.join(output_dir, d, "embeddings.pt")):
+        if os.path.isfile(os.path.join(output_dir, d, f"embeddings_rank_{get_rank()}.pt")):
             completed.append(step)
     return max(completed) + 1 if completed else 0
 
-
-def gather_embeddings(train_loaders, media_types, device, output_dir, api_endpoints=None, resume=True):
+def gather_embeddings(loader, device, output_dir, resume=True):
     os.makedirs(output_dir, exist_ok=True)
-
+    rank = get_rank()
     start_step = _get_resume_step(output_dir) if resume else 0
-    if start_step > 0:
-        logger.info(f"Resuming from step {start_step}")
+    logger.info(f"Rank {rank} resuming from step {start_step}")
 
-    loader = MetaLoader_rs(
-        name2loader=dict(list(zip(media_types, train_loaders))), skip_num=start_step
-    )
+    # Set epoch for DistributedSampler
+    loader.sampler.set_epoch(start_step)
 
-    total_steps = start_step + len(loader)
-    global_step = start_step
-    progress_bar = tqdm(loader, total=total_steps, initial=start_step)
+    # Initialize model
+    model = load_model(config, device)
 
-    # Define a window batch size to process windows in chunks
-    window_batch_size = 32 # Adjust this based on your available memory and batch size
+    total_steps = len(loader)
+    progress_bar = tqdm(loader, total=total_steps, initial=start_step, desc=f"Rank {rank}")
 
-    for media_type, (images, text, idx) in progress_bar:
+    for step, (images, text, idx) in enumerate(progress_bar, start=start_step):
         images = images.to(device, non_blocking=True)
         images = images.permute(0, 2, 1, 3, 4)  # [B, C, T, H, W]
         num_frames = images.size(2)
         if num_frames < 4:
-            global_step += 1
             continue
 
-        logger.info(f"Processing {idx}")
-        step_dir = os.path.join(output_dir, f"step-{global_step}")
+        step_dir = os.path.join(output_dir, f"step-{step}")
         os.makedirs(step_dir, exist_ok=True)
-        save_path = os.path.join(step_dir, "embeddings.pt")
+        save_path = os.path.join(step_dir, f"embeddings_rank_{rank}.pt")
 
         save_dict = {int(i.item()): {} for i in idx}
-
-        # Process windows in batches
         all_windows = [images[:, :, i - 3 : i + 1] for i in range(3, num_frames)]
-        num_windows = len(all_windows)
-        logger.info(f"Total windows to process: {num_windows}")
 
-        for i in range(0, num_windows, window_batch_size):
-            window_batch = all_windows[i : i + window_batch_size]
-            logger.info(f"Sending server requests for window batch {i//window_batch_size + 1}/{(num_windows + window_batch_size - 1)//window_batch_size}...")
-
-            if api_endpoints:
-                embeddings_batch_list = asyncio.run(_infer_windows(window_batch, api_endpoints))
-            else:
-                embeddings_batch_list = [dummy_internvideo6b_api(w).cpu() for w in window_batch]
-
-            # Store embeddings from the current window batch
-            # The corresponding frame indices start from i + 3
-            start_frame_idx = i + 3
-            for win_batch_idx, embeddings in enumerate(embeddings_batch_list):
-                 current_frame_idx = start_frame_idx + win_batch_idx
-                 for vid_id, emb in zip(idx, embeddings):
-                     save_dict[int(vid_id.item())][current_frame_idx] = emb
+        with torch.no_grad():
+            for win_idx, window in enumerate(all_windows):
+                embeddings = model.get_vid_feat(window.permute(0, 2, 1, 3, 4))
+                for vid_id, emb in zip(idx, embeddings.cpu()):
+                    save_dict[int(vid_id.item())][win_idx + 3] = emb
 
         torch.save(save_dict, save_path)
-        global_step += 1
 
 def main(config):
-    setup_seed(config.seed + get_rank())
-    device = torch.device(config.device)
+    # Initialize distributed environment
+    dist.init_process_group(backend="nccl", init_method="env://")
+    rank = get_rank()
+    setup_seed(config.seed + rank)
+    device = torch.device(f"cuda:{rank % torch.cuda.device_count()}")
 
-    train_loaders, media_types = setup_dataloaders(config, mode=config.mode)
-    output_dir = join(config.output_dir, "kinetics-embeddings")
+    # Ensure dataset path points to the shared directory
+    loader = setup_dataloaders(config, mode=config.mode)
+    output_dir = os.path.join(config.output_dir, "kinetics-embeddings")
+    gather_embeddings(loader, device, output_dir, resume=config.resume)
 
-    resume = getattr(config, "resume", True)
-    api_endpoints = getattr(config, "embedding_endpoints", [])
-
-    logger.info(f"Using API endpoints: {api_endpoints}")
-
-    gather_embeddings(train_loaders, media_types, device, output_dir, api_endpoints, resume)
+    # Cleanup
+    dist.destroy_process_group()
 
 if __name__ == "__main__":
     cfg = setup_main()
-    local_broadcast_process_authkey()
     main(cfg)
