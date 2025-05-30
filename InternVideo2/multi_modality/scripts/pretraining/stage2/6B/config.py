@@ -52,10 +52,10 @@ model = dict(
     vision_encoder=dict(
         # backbone
         name="pretrain_internvideo2_6b_patch14_224",
-        img_size=224, 
+        img_size=224,
         num_frames="${num_frames}",
         tubelet_size=1,
-        patch_size=14, 
+        patch_size=14,
         d_model=3200,
         clip_embed_dim=768,
         clip_teacher_embed_dim=3200,
@@ -94,9 +94,9 @@ model = dict(
 
 criterion = dict(
     loss_weight=dict(
-        vtc=1.0, 
-        mlm=1.0, 
-        vtm=1.0, 
+        vtc=1.0,
+        mlm=1.0,
+        vtm=1.0,
         uta=0.0,
         # audio-related
         atc=0.0,
@@ -106,7 +106,7 @@ criterion = dict(
         avtm=1.0,
         amlm=0.0,
         avmlm=1.0
-    ),  # 0: disabled. 
+    ),  # 0: disabled.
     # ['video_name', 'selected_audio_caption', 'selected_video_caption', 'asr_captions', 'av_captions', 'video_fps', 'video_start_frame', 'video_end_frame', 'video']
     loss_caption=dict(
         # vision-related
@@ -150,8 +150,8 @@ evaluation = dict(
     eval_offload=True,  # offload gpu tensors to cpu to save memory.
 )
 
-use_half_precision = True
-use_bf16 = True
+use_half_precision = False
+use_bf16 = False
 
 gradient_checkpointing = True # for text encoder
 use_flash_sdp = False
@@ -186,4 +186,3 @@ deepspeed = dict(
     enable=True,
     stage=1,
 )
-
