@@ -44,16 +44,41 @@ def setup_dataloaders(config, mode="pt"):
     )
     return loader
 
-def load_model(config, device):
-    cfg = Config.from_file(config.model_config_path)
-    cfg = eval_dict_leaf(cfg)
-    cfg.model.vision_ckpt_path = config.model_ckpt_path
-    cfg.model.vision_encoder.pretrained = config.model_ckpt_path
-    cfg.pretrained_path = config.model_ckpt_path
-    cfg.device = str(device)
-    model, _ = setup_internvideo2(cfg)
-    model.eval()
-    return model
+MODEL = None
+CFG = None
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+def _load_model():
+    global MODEL, CFG
+    if MODEL is not None:
+        return
+
+    config_path = os.environ.get(
+        "IV2_6B_CONFIG",
+        os.path.join(
+            os.path.dirname(__file__),
+            "..",
+            "scripts",
+            "pretraining",
+            "stage2",
+            "6B",
+            "config.py",
+        ),
+    )
+    ckpt_path = os.environ.get("IV2_6B_CKPT")
+    if not ckpt_path:
+        raise RuntimeError("IV2_6B_CKPT environment variable must point to the model weights")
+
+    CFG = Config.from_file(config_path)
+    CFG = eval_dict_leaf(CFG)
+    CFG.model.vision_ckpt_path = ckpt_path
+    CFG.model.vision_encoder.pretrained = ckpt_path
+    CFG.pretrained_path = ckpt_path
+    CFG.device = str(DEVICE)
+
+    MODEL, _ = setup_internvideo2(CFG)
+    MODEL.eval()
+    return MODEL
 
 def _get_resume_step(output_dir):
     if not os.path.isdir(output_dir):
