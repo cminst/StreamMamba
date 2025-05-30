@@ -1,51 +1,66 @@
-import random
+import os
 import torch
-from fastapi import FastAPI, Body, HTTPException
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import uvicorn
 
+from InternVideo2.multi_modality.demo.config import Config, eval_dict_leaf
+from InternVideo2.multi_modality.demo.utils import setup_internvideo2
+
 # Define Pydantic models for request and response
 class InferRequest(BaseModel):
-    window_tensor: list # Representing the tensor data
-    texts: list[str] # Representing the text data
+    window_tensor: list  # Representing the tensor data
 
 class InferResponse(BaseModel):
-    vision_embeddings: list[list[float]]
-    text_embeddings: list[list[float]]
+    embeddings: list[list[float]]
 
-def embed_video_6b(video_tensor):
-    """
-    Implements the InternVideo-6B API.
+MODEL = None
+CFG = None
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    This function takes a PyTorch tensor representing video data and
-    returns a list of lists representing embeddings.
 
-    Args:
-        video_tensor (torch.Tensor): Input tensor representing video data.
-                                     Expected shape is [B, C, 4, H, W].
+def _load_model():
+    global MODEL, CFG
+    if MODEL is not None:
+        return
 
-    Returns:
-        list[list[float]]: A list of lists, where each inner list is a
-                           embedding vector of size 768.
-    """
-    # The dummy implementation only needs the batch size from the input tensor's shape.
-    batch = video_tensor.shape[0]
-    # Generate random embeddings of size [batch, 768] and convert to a list.
-    return torch.randn(batch, 768).tolist()
+    config_path = os.environ.get(
+        "IV2_6B_CONFIG",
+        os.path.join(
+            os.path.dirname(__file__),
+            "..",
+            "scripts",
+            "pretraining",
+            "stage2",
+            "6B",
+            "config.py",
+        ),
+    )
+    ckpt_path = os.environ.get("IV2_6B_CKPT")
+    if not ckpt_path:
+        raise RuntimeError("IV2_6B_CKPT environment variable must point to the model weights")
 
-def embed_text(text):
-    """
-    Dummy function to embed text.
+    CFG = Config.from_file(config_path)
+    CFG = eval_dict_leaf(CFG)
+    CFG.model.vision_ckpt_path = ckpt_path
+    CFG.model.vision_encoder.pretrained = ckpt_path
+    CFG.pretrained_path = ckpt_path
+    CFG.device = str(DEVICE)
 
-    Args:
-        text (str): Input text string.
+    MODEL, _ = setup_internvideo2(CFG)
+    MODEL.eval()
 
-    Returns:
-        list[list[float]]: A list of lists, where each inner list is a
-                           embedding vector of size 768.
-    """
-    # Generate a random embedding of size [1, 768] and convert to a list.
-    return torch.randn(1, 768).tolist()
+
+def embed_video_6b(video_tensor: torch.Tensor):
+    """Compute embeddings using InternVideo2-6B."""
+    _load_model()
+    video_tensor = video_tensor.to(DEVICE)
+    # Convert from [B, C, T, H, W] -> [B, T, C, H, W]
+    video_tensor = video_tensor.permute(0, 2, 1, 3, 4)
+    with torch.no_grad():
+        embeddings = MODEL.get_vid_feat(video_tensor)
+    return embeddings.cpu().tolist()
+
 
 
 # Create a FastAPI instance
@@ -57,21 +72,17 @@ async def infer(request_data: InferRequest):
     FastAPI endpoint for simulating video inference.
 
     This endpoint accepts a POST request with a JSON body containing
-    video data represented as a tensor (`window_tensor`) and a text string.
-    It simulates processing this data by calling dummy embedding functions and
-    returns the resulting dummy embeddings in a JSON response.
+    video data represented as a tensor (`window_tensor`).
+    It runs the InternVideo2 model on the window tensor and returns
+    the resulting embeddings in a JSON response.
 
     Request JSON body:
-        {
-            "window_tensor": list  # List representing a tensor (e.g., [[...]])
-            "texts": list[str] # list of text queries, one for each batch
-        }
+        {"window_tensor": list}
 
     Response JSON body:
         On success:
         {
-            "vision_embeddings": list[list[float]]  # List of dummy video embedding vectors
-            "text_embeddings": list[list[float]]  # List of dummy text embedding vectors
+            "embeddings": list[list[float]]  # Video embeddings
         }
         On failure:
         {
@@ -83,7 +94,6 @@ async def infer(request_data: InferRequest):
     try:
         # Extract the 'window_tensor' list and convert it to a PyTorch tensor.
         window_tensor_input = torch.tensor(request_data.window_tensor)
-        texts_input = request_data.texts
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid data: {e}")
 
@@ -94,15 +104,11 @@ async def infer(request_data: InferRequest):
 
     batch_size = shape[0]
 
-    if len(texts_input) != batch_size:
-        raise HTTPException(status_code=400, detail='The number of texts must match the batch size of the video tensor.')
-
-    # Call the dummy API to get simulated embeddings.
-    vision_embeddings = embed_video_6b(window_tensor_input)
-    text_embeddings = [embed_text(text) for text in texts_input]
+    # Compute embeddings with the InternVideo2 model.
+    embeddings = embed_video_6b(window_tensor_input)
 
     # Return the embeddings using the Pydantic response model.
-    return InferResponse(vision_embeddings=vision_embeddings, text_embeddings=text_embeddings)
+    return InferResponse(embeddings=embeddings)
 
 if __name__ == '__main__':
     # Run the FastAPI application using uvicorn
