@@ -4,6 +4,7 @@ import torch
 import torch.distributed as dist
 from torch.utils.data import DataLoader, DistributedSampler
 from tqdm import tqdm
+from huggingface_hub import hf_hub_download
 
 from dataset import create_dataset
 from utils.basic_utils import setup_seed
@@ -67,7 +68,15 @@ def _load_model():
     )
     ckpt_path = os.environ.get("IV2_6B_CKPT")
     if not ckpt_path:
-        raise RuntimeError("IV2_6B_CKPT environment variable must point to the model weights")
+        repo_id = "OpenGVLab/InternVideo2-Stage2_6B-224p-f4"
+        filename = "internvideo2-s2_6b-224p-f4.pt"
+        logger.info(f"IV2_6B_CKPT not set, downloading {filename} from {repo_id}")
+        try:
+            ckpt_path = hf_hub_download(repo_id=repo_id, filename=filename)
+            logger.info(f"Downloaded model to {ckpt_path}")
+        except Exception as e:
+            raise RuntimeError(f"Failed to download model from {repo_id}/{filename}: {e}") from e
+
 
     CFG = Config.from_file(config_path)
     CFG = eval_dict_leaf(CFG)
