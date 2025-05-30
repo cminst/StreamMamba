@@ -4,8 +4,8 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import uvicorn
 
-from InternVideo2.multi_modality.demo.config import Config, eval_dict_leaf
-from InternVideo2.multi_modality.demo.utils import setup_internvideo2
+from demo.config import Config, eval_dict_leaf
+from demo.utils import setup_internvideo2
 
 # Define Pydantic models for request and response
 class InferRequest(BaseModel):
