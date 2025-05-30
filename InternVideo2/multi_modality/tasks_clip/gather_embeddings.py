@@ -105,7 +105,7 @@ def gather_embeddings(loader, device, output_dir, resume=True):
     loader.sampler.set_epoch(start_step)
 
     # Initialize model
-    model = load_model(config, device)
+    model = _load_model()
 
     total_steps = len(loader)
     progress_bar = tqdm(loader, total=total_steps, initial=start_step, desc=f"Rank {rank}")
