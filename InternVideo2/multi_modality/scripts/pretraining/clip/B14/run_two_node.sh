@@ -9,7 +9,7 @@ set -e
 #   $ MASTER_ADDR=10.0.0.1 MASTER_PORT=29500 NODE_RANK=0 bash run_two_node.sh
 #
 # Example usage on node 1:
-#   $ MASTER_ADDR=10.0.0.1 MASTER_PORT=29500 NODE_RANK=1 bash run_two_node.sh
+#   $ MASTER_ADDR=192.168.68.116 MASTER_PORT=29500 NODE_RANK=1 bash run_two_node.sh
 #
 # Note: Here we assume each node has 1 GPU (`NPROC_PER_NODE=1`).
 
@@ -44,9 +44,8 @@ PYTHONUNBUFFERED=1 torchrun \
   --nnodes=${NNODES} \
   --nproc_per_node=${NPROC_PER_NODE} \
   --node_rank=${NODE_RANK} \
-  --master_addr=${MASTER_ADDR} \
-  --master_port=${MASTER_PORT} \
   --rdzv_backend=c10d \
+  --rdzv_endpoint=${MASTER_ADDR}:${MASTER_PORT} \
   --rdzv_id=some_job_name \
   tasks_clip/test_two_node.py \
   --output_dir ${LOGDIR} \
