@@ -1,13 +1,9 @@
-import sys
-sys.stderr.write(">>>>> TOP OF SCRIPT <<<<<\n")
-sys.stderr.flush()
-
 import os
 import logging
 import torch
 import torch.distributed as dist
 from torch.utils.data import DataLoader, DistributedSampler
-from tqdm import tqdm
+from utils.basic_utils import MetricLogger
 from huggingface_hub import hf_hub_download
 
 from dataset import create_dataset
@@ -121,7 +117,7 @@ def _get_resume_step(output_dir):
             completed.append(step)
     return max(completed) + 1 if completed else 0
 
-def gather_embeddings(loader, device, output_dir, resume=True):
+def gather_embeddings(loader, device, output_dir, resume=True, log_freq=50):
     os.makedirs(output_dir, exist_ok=True)
     rank = get_rank()
     start_step = _get_resume_step(output_dir) if resume else 0
@@ -133,10 +129,12 @@ def gather_embeddings(loader, device, output_dir, resume=True):
     # Initialize model
     model = _load_model()
 
-    total_steps = len(loader)
-    progress_bar = tqdm(loader, total=total_steps, initial=start_step, desc=f"Rank {rank}")
+    metric_logger = MetricLogger(delimiter="  ")
+    header = f"Rank {rank}"
+    iterator = metric_logger.log_every(loader, log_freq, header)
 
-    for step, (images, text, idx) in enumerate(progress_bar, start=start_step):
+    for step_offset, (images, text, idx) in enumerate(iterator):
+        step = start_step + step_offset
         images = images.to(device, non_blocking=True)
         images = images.permute(0, 2, 1, 3, 4)  # [B, C, T, H, W]
         num_frames = images.size(2)
@@ -159,9 +157,6 @@ def gather_embeddings(loader, device, output_dir, resume=True):
         torch.save(save_dict, save_path)
 
 def main(config):
-    # This will print immediately if you run with -u or flush=True
-    sys.stdout.write("ENTERED main()")
-    sys.stdout.flush()
 
     # 1) init
 
@@ -180,18 +175,11 @@ def main(config):
 
     print("Dataloaders set up!")
     output_dir = os.path.join(config.output_dir, "kinetics-embeddings")
-    gather_embeddings(loader, device, output_dir, resume=config.resume)
+    gather_embeddings(loader, device, output_dir, resume=config.resume, log_freq=config.log_freq)
 
     # Cleanup
     dist.destroy_process_group()
 
 if __name__ == "__main__":
-    print(">>> Inside Main")
-
-    import sys
-    sys.stderr.write(">>> right before setup_main()\n")
-    sys.stderr.flush()
     cfg = setup_main()
-    sys.stderr.write(">>> right after setup_main()\n")
-    sys.stderr.flush()
     main(cfg)
