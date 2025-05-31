@@ -172,6 +172,5 @@ def main(config):
     # Cleanup
     dist.destroy_process_group()
 
-if __name__ == "__main__":
-    cfg = setup_main()
-    main(cfg)
+cfg = setup_main()
+main(cfg)
