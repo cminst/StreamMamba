@@ -173,5 +173,13 @@ def main(config):
     # Cleanup
     dist.destroy_process_group()
 
-cfg = setup_main()
-main(cfg)
+if __name__ == "__main__":
+    print("Inside Main")
+
+    import sys
+    sys.stderr.write(">>> right before setup_main()\n")
+    sys.stderr.flush()
+    cfg = setup_main()
+    sys.stderr.write(">>> right after setup_main()\n")
+    sys.stderr.flush()
+    main(cfg)
