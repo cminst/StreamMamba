@@ -89,7 +89,7 @@ def _load_model():
     logger.info(f"Attempting to load config from file: {config_path}")
     CFG = Config.from_file(config_path)
     # Log after loading config
-    logger.info("Config loaded successfully from file.")
+    logger.info(f"Config loaded successfully from file. {CFG}")
 
     CFG = eval_dict_leaf(CFG)
     CFG.model.vision_ckpt_path = ckpt_path
