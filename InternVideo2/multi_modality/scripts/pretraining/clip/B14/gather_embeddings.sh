@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 echo "PYTHONPATH: ${PYTHONPATH}"
 which_python=$(which python)
 echo "which python: ${which_python}"
