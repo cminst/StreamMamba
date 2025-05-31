@@ -2,7 +2,6 @@ import os
 import datetime
 import torch
 import torch.distributed as dist
-from torch.distributed import PGOptions
 import logging
 import sys
 try:
@@ -179,80 +178,62 @@ def is_port_in_use(port):
 
 def init_distributed_mode(args):
     """
-    Sets up distributed training via either torchrun (torch.distributed.launch) or SLURM.
-    Binds each process to its own GPU and initializes the NCCL process group with PGOptions.device_id.
+    Initializes distributed mode for both torchrun and SLURM.
+    Binds each rank to its GPU via device_id, seeds NCCL, and calls barrier().
 
-    After calling this function, every rank will have:
-      - args.distributed = True
-      - args.rank: the global rank (0 .. world_size-1)
-      - args.world_size: total number of processes
-      - args.gpu: the local GPU index (0 .. gpus_per_node-1)
-      - current CUDA device set to args.gpu
-      - an active NCCL process group, so dist.barrier() will return.
+    After this call:
+      - args.distributed = True (or False if not launched in distributed mode)
+      - args.rank, args.world_size, args.gpu are correctly set
+      - torch.cuda.current_device() == args.gpu
+      - A NCCL process group is active, so dist.barrier() will succeed
     """
 
     sys.stderr.write(">>> init_distributed_mode() entry\n")
     sys.stderr.flush()
 
-    #────── 1) Detect whether we're running under torchrun/torch.distributed.launch ──────
+    # 1) Detect torchrun (torch.distributed.launch) environment
     if "RANK" in os.environ and "WORLD_SIZE" in os.environ:
-        # torchrun sets these automatically.
         args.rank = int(os.environ["RANK"])
         args.world_size = int(os.environ["WORLD_SIZE"])
         args.gpu = int(os.environ.get("LOCAL_RANK", 0))
         sys.stderr.write(
-            f">>> init_distributed_mode(): Detected torchrun "
-            f"→ rank={args.rank}, world_size={args.world_size}, gpu={args.gpu}\n"
+            f">>> init_distributed_mode(): Detected torchrun → "
+            f"rank={args.rank}, world_size={args.world_size}, gpu={args.gpu}\n"
         )
         sys.stderr.flush()
 
-    #────── 2) Detect whether we're running under SLURM ──────
+    # 2) Detect SLURM environment
     elif "SLURM_PROCID" in os.environ:
-        # SLURM_PROCID gives the global rank. SLURM_LOCALID gives the GPU slot on this node.
         args.rank = int(os.environ["SLURM_PROCID"])
         args.gpu = int(os.environ["SLURM_LOCALID"])
-
-        # SLURM_TASKS_PER_NODE may look like "4(x2)" or simply "4".
-        # We take the first integer as the per-node GPU count.
+        # SLURM_TASKS_PER_NODE might look like "4(x2)" or "4"
         raw_tasks = os.environ.get("SLURM_TASKS_PER_NODE", "1")
-        # If it’s “4(x2)”, split off at “(” → “4”
-        tasks_per_node = int(raw_tasks.split("(")[0])
+        per_node = int(raw_tasks.split("(")[0])
         num_nodes = int(os.environ.get("SLURM_NNODES", "1"))
-        args.world_size = num_nodes * tasks_per_node
-
+        args.world_size = num_nodes * per_node
         sys.stderr.write(
-            f">>> init_distributed_mode(): Detected SLURM "
-            f"→ rank={args.rank}, gpu={args.gpu}, world_size={args.world_size}\n"
+            f">>> init_distributed_mode(): Detected SLURM → "
+            f"rank={args.rank}, world_size={args.world_size}, gpu={args.gpu}\n"
         )
         sys.stderr.flush()
 
-    #────── 3) If neither torchrun nor SLURM, disable distributed mode ──────
+    # 3) Non-distributed fallback
     else:
         sys.stderr.write(">>> init_distributed_mode(): Not using distributed mode\n")
         sys.stderr.flush()
         args.distributed = False
         return
 
-    # From here on, we are guaranteed to be in distributed mode.
+    # Mark that we are in distributed mode
     args.distributed = True
 
-    #────── 4) Bind this process to the designated GPU ──────
-    # It’s critical to set this before init_process_group so NCCL knows which GPU to use.
+    # 4) Bind this process to its GPU before forming the process group
     torch.cuda.set_device(args.gpu)
     sys.stderr.write(f">>> init_distributed_mode(): torch.cuda.set_device({args.gpu}) done\n")
     sys.stderr.flush()
 
-    #────── 5) Build PGOptions and assign device_id ──────
-    pg_options = PGOptions()
-    # PGOptions.device_id expects a torch.device, not a raw integer.
-    pg_options.device_id = torch.device(f"cuda:{args.gpu}")
-    sys.stderr.write(f">>> init_distributed_mode(): PGOptions.device_id set to cuda:{args.gpu}\n")
-    sys.stderr.flush()
-
-    #────── 6) If using a TCP-based dist_url, possibly shift to an unused port ──────
-    # (Optional: Only if you supplied args.dist_url="tcp://host:port")
+    # 5) If using a TCP-based dist_url, adjust port if needed (optional)
     if "tcp" in getattr(args, "dist_url", ""):
-        # Extract the integer port at the end of dist_url, e.g. "tcp://hostname:12345"
         url_parts = args.dist_url.split(":")
         try:
             base = ":".join(url_parts[:-1])
@@ -263,77 +244,54 @@ def init_distributed_mode(args):
         sys.stderr.write(f">>> init_distributed_mode(): Checking TCP port {port}\n")
         sys.stderr.flush()
 
-        # You need to define is_port_in_use(port) elsewhere in your code.
-        # It should return True if the port is occupied, False otherwise.
+        # Define is_port_in_use() elsewhere; this loop increments port by 10 until free
         while is_port_in_use(port):
-            old = port
+            old_port = port
             port += 10
-            sys.stderr.write(f">>> init_distributed_mode(): port {old} in use → trying {port}\n")
+            sys.stderr.write(
+                f">>> init_distributed_mode(): port {old_port} in use → trying {port}\n"
+            )
             sys.stderr.flush()
 
         args.dist_url = f"{base}:{port}"
         sys.stderr.write(f">>> init_distributed_mode(): Updated TCP dist_url → {args.dist_url}\n")
         sys.stderr.flush()
     else:
-        sys.stderr.write(">>> init_distributed_mode(): dist_url is not TCP (using env:// or similar)\n")
+        sys.stderr.write(
+            ">>> init_distributed_mode(): dist_url is not TCP (using env:// or similar)\n"
+        )
         sys.stderr.flush()
 
-    #────── 7) Finally, initialize the NCCL-backed process group ──────
+    # 6) Create the NCCL process group, passing device_id directly
     args.dist_backend = "nccl"
+    sys.stderr.write(
+        f">>> init_distributed_mode(): Calling torch.distributed.init_process_group(\n"
+        f"    backend={args.dist_backend}, init_method={args.dist_url},\n"
+        f"    world_size={args.world_size}, rank={args.rank},\n"
+        f"    device_id=torch.device('cuda:{args.gpu}')\n"
+        f")\n"
+    )
+    sys.stderr.flush()
 
-    if hasattr(args, "deepspeed") and getattr(args.deepspeed, "enable", False):
-        # If you're using DeepSpeed, call its init_distributed WITHOUT any device_id keyword.
-        sys.stderr.write(
-            f">>> init_distributed_mode(): Calling deepspeed.init_distributed(...)\n"
-            f"    → backend={args.dist_backend}, init_method={args.dist_url}, "
-            f"world_size={args.world_size}, rank={args.rank}\n"
-        )
-        sys.stderr.flush()
+    dist.init_process_group(
+        backend=args.dist_backend,
+        init_method=args.dist_url,
+        world_size=args.world_size,
+        rank=args.rank,
+        timeout=datetime.timedelta(minutes=60),
+        device_id=torch.device(f"cuda:{args.gpu}"),
+    )
+    sys.stderr.write(">>> init_distributed_mode(): init_process_group() returned\n")
+    sys.stderr.flush()
 
-        # DeepSpeed’s init_distributed respects PGOptions.device_id internally if launcher has set LOCAL_RANK.
-        import deepspeed
-        deepspeed.init_distributed(
-            dist_backend=args.dist_backend,
-            init_method=args.dist_url,
-            world_size=args.world_size,
-            rank=args.rank,
-            # device_id is handled via PGOptions above, so do NOT pass `device_id=` here
-            timeout=datetime.timedelta(seconds=7200)
-        )
-        sys.stderr.write(">>> init_distributed_mode(): deepspeed.init_distributed() returned\n")
-        sys.stderr.flush()
-
-    else:
-        # Native PyTorch path:
-        sys.stderr.write(
-            f">>> init_distributed_mode(): Calling torch.distributed.init_process_group(...)\n"
-            f"    → backend={args.dist_backend}, init_method={args.dist_url}, "
-            f"world_size={args.world_size}, rank={args.rank}\n"
-        )
-        sys.stderr.flush()
-
-        dist.init_process_group(
-            backend=args.dist_backend,
-            init_method=args.dist_url,
-            world_size=args.world_size,
-            rank=args.rank,
-            timeout=datetime.timedelta(minutes=60),
-            pg_options=pg_options,
-        )
-        sys.stderr.write(">>> init_distributed_mode(): torch.distributed.init_process_group() returned\n")
-        sys.stderr.flush()
-
-    #────── 8) Synchronize all ranks ──────
-    # Every rank must reach this barrier. If one rank skipped init_process_group,
-    # all others will hang here.
+    # 7) Synchronize: all ranks must reach this barrier
     sys.stderr.write(f">>> init_distributed_mode(): Reaching torch.distributed.barrier() ...\n")
     sys.stderr.flush()
     dist.barrier()
     sys.stderr.write(f">>> init_distributed_mode(): After barrier (rank {args.rank})\n")
     sys.stderr.flush()
 
-    #────── 9) Any post‐barrier setup ──────
-    # For example, only the master (rank 0) may want to do certain things:
+    # 8) Any master-specific setup
     setup_for_distributed(is_master=(args.rank == 0))
     sys.stderr.write(">>> init_distributed_mode() exit\n")
     sys.stderr.flush()
