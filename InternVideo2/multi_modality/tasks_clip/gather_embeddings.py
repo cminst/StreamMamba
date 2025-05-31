@@ -147,7 +147,8 @@ def gather_embeddings(loader, device, output_dir, resume=True):
 
 def main(config):
     # This will print immediately if you run with -u or flush=True
-    print("ENTERED main()", flush=True)
+    sys.stdout.write("ENTERED main()")
+    sys.stdout.flush()
 
     # 1) init
     dist.init_process_group(backend="nccl", init_method="env://")
