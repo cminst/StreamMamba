@@ -46,7 +46,4 @@ PYTHONUNBUFFERED=1 torchrun \
   --node_rank=${NODE_RANK} \
   --rdzv_backend=c10d \
   --rdzv_endpoint=${MASTER_ADDR}:${MASTER_PORT} \
-  --rdzv_id=some_job_name \
-  tasks_clip/test_two_node.py \
-  --output_dir ${LOGDIR} \
-  2>&1 | tee ${LOGDIR}/stdout_node${NODE_RANK}.log
+  tasks_clip/test_two_node.py
