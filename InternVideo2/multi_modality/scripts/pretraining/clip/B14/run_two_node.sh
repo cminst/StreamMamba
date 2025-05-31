@@ -44,9 +44,6 @@ PYTHONUNBUFFERED=1 torchrun \
   --nnodes=${NNODES} \
   --nproc_per_node=${NPROC_PER_NODE} \
   --node_rank=${NODE_RANK} \
-  --rdzv_backend=file \
-  --rdzv_endpoint="/home/zli/kinetics-dataset/rdv.file" \
+  --rdzv_backend=c10d \
+  --rdzv_endpoint=${MASTER_ADDR}:${MASTER_PORT} \
   tasks_clip/test_two_node.py
-
-
-  #--rdzv_endpoint=${MASTER_ADDR}:${MASTER_PORT} \
