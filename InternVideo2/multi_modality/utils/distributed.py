@@ -1,7 +1,9 @@
 import os
+import datetime
 import torch
 import torch.distributed as dist
 import logging
+import sys
 try:
     import deepspeed
 except Exception as e:
@@ -67,12 +69,18 @@ def is_port_in_use(port):
 
 
 def init_distributed_mode(args):
+    sys.stderr.write(">>> init_distributed_mode() entry\n"); sys.stderr.flush()
+
     if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
+        sys.stderr.write(">>> init_distributed_mode(): Detected torch.distributed.launch (torchrun)\n"); sys.stderr.flush()
         # job started by torch.distributed.launch
         args.rank = int(os.environ["RANK"])
         args.world_size = int(os.environ['WORLD_SIZE'])
         args.gpu = int(os.environ['LOCAL_RANK'])
+        sys.stderr.write(f">>> init_distributed_mode(): torchrun: Rank {args.rank}, GPU {args.gpu}, World Size {args.world_size}\n"); sys.stderr.flush()
+
     elif 'SLURM_PROCID' in os.environ:
+        sys.stderr.write(">>> init_distributed_mode(): Detected SLURM\n"); sys.stderr.flush()
         # local rank on the current node / global rank
         local_rank = int(os.environ['SLURM_LOCALID'])
         global_rank = int(os.environ['SLURM_PROCID'])
@@ -80,44 +88,85 @@ def init_distributed_mode(args):
         world_size = int(os.environ["SLURM_NNODES"]) * \
             int(os.environ["SLURM_TASKS_PER_NODE"][0])
 
-        print(world_size)
+        # print(world_size) # Change to stderr
+        sys.stderr.write(f">>> init_distributed_mode(): SLURM world_size={world_size}\n"); sys.stderr.flush()
 
         args.rank = global_rank
         args.gpu = local_rank
         args.world_size = world_size
+        sys.stderr.write(f">>> init_distributed_mode(): SLURM: Rank {args.rank}, GPU {args.gpu}, World Size {args.world_size}\n"); sys.stderr.flush()
+
     else:
+        sys.stderr.write(">>> init_distributed_mode(): Not using distributed mode\n"); sys.stderr.flush()
         logger.info('Not using distributed mode')
         args.distributed = False
         return
 
     args.distributed = True
+    sys.stderr.write(f">>> init_distributed_mode(): Distributed mode enabled\n"); sys.stderr.flush()
 
+
+    # NOTE: While setting device *before* init_process_group is common,
+    # the NCCL warning you see sometimes indicates a need to set it *after*
+    # or rely on the process group to handle device association correctly.
+    # Let's keep it here for now as it was, but add instrumentation.
+    sys.stderr.write(f">>> init_distributed_mode(): Before torch.cuda.set_device({args.gpu})\n"); sys.stderr.flush()
     torch.cuda.set_device(args.gpu)
+    sys.stderr.write(f">>> init_distributed_mode(): After torch.cuda.set_device()\n"); sys.stderr.flush()
+
+
     args.dist_backend = 'nccl'
 
-    if "tcp" in args.dist_url:  # in slurm, multiple program runs in a single node
-        dist_port = int(args.dist_url.split(":")[-1])
-        while is_port_in_use(dist_port):
-            dist_port += 10
-        args.dist_url = ":".join(args.dist_url.split(":")[:-1] + [str(dist_port)])
+    # dist_url logic is likely skipped with env://, but add instrumentation just in case
+    sys.stderr.write(f">>> init_distributed_mode(): Checking dist_url: {args.dist_url}\n"); sys.stderr.flush()
+    if "tcp" in args.dist_url:
+         sys.stderr.write(f">>> init_distributed_mode(): Handling TCP dist_url: {args.dist_url}\n"); sys.stderr.flush()
+         # Make sure is_port_in_use is defined and accessible
+         # This loop could potentially hang if is_port_in_use is broken or port range is exhausted
+         dist_port = int(args.dist_url.split(":")[-1])
+         sys.stderr.write(f">>> init_distributed_mode(): TCP port check starting from {dist_port}\n"); sys.stderr.flush()
+         while is_port_in_use(dist_port): # is_port_in_use needs definition if not provided
+             dist_port += 10
+             sys.stderr.write(f">>> init_distributed_mode(): Port {dist_port - 10} in use, trying {dist_port}\n"); sys.stderr.flush()
+
+         args.dist_url = ":".join(args.dist_url.split(":")[:-1] + [str(dist_port)])
+         sys.stderr.write(f">>> init_distributed_mode(): Updated TCP dist_url: {args.dist_url}\n"); sys.stderr.flush()
+    else:
+         sys.stderr.write(f">>> init_distributed_mode(): dist_url is not TCP, using env:// or similar\n"); sys.stderr.flush()
+
 
     logger.info('| distributed init (rank {}): {}'.format(
         args.rank, args.dist_url))
     if "SLURM_JOB_ID" in os.environ:
         logger.info(f"SLURM_JOB_ID {os.environ['SLURM_JOB_ID']}")
 
+    sys.stderr.write(f">>> init_distributed_mode(): Before init_process_group or deepspeed. Rank {args.rank}\n"); sys.stderr.flush()
+    # Ensure you have imported datetime and deepspeed if needed
     if hasattr(args, "deepspeed") and args.deepspeed.enable:
+        sys.stderr.write(f">>> init_distributed_mode(): Calling deepspeed.init_distributed. Rank {args.rank}\n"); sys.stderr.flush()
+        # Add timeout to deepspeed init if it supports it and it's not the default
         deepspeed.init_distributed(
             dist_backend=args.dist_backend, init_method=args.dist_url,
             world_size=args.world_size, rank=args.rank, timeout=datetime.timedelta(seconds=7200)
         )
+        sys.stderr.write(f">>> init_distributed_mode(): deepspeed.init_distributed returned. Rank {args.rank}\n"); sys.stderr.flush()
+
     else:
+        sys.stderr.write(f">>> init_distributed_mode(): Calling torch.distributed.init_process_group. Rank {args.rank}\n"); sys.stderr.flush()
+        # This is the most likely hang point for torchrun env://
         torch.distributed.init_process_group(
             backend=args.dist_backend, init_method=args.dist_url,
-            world_size=args.world_size, rank=args.rank, timeout=timedelta(minutes=60))
+            world_size=args.world_size, rank=args.rank, timeout=datetime.timedelta(minutes=60)) # Ensure timedelta is imported/available
+        sys.stderr.write(f">>> init_distributed_mode(): torch.distributed.init_process_group returned. Rank {args.rank}\n"); sys.stderr.flush()
 
+
+    sys.stderr.write(f">>> init_distributed_mode(): Before barrier. Rank {args.rank}\n"); sys.stderr.flush()
     torch.distributed.barrier()
+    sys.stderr.write(f">>> init_distributed_mode(): After barrier. Rank {args.rank}\n"); sys.stderr.flush()
+
+    # Make sure setup_for_distributed is defined and accessible
     setup_for_distributed(args.rank == 0)
+    sys.stderr.write(">>> init_distributed_mode() exit\n"); sys.stderr.flush()
 
 
 # Copyright (c) Facebook, Inc. and its affiliates.
