@@ -141,27 +141,33 @@ def init_distributed_mode(args):
         logger.info(f"SLURM_JOB_ID {os.environ['SLURM_JOB_ID']}")
 
     sys.stderr.write(f">>> init_distributed_mode(): Before init_process_group or deepspeed. Rank {args.rank}\n"); sys.stderr.flush()
-    # Ensure you have imported datetime and deepspeed if needed
+
     if hasattr(args, "deepspeed") and args.deepspeed.enable:
-        sys.stderr.write(f">>> init_distributed_mode(): Calling deepspeed.init_distributed. Rank {args.rank}\n"); sys.stderr.flush()
-        # Add timeout to deepspeed init if it supports it and it's not the default
+        sys.stderr.write(f">>> init_distributed_mode(): Calling deepspeed.init_distributed with device_id={args.gpu}. Rank {args.rank}\n"); sys.stderr.flush()
+        # Explicitly pass the device_id to DeepSpeed init
         deepspeed.init_distributed(
-            dist_backend=args.dist_backend, init_method=args.dist_url,
-            world_size=args.world_size, rank=args.rank, timeout=datetime.timedelta(seconds=7200)
+            dist_backend=args.dist_backend,
+            init_method=args.dist_url,
+            world_size=args.world_size,
+            rank=args.rank,
+            device_id=args.gpu,  # <--- ADD THIS ARGUMENT
+            timeout=datetime.timedelta(seconds=7200)
         )
         sys.stderr.write(f">>> init_distributed_mode(): deepspeed.init_distributed returned. Rank {args.rank}\n"); sys.stderr.flush()
-
     else:
         sys.stderr.write(f">>> init_distributed_mode(): Calling torch.distributed.init_process_group. Rank {args.rank}\n"); sys.stderr.flush()
-        # This is the most likely hang point for torchrun env://
+        # This path is likely not taken based on your logs, but keep it correct
+        # If you were using this path, you might need pg_options={"device_id": args.gpu}
         torch.distributed.init_process_group(
-            backend=args.dist_backend, init_method=args.dist_url,
-            world_size=args.world_size, rank=args.rank, timeout=datetime.timedelta(minutes=60)) # Ensure timedelta is imported/available
+            backend=args.dist_backend,
+            init_method=args.dist_url,
+            world_size=args.world_size,
+            rank=args.rank,
+            timeout=datetime.timedelta(minutes=60))
         sys.stderr.write(f">>> init_distributed_mode(): torch.distributed.init_process_group returned. Rank {args.rank}\n"); sys.stderr.flush()
 
-
     sys.stderr.write(f">>> init_distributed_mode(): Before barrier. Rank {args.rank}\n"); sys.stderr.flush()
-    torch.distributed.barrier()
+    torch.distributed.barrier() # They are hanging here
     sys.stderr.write(f">>> init_distributed_mode(): After barrier. Rank {args.rank}\n"); sys.stderr.flush()
 
     # Make sure setup_for_distributed is defined and accessible
