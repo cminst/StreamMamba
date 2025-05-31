@@ -58,8 +58,12 @@ def _load_model():
     if MODEL is not None:
         return
 
+    # Log the base directory from which config_path is computed
+    base_dir = os.path.dirname(__file__)
+    logger.info(f"Base directory for config calculation: {base_dir}")
+
     config_path = os.path.join(
-        os.path.dirname(__file__),
+        base_dir,
         "..",
         "scripts",
         "pretraining",
@@ -67,6 +71,9 @@ def _load_model():
         "6B",
         "config.py",
     )
+    # Log the computed config path
+    logger.info(f"Computed config path: {config_path}")
+
     ckpt_path = os.environ.get("IV2_6B_CKPT")
     if not ckpt_path:
         repo_id = "OpenGVLab/InternVideo2-Stage2_6B-224p-f4"
@@ -78,15 +85,19 @@ def _load_model():
         except Exception as e:
             raise RuntimeError(f"Failed to download model from {repo_id}/{filename}: {e}") from e
 
-
+    # Log before loading config from file
+    logger.info(f"Attempting to load config from file: {config_path}")
     CFG = Config.from_file(config_path)
+    # Log after loading config
+    logger.info("Config loaded successfully from file.")
+
     CFG = eval_dict_leaf(CFG)
     CFG.model.vision_ckpt_path = ckpt_path
     CFG.model.vision_encoder.pretrained = ckpt_path
     CFG.pretrained_path = ckpt_path
     CFG.device = str(DEVICE)
 
-    logger.info(f"Config for InternVideo2 Stage2 6b: {CFG}")
+    logger.info(f"Final config for InternVideo2 Stage2 6b: {CFG}")
 
     MODEL, _ = setup_internvideo2(CFG)
     MODEL.eval()
