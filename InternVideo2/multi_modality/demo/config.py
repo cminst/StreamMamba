@@ -124,7 +124,11 @@ class Config(object):
             raise IOError(f"File does not exist: {filepath}")
         if filepath.endswith(".py"):
             sys.path.insert(0, osp.dirname(filepath))
-            mod = import_module(osp.splitext(osp.basename(filepath))[0])
+            mod_name = osp.splitext(osp.basename(filepath))[0]
+            if mod_name in sys.modules:
+                del sys.modules[mod_name]
+            mod = import_module(mod_name)
+
             cfg_dict = {
                 name: value
                 for name, value in mod.__dict__.items()
