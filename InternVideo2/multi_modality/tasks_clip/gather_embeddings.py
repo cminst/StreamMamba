@@ -11,6 +11,22 @@ from tqdm import tqdm
 from huggingface_hub import hf_hub_download
 
 from dataset import create_dataset
+
+def _verify_dataset_paths(config):
+    """Ensure dataset paths exist to fail fast with a clear error."""
+    train_file = config.train_file
+    missing = []
+    for key in ["anno_path", "data_root"]:
+        path = train_file.get(key)
+        if path and not os.path.exists(path):
+            missing.append(path)
+    if missing:
+        msg = (
+            "Dataset paths do not exist: "
+            + ", ".join(missing)
+            + ". Please update the paths in your config."
+        )
+        raise FileNotFoundError(msg)
 from utils.basic_utils import setup_seed
 from utils.config_utils import setup_main
 from utils.distributed import get_rank, get_world_size
@@ -163,6 +179,9 @@ def main(config):
     setup_seed(config.seed + rank)
 
     print(f"Device is {device}")
+
+    # Validate dataset paths early so we fail with a readable error instead
+    _verify_dataset_paths(config)
 
     # Ensure dataset path points to the shared directory
     loader = setup_dataloaders(config, mode=config.mode)

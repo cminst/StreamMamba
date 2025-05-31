@@ -36,3 +36,11 @@ This repo contains InternVideo series and related works in video foundation mode
 </div>
 
 - We are hiring researchers, engineers and interns in General Vision Group, Shanghai AI Lab. If you are interested in working with us on video foundation models and related topics, please contact Yi Wang (wangyi@pjlab.org.cn).
+
+## Preparing Datasets
+
+Some training scripts, such as `single_gather_embeddings.sh`, expect the
+Kinetics dataset to reside under `/home/zli`.  If your dataset is stored in a
+different location, edit `InternVideo2/multi_modality/configs/data.py` to update
+the `anno_path` and `data_root` fields of `slim_kinetics` and
+`slim_kinetics_act_val` before running the scripts.
