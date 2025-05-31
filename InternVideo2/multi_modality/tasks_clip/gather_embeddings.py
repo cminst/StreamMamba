@@ -1,3 +1,7 @@
+import sys
+sys.stderr.write(">>>>> TOP OF SCRIPT <<<<<\n")
+sys.stderr.flush()
+
 import os
 import logging
 import torch
@@ -142,6 +146,10 @@ def gather_embeddings(loader, device, output_dir, resume=True):
         torch.save(save_dict, save_path)
 
 def main(config):
+    import sys
+    sys.stderr.write(">>>>> ENTERED main() <<<<<\n")
+    sys.stderr.flush()
+
     # Initialize distributed environment
     print(f"Setting up torch distributed...")
     device = torch.device(f"cuda:0")
