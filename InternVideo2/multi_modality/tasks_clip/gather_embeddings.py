@@ -89,6 +89,8 @@ def _load_model():
     CFG.pretrained_path = ckpt_path
     CFG.device = str(DEVICE)
 
+    logger.info(f"Config for InternVideo2 Stage2 6b: {CFG}")
+
     MODEL, _ = setup_internvideo2(CFG)
     MODEL.eval()
     return MODEL
