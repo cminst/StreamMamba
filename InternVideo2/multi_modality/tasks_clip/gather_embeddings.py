@@ -68,8 +68,8 @@ def _load_model():
 
     ckpt_path = os.environ.get("IV2_6B_CKPT")
     if not ckpt_path:
-        repo_id = "OpenGVLab/InternVideo2-Stage2_6B-224p-f4"
-        filename = "internvideo2-s2_6b-224p-f4.pt"
+        repo_id = "qingy2024/InternVideo2_S2_6B_Vision"
+        filename = "InternVideo2_S2_6B_vision.pt"
         logger.info(f"IV2_6B_CKPT not set, downloading {filename} from {repo_id}")
         try:
             ckpt_path = hf_hub_download(repo_id=repo_id, filename=filename)
