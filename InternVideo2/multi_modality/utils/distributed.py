@@ -2,6 +2,7 @@ import os
 import datetime
 import torch
 import torch.distributed as dist
+from torch.distributed import PGOptions
 import logging
 import sys
 try:
