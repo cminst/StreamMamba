@@ -42,7 +42,7 @@ done
 echo "Running with NODE_RANK=${NODE_RANK}"
 
 # Using torchrun directly instead of the wrapper script
-torchrun \
+PYTHONUNBUFFERED=1 torchrun \
     --nnodes=${NNODE} \
     --nproc_per_node=${NUM_GPUS} \
     --node_rank=${NODE_RANK} \
