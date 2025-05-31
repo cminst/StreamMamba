@@ -38,6 +38,17 @@ def clone_collate_fn(batch):
 def setup_dataloaders(config, mode="pt"):
     logger.info(f"Creating dataset for {mode}")
     dataset = create_dataset(f"{mode}_train", config)
+    # `create_dataset` always returns a list, even when there is only one
+    # dataset. DataLoader expects a single `Dataset` object, so grab the first
+    # dataset in the list.  Warn the user if there are multiple datasets as this
+    # script currently supports a single dataset only.
+    if isinstance(dataset, list):
+        if len(dataset) > 1:
+            logger.warning(
+                f"Multiple datasets returned for {mode}_train, using the first one only"
+            )
+        dataset = dataset[0]
+
     sampler = DistributedSampler(dataset, num_replicas=get_world_size(), rank=get_rank(), shuffle=False)
     loader = DataLoader(
         dataset,
