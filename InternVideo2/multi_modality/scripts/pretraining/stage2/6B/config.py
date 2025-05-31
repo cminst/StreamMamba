@@ -141,7 +141,7 @@ evaluation = dict(
 )
 
 use_half_precision = False
-use_bf16 = False
+use_bf16 = True
 
 gradient_checkpointing = True # for text encoder
 use_flash_sdp = False

@@ -81,7 +81,7 @@ def _load_model():
     logger.info(f"Attempting to load config from file: {config_path}")
     CFG = Config.from_file(config_path, log = False)
     # Log after loading config
-    logger.info(f"Config loaded successfully from file. {CFG}")
+    logger.info(f"Config loaded successfully from file.")
 
     CFG = eval_dict_leaf(CFG)
     CFG.model.vision_ckpt_path = ckpt_path
@@ -89,7 +89,7 @@ def _load_model():
     CFG.pretrained_path = ckpt_path
     CFG.device = str(DEVICE)
 
-    logger.info(f"Final config for InternVideo2 Stage2 6b: {CFG}")
+    logger.info(f"Final config for InternVideo2 Stage2 6b: {CFG.model}")
 
     MODEL, _ = setup_internvideo2(CFG)
     MODEL.eval()
