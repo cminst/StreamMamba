@@ -77,7 +77,7 @@ def setup_deepspeed_zero_config(stage):
                 "device": "cpu"
             }
         }
-    
+
     raise ValueError("Wrong stage for deepspeed {}".format(stage.stage))
 
 def setup_deepspeed_config(config):
@@ -86,7 +86,7 @@ def setup_deepspeed_config(config):
     logger.info(f'Write deepspeed config to {config.deepspeed_config}')
     if not is_main_process():
         return config
-    
+
     os.makedirs(config.output_dir, exist_ok=True)
 
     with open(config.deepspeed_config, mode="w") as writer:
@@ -127,17 +127,17 @@ def setup_deepspeed_config(config):
                     "hysteresis": 2,
                     "consecutive_hysteresis": False,
                     "min_loss_scale": 1
-                } 
+                }
         else:
             assert config.deepspeed.stage == 0, "You must use fp16 or bf16 when using ZERO!!!"
-            
+
         # if config.get("max_grad_norm", -1) > 0:
         #     ds_config.update({"gradient_clipping", config.max_grad_norm})
         if opts.get("max_grad_norm", -1) > 0:
             ds_config["gradient_clipping"] = opts.max_grad_norm
 
         writer.write(json.dumps(ds_config, indent=2))
-    
+
     return config
 
 
@@ -146,25 +146,32 @@ def setup_main():
     Setup config, logger, output_dir, etc.
     Shared for pretrain and all downstream tasks.
     """
-    # try:
+    print(">>> Inside Setup")
     config = setup_config()
+    print(">>> Setup Config done")
     if hasattr(config, "evaluate") and config.evaluate:
         config = setup_evaluate_config(config)
+        print(">>> Setup Eval Config done")
+
+
     init_distributed_mode(config)
+    print(">>> Distributed Config done")
 
     if hasattr(config, "deepspeed") and config.deepspeed.enable:
         config = setup_deepspeed_config(config)
+
+    print(">>> Distributed DeepSpeed done")
     # except Exception as e:
     #     print(f"\033[31m NODE NAME: {os.environ['SLURMD_NODENAME']} is not OK \033[0m")
     #     logger.info(f"NODE NAME: {os.environ['SLURMD_NODENAME']} is not OK")
     #     raise ValueError
-    
+
     if is_main_process():
         setup_output_dir(config.output_dir, excludes=["code"])
         setup_logger(output=config.output_dir, color=True, name="vindlu")
         logger.info(f"config: {Config.pretty_text(config)}")
         Config.dump(config, os.path.join(config.output_dir, "config.json"))
-    
+
     dist.barrier()
 
     return config

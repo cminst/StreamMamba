@@ -174,7 +174,7 @@ def main(config):
     dist.destroy_process_group()
 
 if __name__ == "__main__":
-    print("Inside Main")
+    print(">>> Inside Main")
 
     import sys
     sys.stderr.write(">>> right before setup_main()\n")
