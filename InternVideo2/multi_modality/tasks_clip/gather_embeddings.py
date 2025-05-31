@@ -62,15 +62,7 @@ def _load_model():
     base_dir = os.path.dirname(__file__)
     logger.info(f"Base directory for config calculation: {base_dir}")
 
-    config_path = os.path.join(
-        base_dir,
-        "..",
-        "scripts",
-        "pretraining",
-        "stage2",
-        "6B",
-        "config.py",
-    )
+    config_path = "scripts/pretraining/stage2/6B/config.py"
     # Log the computed config path
     logger.info(f"Computed config path: {config_path}")
 
