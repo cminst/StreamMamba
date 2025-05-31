@@ -91,7 +91,7 @@ def _load_model():
 
     logger.info(f"Final config for InternVideo2 Stage2 6b: {CFG.model}")
 
-    MODEL, _ = setup_internvideo2(CFG)
+    MODEL, _ = setup_internvideo2(CFG, no_text=True)
     MODEL.eval()
     return MODEL
 

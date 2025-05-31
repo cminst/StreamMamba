@@ -303,8 +303,23 @@ def retrieve_text_streaming(
     # Return top texts, their probabilities, and the updated hidden state
     return ret_texts, ret_probs, new_hidden_state
 
-def setup_internvideo2(config: dict):
-    if "bert" in config.model.text_encoder.name:
+def setup_internvideo2(config: dict, no_text: bool = False):
+    """Setup InternVideo2 model for inference.
+
+    Args:
+        config (dict): model configuration.
+        no_text (bool): whether to build a vision-only variant without the text
+            encoder. This greatly reduces memory consumption when the text
+            encoder is not required.
+
+    Returns:
+        tuple: (model, tokenizer)
+    """
+
+    if no_text:
+        tokenizer = None
+        model = InternVideo2_Stage2_VisionOnly(config=config)
+    elif "bert" in config.model.text_encoder.name:
         tokenizer = BertTokenizer.from_pretrained(config.model.text_encoder.pretrained)
         model = InternVideo2_Stage2(config=config, tokenizer=tokenizer, is_pretrain=True)
     else:
@@ -324,14 +339,23 @@ def setup_internvideo2(config: dict):
             if "model" in checkpoint.keys():
                 state_dict = checkpoint["model"]
             else:
-                state_dict = checkpoint["module"] # This is a deepspeed stage 1 model
-        except:
+                state_dict = checkpoint["module"]  # This is a deepspeed stage 1 model
+        except Exception:
             state_dict = checkpoint
 
         if config.get('origin_num_frames', None) is not None:
             a = len(state_dict)
             interpolate_pos_embed_internvideo2_new(state_dict, model_without_ddp.vision_encoder, orig_t_size=config.origin_num_frames)
             assert a == len(state_dict), state_dict.keys()
+
+        if no_text:
+            state_dict = {
+                k: v
+                for k, v in state_dict.items()
+                if not k.startswith("text_encoder")
+                and not k.startswith("text_proj")
+                and not k.startswith("itm_head")
+            }
 
         msg = model_without_ddp.load_state_dict(state_dict, strict=False)
         print(f"load_state_dict: {msg}")
@@ -544,6 +568,71 @@ class InternVideo2_Stage2(nn.Module):
         label_probs = (100.0 * vid_feat @ txt_feat.T)
         top_probs, top_labels = label_probs.float().cpu().topk(top, dim=-1)
         return top_probs, top_labels
+
+
+class InternVideo2_Stage2_VisionOnly(nn.Module):
+    """Variant of InternVideo2_Stage2 without the text encoder.
+
+    This lightweight class only keeps the vision backbone and projection layer,
+    making it suitable for tasks where text processing is unnecessary such as
+    feature extraction.
+    """
+
+    def __init__(self, config, is_pretrain: bool = True):
+        super().__init__()
+
+        self.config = config
+        self.is_pretrain = is_pretrain
+        self.vision_width = config.model.vision_encoder.clip_embed_dim
+        self.embed_dim = config.model.embed_dim
+
+        self.vision_encoder = self.build_vision_encoder()
+        self.freeze_vision()
+
+        self.vision_proj = nn.Linear(self.vision_width, self.embed_dim)
+
+    def freeze_vision(self):
+        for p in self.vision_encoder.parameters():
+            p.requires_grad = False
+
+    @property
+    def dtype(self):
+        return self.vision_encoder.patch_embed.proj.weight.dtype
+
+    def build_vision_encoder(self):
+        encoder_name = self.config.model.vision_encoder.name
+        if encoder_name == 'pretrain_internvideo2_1b_patch14_224':
+            vision_encoder = pretrain_internvideo2_1b_patch14_224(self.config.model)
+        else:
+            vision_encoder = pretrain_internvideo2_6b_patch14_224(self.config.model)
+
+        img_size = self.config.model.vision_encoder.img_size
+        num_frames = self.config.model.vision_encoder.num_frames
+        tublet_size = self.config.model.vision_encoder.tubelet_size
+        patch_size = self.config.model.vision_encoder.patch_size
+        self.clip_img_size = self.config.model.vision_encoder.clip_input_resolution
+        self.video_mask_type = self.config.model.vision_encoder.video_mask_type
+        self.video_window_size = (num_frames // tublet_size, img_size // patch_size, img_size // patch_size)
+        self.video_mask_ratio = self.config.model.vision_encoder.video_mask_ratio
+        self.image_mask_type = self.config.model.vision_encoder.image_mask_type
+        self.image_window_size = (1, img_size // patch_size, img_size // patch_size)
+        self.image_mask_ratio = self.config.model.vision_encoder.image_mask_ratio
+
+        return vision_encoder
+
+    def encode_vision(self, image: torch.Tensor):
+        T = image.shape[1]
+        use_image = True if T == 1 else False
+        image = image.permute(0, 2, 1, 3, 4).to(self.dtype)
+        vision_embeds, pooled_vision_embeds, _, _ = self.vision_encoder(image, None, use_image)
+        return vision_embeds, pooled_vision_embeds
+
+    def get_vid_feat(self, frames: torch.Tensor):
+        with torch.no_grad():
+            _, vfeat = self.encode_vision(frames)
+            vfeat = self.vision_proj(vfeat)
+            vfeat /= vfeat.norm(dim=-1, keepdim=True)
+        return vfeat
 
 def print_config(config):
     """Prints a formatted table of the model configuration parameters.
