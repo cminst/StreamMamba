@@ -58,17 +58,14 @@ def _load_model():
     if MODEL is not None:
         return
 
-    config_path = os.environ.get(
-        "IV2_6B_CONFIG",
-        os.path.join(
-            os.path.dirname(__file__),
-            "..",
-            "scripts",
-            "pretraining",
-            "stage2",
-            "6B",
-            "config.py",
-        ),
+    config_path = os.path.join(
+        os.path.dirname(__file__),
+        "..",
+        "scripts",
+        "pretraining",
+        "stage2",
+        "6B",
+        "config.py",
     )
     ckpt_path = os.environ.get("IV2_6B_CKPT")
     if not ckpt_path:
