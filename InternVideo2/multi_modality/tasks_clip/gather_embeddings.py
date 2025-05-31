@@ -148,7 +148,7 @@ def main(config):
     dist.init_process_group(
         backend="nccl",
         init_method="env://",
-        device = device
+        device_id = device
     )
     print(f"Finished initializing group!")
     rank = get_rank()
