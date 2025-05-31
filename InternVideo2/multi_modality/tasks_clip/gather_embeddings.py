@@ -146,19 +146,17 @@ def gather_embeddings(loader, device, output_dir, resume=True):
         torch.save(save_dict, save_path)
 
 def main(config):
-    import sys
-    sys.stderr.write(">>>>> ENTERED main() <<<<<\n")
-    sys.stderr.flush()
+    # This will print immediately if you run with -u or flush=True
+    print("ENTERED main()", flush=True)
 
-    # Initialize distributed environment
-    print(f"Setting up torch distributed...")
-    device = torch.device(f"cuda:0")
-    dist.init_process_group(
-        backend="nccl",
-        init_method="env://",
-        device_id = device
-    )
-    print(f"Finished initializing group!")
+    # 1) init
+    dist.init_process_group(backend="nccl", init_method="env://")
+
+    # 2) figure out which GPU this local process should use
+    local_rank = int(os.environ["LOCAL_RANK"])
+    torch.cuda.set_device(local_rank)
+    device = torch.device(f"cuda:{local_rank}")
+    print(f"[Rank {dist.get_rank()}] Using device {device}", flush=True)
     rank = get_rank()
     setup_seed(config.seed + rank)
 
