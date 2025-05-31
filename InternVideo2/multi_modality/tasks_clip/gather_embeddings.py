@@ -143,22 +143,23 @@ def gather_embeddings(loader, device, output_dir, resume=True):
 
 def main(config):
     # Initialize distributed environment
-    logger.info(f"Setting up torch distributed...")
+    print(f"Setting up torch distributed...")
+    device = torch.device(f"cuda:0")
     dist.init_process_group(
         backend="nccl",
-        init_method="env://"
+        init_method="env://",
+        device = device
     )
-    logger.info(f"Finished initializing group!")
+    print(f"Finished initializing group!")
     rank = get_rank()
     setup_seed(config.seed + rank)
-    device = torch.device(f"cuda:{rank % torch.cuda.device_count()}")
 
-    logger.info(f"Device is {device}")
+    print(f"Device is {device}")
 
     # Ensure dataset path points to the shared directory
     loader = setup_dataloaders(config, mode=config.mode)
 
-    logger.info("Dataloaders set up!")
+    print("Dataloaders set up!")
     output_dir = os.path.join(config.output_dir, "kinetics-embeddings")
     gather_embeddings(loader, device, output_dir, resume=config.resume)
 
