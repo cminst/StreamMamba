@@ -79,7 +79,7 @@ def _load_model():
 
     # Log before loading config from file
     logger.info(f"Attempting to load config from file: {config_path}")
-    CFG = Config.from_file(config_path)
+    CFG = Config.from_file(config_path, log = True)
     # Log after loading config
     logger.info(f"Config loaded successfully from file. {CFG}")
 

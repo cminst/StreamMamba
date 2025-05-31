@@ -107,15 +107,18 @@ class Config(object):
         return cfg
 
     @classmethod
-    def from_file(cls, filepath: str) -> EasyDict:
+    def from_file(cls, filepath: str, log: bool = False) -> EasyDict:
         """Build config from file. Supported filetypes: `.py`,`.yaml`,`.json`.
 
         Args:
             filepath (str): The config file path.
+            log [bool]: Whether to log.
 
         Returns: TODO
 
         """
+        if log:
+            print(f"Loading config from {filepath}")
         filepath = osp.abspath(osp.expanduser(filepath))
         if not osp.isfile(filepath):
             raise IOError(f"File does not exist: {filepath}")
