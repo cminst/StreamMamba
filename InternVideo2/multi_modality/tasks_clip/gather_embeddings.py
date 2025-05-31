@@ -151,7 +151,6 @@ def main(config):
     sys.stdout.flush()
 
     # 1) init
-    dist.init_process_group(backend="nccl", init_method="env://")
 
     # 2) figure out which GPU this local process should use
     local_rank = int(os.environ["LOCAL_RANK"])
