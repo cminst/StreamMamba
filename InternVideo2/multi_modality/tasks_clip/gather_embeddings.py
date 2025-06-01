@@ -1,15 +1,13 @@
 import os
 import logging
 import torch
-import torch.distributed as dist
-from torch.utils.data import DataLoader, DistributedSampler
+from torch.utils.data import DataLoader
 from utils.basic_utils import MetricLogger
 from huggingface_hub import hf_hub_download
 
 from dataset import create_dataset
 from utils.basic_utils import setup_seed
 from utils.config_utils import setup_main
-from utils.distributed import get_rank, get_world_size
 from demo.config import Config, eval_dict_leaf
 from demo.utils import setup_internvideo2
 
@@ -45,11 +43,10 @@ def setup_dataloaders(config, mode="pt"):
             )
         dataset = dataset[0]
 
-    sampler = DistributedSampler(dataset, num_replicas=get_world_size(), rank=get_rank(), shuffle=True) # Set to true to match training?
     loader = DataLoader(
         dataset,
         batch_size=config.inputs.batch_size["video"],
-        sampler=sampler,
+        shuffle=False,
         num_workers=config.num_workers,
         collate_fn=clone_collate_fn,
         pin_memory=True,
@@ -63,7 +60,7 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 def _load_model():
     global MODEL, CFG
     if MODEL is not None:
-        return
+        return MODEL
 
     # Log the base directory from which config_path is computed
     base_dir = os.path.dirname(__file__)
@@ -86,7 +83,7 @@ def _load_model():
 
     # Log before loading config from file
     logger.info(f"Attempting to load config from file: {config_path}")
-    CFG = Config.from_file(config_path, log = False)
+    CFG = Config.from_file(config_path, log=False)
     # Log after loading config
     logger.info(f"Config loaded successfully from file.")
 
@@ -102,39 +99,17 @@ def _load_model():
     MODEL.eval()
     return MODEL
 
-def _get_resume_step(output_dir):
-    if not os.path.isdir(output_dir):
-        return 0
-    completed = []
-    for d in os.listdir(output_dir):
-        if not d.startswith("step-"):
-            continue
-        try:
-            step = int(d.split("-", 1)[1])
-        except ValueError:
-            continue
-        if os.path.isfile(os.path.join(output_dir, d, f"embeddings_rank_{get_rank()}.pt")):
-            completed.append(step)
-    return max(completed) + 1 if completed else 0
-
-def gather_embeddings(loader, device, output_dir, resume=True, log_freq=50):
+def gather_embeddings(loader, device, output_dir, log_freq=50):
     os.makedirs(output_dir, exist_ok=True)
-    rank = get_rank()
-    start_step = _get_resume_step(output_dir) if resume else 0
-    logger.info(f"Rank {rank} resuming from step {start_step}")
-
-    # Set epoch for DistributedSampler
-    loader.sampler.set_epoch(start_step)
 
     # Initialize model
     model = _load_model()
 
     metric_logger = MetricLogger(delimiter="  ")
-    header = f"Rank {rank}"
+    header = "Processing"
     iterator = metric_logger.log_every(loader, log_freq, header)
 
-    for step_offset, (images, text, idx) in enumerate(iterator):
-        step = start_step + step_offset
+    for step, (images, text, idx) in enumerate(iterator):
         images = images.to(device, non_blocking=True)
         images = images.permute(0, 2, 1, 3, 4)  # [B, C, T, H, W]
         num_frames = images.size(2)
@@ -143,7 +118,7 @@ def gather_embeddings(loader, device, output_dir, resume=True, log_freq=50):
 
         step_dir = os.path.join(output_dir, f"step-{step}")
         os.makedirs(step_dir, exist_ok=True)
-        save_path = os.path.join(step_dir, f"embeddings_rank_{rank}.pt")
+        save_path = os.path.join(step_dir, f"embeddings.pt")
 
         save_dict = {int(i.item()): {} for i in idx}
         all_windows = [images[:, :, i - 3 : i + 1] for i in range(3, num_frames)]
@@ -157,28 +132,18 @@ def gather_embeddings(loader, device, output_dir, resume=True, log_freq=50):
         torch.save(save_dict, save_path)
 
 def main(config):
+    # Set up device
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device {device}")
+    setup_seed(config.seed)
 
-    # 1) init
-
-    # 2) figure out which GPU this local process should use
-    local_rank = int(os.environ["LOCAL_RANK"])
-    torch.cuda.set_device(local_rank)
-    device = torch.device(f"cuda:{local_rank}")
-    print(f"[Rank {dist.get_rank()}] Using device {device}", flush=True)
-    rank = get_rank()
-    setup_seed(config.seed + rank)
-
-    print(f"Device is {device}")
-
-    # Ensure dataset path points to the shared directory
+    # Set up dataloader
     loader = setup_dataloaders(config, mode=config.mode)
-
     print("Dataloaders set up!")
-    output_dir = os.path.join(config.output_dir, "kinetics-embeddings")
-    gather_embeddings(loader, device, output_dir, resume=config.resume, log_freq=config.log_freq)
 
-    # Cleanup
-    dist.destroy_process_group()
+    # Process data
+    output_dir = os.path.join(config.output_dir, "kinetics-embeddings")
+    gather_embeddings(loader, device, output_dir, log_freq=config.log_freq)
 
 if __name__ == "__main__":
     cfg = setup_main()
