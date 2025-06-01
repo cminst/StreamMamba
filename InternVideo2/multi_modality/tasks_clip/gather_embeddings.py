@@ -45,7 +45,7 @@ def setup_dataloaders(config, mode="pt"):
             )
         dataset = dataset[0]
 
-    sampler = DistributedSampler(dataset, num_replicas=get_world_size(), rank=get_rank(), shuffle=False)
+    sampler = DistributedSampler(dataset, num_replicas=get_world_size(), rank=get_rank(), shuffle=True) # Set to true to match training?
     loader = DataLoader(
         dataset,
         batch_size=config.inputs.batch_size["video"],
