@@ -6,7 +6,7 @@ image = (
     modal.Image.from_registry("nvidia/cuda:12.6.3-devel-ubuntu22.04", add_python="3.10")
     .run_commands(
         "apt-get update -y",
-        "apt-get install -y git curl ffmpeg",
+        "apt-get install -y git curl ffmpeg libsm6 libxext6",
     )
     .run_commands(
         "curl -s -o reqs.txt https://raw.githubusercontent.com/qingy1337/IV2/refs/heads/main/reqs.txt && pip install -r reqs.txt",
@@ -18,7 +18,7 @@ app = modal.App(name="Slim-Kinetics Embeddings", image=image)
 
 slim_volume = modal.Volume.from_name("slim-kinetics", create_if_missing=True)
 
-@app.function(gpu="A100-40GB:1", volumes={"/data": slim_volume}, timeout=600)
+@app.function(gpu="A100-40GB:1", volumes={"/data": slim_volume}, memory=48000, timeout=6000)
 def embed_video(video_path: str):
     """Embed a single video file and store result alongside it."""
     from InternVideo2.multi_modality.tasks_clip.gather_embeddings import _load_model
@@ -48,12 +48,49 @@ def embed_video(video_path: str):
     save_path = out_dir / (Path(video_path).stem + ".pt")
     torch.save(save_dict, save_path)
 
-@app.local_entrypoint()
-def main(data_dir: str = "/data"):
-    video_files: Iterable[str] = []
-    for root, _, files in os.walk(data_dir):
-        for f in files:
-            if f.lower().endswith(".mp4"):
-                video_files.append(os.path.join(root, f))
+    slim_volume.commit()
 
+@app.local_entrypoint()
+def main(json_path: str):
+    import json
+    from pathlib import Path
+    from typing import List
+    from tqdm import tqdm
+
+    json_file_path = Path(json_path)
+    if not json_file_path.exists():
+        print(f"Error: JSON file not found at {json_path}")
+        return
+
+    try:
+        with open(json_file_path, 'r') as f:
+            data = json.load(f)
+    except json.JSONDecodeError:
+        print(f"Error: Could not decode JSON from {json_path}")
+        return
+    except Exception as e:
+        print(f"Error reading file {json_path}: {e}")
+        return
+
+    video_files: List[str] = []
+
+    # The JSON file lists paths relative to the directory where the videos are stored.
+    # Assuming this video data directory structure is present within the /data volume mount
+    # inside the Modal container.
+    for entry in tqdm(data):
+        if isinstance(entry, dict) and "video" in entry and isinstance(entry["video"], str):
+            relative_video_path = entry["video"]
+            # Construct the path as accessed within the container's /data mount
+            container_video_path = str(Path("/data") / relative_video_path)
+            video_files.append(container_video_path)
+        else:
+             print(f"Warning: Skipping invalid entry in JSON: {entry}")
+
+    if not video_files:
+        print("No video files found in the JSON.")
+        return
+
+    print(f"Found {len(video_files)} videos to process.")
+    # Use .map() to parallelize processing over the list of video paths.
+    # Consuming the iterator forces waiting for all tasks to complete.
     embed_video.spawn_map(video_files)
