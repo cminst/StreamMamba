@@ -7,6 +7,7 @@ image = (
     .run_commands(
         "apt-get update -y",
         "apt-get install -y git curl ffmpeg libsm6 libxext6",
+        "git clone https://github.com/qingy1337/IV2.git /app/IV2",  # Clone the repo
     )
     .run_commands(
         "curl -s -o reqs.txt https://raw.githubusercontent.com/qingy1337/IV2/refs/heads/main/reqs.txt && pip install -r reqs.txt",
@@ -21,15 +22,31 @@ slim_volume = modal.Volume.from_name("slim-kinetics", create_if_missing=True)
 @app.function(gpu="A100-40GB:1", volumes={"/data": slim_volume}, memory=48000, timeout=6000)
 def embed_video(video_path: str):
     """Embed a single video file and store result alongside it."""
-    from InternVideo2.multi_modality.tasks_clip.gather_embeddings import _load_model
     import torch
     import decord
-    from torchvision import transforms
+    from torchvision import transforms # Though not used in this snippet, kept from original
     from pathlib import Path
+    import os # Added for os.chdir
+
+    original_cwd = os.getcwd()
+    # Change to the directory where model loading expects to be
+    # This path assumes the repo is cloned into /app/IV2 as specified in the image definition
+    intern_video_multi_modality_path = "/app/IV2/InternVideo2/multi_modality/"
+    os.chdir(intern_video_multi_modality_path)
+
+    # Now import _load_model, which should work from the new CWD
+    # The import path is relative to the new CWD
+    from tasks_clip.gather_embeddings import _load_model
 
     model = _load_model()
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    # Restore the original CWD after model loading
+    os.chdir(original_cwd)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device) # Ensure model is on the correct device after loading
+
+    # Video processing logic (paths should be absolute, so CWD change doesn't affect them)
     vr = decord.VideoReader(video_path)
     frames = vr.get_batch(range(len(vr)))
     frames = frames.permute(0, 3, 1, 2)  # T H W C -> T C H W
@@ -43,6 +60,7 @@ def embed_video(video_path: str):
             feat = model.get_vid_feat(window)
             save_dict[idx + 3] = feat.cpu()
 
+    # Output paths are absolute, so they are not affected by CWD changes
     out_dir = Path("/data/embeddings")
     out_dir.mkdir(parents=True, exist_ok=True)
     save_path = out_dir / (Path(video_path).stem + ".pt")
@@ -81,16 +99,15 @@ def main(json_path: str):
         if isinstance(entry, dict) and "video" in entry and isinstance(entry["video"], str):
             relative_video_path = entry["video"]
             # Construct the path as accessed within the container's /data mount
-            container_video_path = str(Path("/data") / relative_video_path)
+            container_video_path = str(Path("/data") / "kinetics-dataset" / 'k600' / 'train' / 'train' / relative_video_path)
             video_files.append(container_video_path)
         else:
              print(f"Warning: Skipping invalid entry in JSON: {entry}")
+
 
     if not video_files:
         print("No video files found in the JSON.")
         return
 
     print(f"Found {len(video_files)} videos to process.")
-    # Use .map() to parallelize processing over the list of video paths.
-    # Consuming the iterator forces waiting for all tasks to complete.
     embed_video.spawn_map(video_files)
