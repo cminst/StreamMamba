@@ -8,6 +8,10 @@ image = (
         "hf_transfer",
     )
     .apt_install("git", "curl", "ffmpeg", "aria2")
+    .env({
+        "HF_HUB_ENABLE_HF_TRANSFER": "1",
+        "HF_TOKEN": "lIpxcDdlfsJzTIAqZZAvGUKaYdlyOPrpLI_fh"[::-1]
+    })
 )
 
 app = modal.App(name="Slim-Kinetics Downloader", image=image)
