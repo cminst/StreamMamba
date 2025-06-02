@@ -66,8 +66,6 @@ def embed_video(video_path: str):
     save_path = out_dir / (Path(video_path).stem + ".pt")
     torch.save(save_dict, save_path)
 
-    slim_volume.commit()
-
 @app.local_entrypoint()
 def main(json_path: str):
     import json

@@ -29,7 +29,7 @@ def download_slim():
         [
             "huggingface-cli",
             "download",
-            "qingy2024/Slim-Kinetics",
+            "qingy2024/Slim-Kinetics-2",
             "--local-dir",
             ".",
             "--repo-type",
