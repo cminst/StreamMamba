@@ -25,7 +25,7 @@ def extract_kinetics():
     import os
     import subprocess
     from pathlib import Path
-    from iv2_utils.iv2 import *
+    from iv2_utils.iv2 import json_read
     import gzip
     import shutil
 
