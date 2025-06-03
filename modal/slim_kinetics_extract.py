@@ -39,7 +39,12 @@ def extract_kinetics():
 
     for idx, action_class in enumerate(actions):
         # Create an extraction directory for the action class
-        action_class_name = action_class.replace('.gz', '')
+        # More robust extension handling
+        if action_class.endswith('.tar.gz'):
+            action_class_name = action_class.replace('.tar.gz', '')
+        else:
+            action_class_name = action_class.replace('.gz', '')
+
         extraction_dir = kinetics_base_path / action_class_name
 
         # Make sure the directory exists
