@@ -6,8 +6,10 @@ image = (
     .pip_install(
         "huggingface_hub",
         "hf_transfer",
-        "pillow",
-        "iv2_utils"
+        "iv2_utils>=0.3.2",
+        "Pillow",
+        "opencv-python",
+        "matplotlib"
     )
     .apt_install("git", "curl", "ffmpeg", "aria2")
     .env({
@@ -34,7 +36,7 @@ def extract_kinetics():
 
     os.chdir(home_dir)
 
-    kinetics_base_path = Path(home_dir) / 'kinetics-dataset' / 'k600' / 'train' / 'train'
+    kinetics_base_path = Path(home_dir) / 'k600' / 'train' / 'train'
 
     actions = list(filter(lambda x: x.endswith('.gz') and not x.startswith('.'), os.listdir(kinetics_base_path)))
 
@@ -51,9 +53,12 @@ def extract_kinetics():
         # Make sure the directory exists
         extraction_dir.mkdir(exist_ok=True, parents=True)
 
+        if os.path.isdir(kinetics_base_path / action_class_name):
+            print(f"[{idx+1}/{len(actions)}] [{((idx+1)/len(actions))*100:.2f}%] Removing existing {action_class_name}/ folder")
+
         # Extract the tar/folder content directly to the directory
         # Use subprocess to extract the gzipped archive
-        subprocess.run(['tar', '-xzf', kinetics_base_path / action_class, '-C', str(extraction_dir)], check=True)
+        subprocess.run(['tar', '-xzf', kinetics_base_path / action_class, '-C', str(extraction_dir), '--strip-components=1'], check=True)
 
         print(f"[{idx+1}/{len(actions)}] [{((idx+1)/len(actions))*100:.2f}%] Extracted {action_class} to {extraction_dir}.")
 
