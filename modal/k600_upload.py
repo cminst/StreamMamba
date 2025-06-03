@@ -6,7 +6,7 @@ import subprocess
 import pathlib
 import modal
 
-# ── Image ─────────────────────────────────────────────────────────
+# ── Image ──────────────────────────────────────────────
 image = (
     modal.Image.debian_slim()
     # core Jupyter stack
