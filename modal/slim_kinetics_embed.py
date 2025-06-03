@@ -11,11 +11,21 @@ image = (
         "git clone https://github.com/qingy1337/IV2.git /app/IV2",
     )
     .run_commands(
+        "cd /app/IV2 && git checkout delta_6b_server"
+    )
+    .run_commands(
         "curl -s -o reqs.txt https://raw.githubusercontent.com/qingy1337/IV2/refs/heads/main/reqs.txt && pip install -r reqs.txt",
         "rm reqs.txt"
     )
     .run_commands(
         "huggingface-cli download qingy2024/InternVideo2_S2_6B_Vision InternVideo2_S2_6B_vision.pt"
+    )
+    .pip_install(
+        'librosa',
+        'decord',
+        'open-clip-torch',
+        'av',
+        'opencv-python'
     )
 )
 
@@ -55,12 +65,15 @@ def embed_video(video_path: str):
     import torch
     import cv2
     import decord
+    import sys
     import numpy as np
 
     # Change to the directory where model loading expects to be
     intern_video_multi_modality_path = "/app/IV2/InternVideo2/multi_modality/"
     original_cwd = os.getcwd()
     os.chdir(intern_video_multi_modality_path)
+
+    sys.path.append(os.getcwd()) # Allow imports from here
 
     from tasks_clip.gather_embeddings import _load_model
     from demo.utils import _frame_from_video, frames2tensor
@@ -128,6 +141,7 @@ def main(json_path: str):
         print("No video files found in the JSON.")
         return
 
+    video_files = [video_files[0]]
     print(f"===== Found {len(video_files)} videos to process. =====")
     print(f"Starting the SPAWN")
     embed_video.spawn_map(video_files)
