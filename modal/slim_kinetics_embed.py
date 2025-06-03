@@ -25,7 +25,9 @@ slim_volume = modal.Volume.from_name("slim-kinetics", create_if_missing=False)
 @app.function(gpu="A100-40GB:1", volumes={"/data": slim_volume}, memory=48000, timeout=6000)
 def embed_video(video_path: str):
     """
-    Embed a single video file and store result alongside it.
+    Embed a single video file (path) and store result alongside it.
+
+    ====================================================================
 
     Output Folder Structure (data is the slim kinetics volume)
 
@@ -126,5 +128,6 @@ def main(json_path: str):
         print("No video files found in the JSON.")
         return
 
-    print(f"Found {len(video_files)} videos to process.")
+    print(f"===== Found {len(video_files)} videos to process. =====")
+    print(f"Starting the SPAWN")
     embed_video.spawn_map(video_files)
