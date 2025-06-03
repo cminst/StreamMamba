@@ -6,6 +6,7 @@ image = (
     .pip_install(
         "huggingface_hub",
         "hf_transfer",
+        "pillow",
         "iv2_utils"
     )
     .apt_install("git", "curl", "ffmpeg", "aria2")
