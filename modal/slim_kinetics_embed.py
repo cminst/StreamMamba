@@ -1,66 +1,90 @@
 import os
-from typing import Iterable
+from pathlib import Path
 import modal
 
+# --- Modal Image Definition ---
 image = (
     modal.Image.from_registry("nvidia/cuda:12.6.3-devel-ubuntu22.04", add_python="3.10")
     .run_commands(
         "apt-get update -y",
         "apt-get install -y git curl ffmpeg libsm6 libxext6",
-        "git clone https://github.com/qingy1337/IV2.git /app/IV2",  # Clone the repo
+        "git clone https://github.com/qingy1337/IV2.git /app/IV2",
     )
     .run_commands(
         "curl -s -o reqs.txt https://raw.githubusercontent.com/qingy1337/IV2/refs/heads/main/reqs.txt && pip install -r reqs.txt",
         "rm reqs.txt"
     )
+    .run_commands(
+        "huggingface-cli download qingy2024/InternVideo2_S2_6B_Vision InternVideo2_S2_6B_vision.pt"
+    )
 )
 
 app = modal.App(name="Slim-Kinetics Embeddings", image=image)
-
-slim_volume = modal.Volume.from_name("slim-kinetics", create_if_missing=True)
+slim_volume = modal.Volume.from_name("slim-kinetics", create_if_missing=False)
 
 @app.function(gpu="A100-40GB:1", volumes={"/data": slim_volume}, memory=48000, timeout=6000)
 def embed_video(video_path: str):
-    """Embed a single video file and store result alongside it."""
-    import torch
-    import decord
-    from torchvision import transforms # Though not used in this snippet, kept from original
-    from pathlib import Path
-    import os # Added for os.chdir
+    """
+    Embed a single video file and store result alongside it.
 
-    original_cwd = os.getcwd()
+    Output Folder Structure (data is the slim kinetics volume)
+
+    /data/embeddings
+        video1.pt
+        ├─ 3: {dict}
+        │   ├─ "raw": tensor[...] (raw features from the model)
+        │   ├─ "proj": tensor[...] (projected features)
+        │   └─ "final": tensor[...] (normalized features)
+        ├─ 4: {dict}
+        │   ├─ "raw": tensor[...]
+        │   ├─ "proj": tensor[...]
+        │   └─ "final": tensor[...]
+        └─ ... (continues for each frame index)
+        video2.pt
+        ├─ 3: {dict}
+        │   ├─ "raw": tensor[...]
+        │   ├─ "proj": tensor[...]
+        │   └─ "final": tensor[...]
+        └─ ... (similar structure as video1.pt)
+        video3.pt
+        └─ ... (similar structure)
+        ...
+    """
+    import torch
+    import cv2
+    import decord
+    import numpy as np
+
     # Change to the directory where model loading expects to be
-    # This path assumes the repo is cloned into /app/IV2 as specified in the image definition
     intern_video_multi_modality_path = "/app/IV2/InternVideo2/multi_modality/"
+    original_cwd = os.getcwd()
     os.chdir(intern_video_multi_modality_path)
 
-    # Now import _load_model, which should work from the new CWD
-    # The import path is relative to the new CWD
     from tasks_clip.gather_embeddings import _load_model
+    from demo.utils import _frame_from_video, frames2tensor
 
     model = _load_model()
-
-    # Restore the original CWD after model loading
     os.chdir(original_cwd)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device) # Ensure model is on the correct device after loading
+    model.to(device)
 
-    # Video processing logic (paths should be absolute, so CWD change doesn't affect them)
-    vr = decord.VideoReader(video_path)
-    frames = vr.get_batch(range(len(vr)))
-    frames = frames.permute(0, 3, 1, 2)  # T H W C -> T C H W
-    frames = frames.float() / 255.0
-    # Take sliding windows of 4 frames as in gather_embeddings
-    windows = [frames[i - 3:i + 1] for i in range(3, len(frames))]
+    frames = [x for x in _frame_from_video(cv2.VideoCapture(video_path))]
     save_dict = {}
-    with torch.no_grad():
-        for idx, window in enumerate(windows):
-            window = window.unsqueeze(0).to(device)
-            feat = model.get_vid_feat(window)
-            save_dict[idx + 3] = feat.cpu()
 
-    # Output paths are absolute, so they are not affected by CWD changes
+    with torch.no_grad():
+        for frame_idx in range(4, len(frames) + 1):
+            window = frames[frame_idx - 4 : frame_idx]
+            frames_tensor = frames2tensor(window, fnum=4, target_size=(224, 224), device=device)
+            raw_features = model.encode_vision(frames_tensor, test=True)
+            projected_features = model.vision_proj(raw_features)
+            final_features = projected_features / projected_features.norm(dim=-1, keepdim=True)
+            save_dict[frame_idx - 1] = {
+                "raw": raw_features.cpu(),
+                "proj": projected_features.cpu(),
+                "final": final_features.cpu(),
+            }
+
     out_dir = Path("/data/embeddings")
     out_dir.mkdir(parents=True, exist_ok=True)
     save_path = out_dir / (Path(video_path).stem + ".pt")
@@ -68,9 +92,10 @@ def embed_video(video_path: str):
 
 @app.local_entrypoint()
 def main(json_path: str):
+    """
+    Entrypoint for local execution. Reads a JSON file listing video paths and spawns embedding jobs.
+    """
     import json
-    from pathlib import Path
-    from typing import List
     from tqdm import tqdm
 
     json_file_path = Path(json_path)
@@ -88,20 +113,14 @@ def main(json_path: str):
         print(f"Error reading file {json_path}: {e}")
         return
 
-    video_files: List[str] = []
-
-    # The JSON file lists paths relative to the directory where the videos are stored.
-    # Assuming this video data directory structure is present within the /data volume mount
-    # inside the Modal container.
+    video_files = []
     for entry in tqdm(data):
         if isinstance(entry, dict) and "video" in entry and isinstance(entry["video"], str):
             relative_video_path = entry["video"]
-            # Construct the path as accessed within the container's /data mount
-            container_video_path = str(Path("/data") / "kinetics-dataset" / 'k600' / 'train' / 'train' / relative_video_path)
+            container_video_path = str(Path("/data/k600/train/train") / relative_video_path)
             video_files.append(container_video_path)
         else:
-             print(f"Warning: Skipping invalid entry in JSON: {entry}")
-
+            print(f"Warning: Skipping invalid entry in JSON: {entry}")
 
     if not video_files:
         print("No video files found in the JSON.")
