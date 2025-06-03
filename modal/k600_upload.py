@@ -38,7 +38,7 @@ image = (
     })
 )
 
-# ── Modal App / GPU entrypoint ───────────────────────────────────────────
+# ── Modal App / GPU entrypoint ─────────────────────────────────
 app = modal.App(image=image, name="K600 Upload")
 
 k600_volume = modal.Volume.from_name("k600", create_if_missing=True)
