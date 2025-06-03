@@ -23,9 +23,13 @@ image = (
     .pip_install(
         'librosa',
         'decord',
+        'imageio',
+        'easydict',
         'open-clip-torch',
+        'torch',
         'av',
-        'opencv-python'
+        'opencv-python',
+        'torchaudio',
     )
 )
 
@@ -91,7 +95,7 @@ def embed_video(video_path: str):
         for frame_idx in range(4, len(frames) + 1):
             window = frames[frame_idx - 4 : frame_idx]
             frames_tensor = frames2tensor(window, fnum=4, target_size=(224, 224), device=device)
-            raw_features = model.encode_vision(frames_tensor, test=True)
+            raw_features = model.encode_vision(frames_tensor)
             projected_features = model.vision_proj(raw_features)
             final_features = projected_features / projected_features.norm(dim=-1, keepdim=True)
             save_dict[frame_idx - 1] = {
