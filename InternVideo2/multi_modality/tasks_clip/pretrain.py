@@ -388,6 +388,10 @@ def train(
     )
 
     MODEL_MAX_FRAMES = config.num_frames
+    # Weight for the cosine similarity loss between the stream embedding and
+    # the teacher text embedding. This loss complements the video-to-video
+    # distillation loss used during training.
+    TEXT_LOSS_WEIGHT = getattr(config, "text_loss_weight", 0.5)
     cosine_loss_base_fn = CosineEmbeddingLoss()
 
     def cosine_sim_loss(student_embedding, teacher_embedding):
@@ -422,6 +426,20 @@ def train(
 
             assert num_sliding_windows >= 1, "Number of sliding windows must be at least 1 for loss calculation."
 
+            # Tokenize once per batch and obtain teacher text embedding.
+            text_input = tokenizer(
+                text,
+                padding="max_length",
+                truncation=True,
+                max_length=config.max_txt_l,
+                return_tensors="pt",
+            ).to(device)
+            # Teacher text features used for distillation against the student's
+            # streaming video representation.
+            with torch.no_grad():
+                teacher_text_emb = model_without_ddp.encode_text(text_input)
+                teacher_text_emb = teacher_text_emb / (teacher_text_emb.norm(dim=-1, keepdim=True) + 1e-9)
+
             batch_total_loss_for_logging = 0.0
             batch_total_sim_for_logging = 0.0
 
@@ -453,7 +471,10 @@ def train(
                     target_embedding = aligned_target_emb_orig / (aligned_target_emb_orig.norm(dim=-1, keepdim=True) + 1e-9)
 
                 # --- Loss Calculation (for this sliding window step) ---
-                loss = cosine_sim_loss(stream_embedding, target_embedding)
+                video_loss = cosine_sim_loss(stream_embedding, target_embedding)
+                text_loss = cosine_sim_loss(stream_embedding, teacher_text_emb)
+                # Combine video-to-video loss with text-based distillation.
+                loss = video_loss + TEXT_LOSS_WEIGHT * text_loss
 
                 # Accumulate loss and similarity for batch-level logging
                 batch_total_loss_for_logging += loss.item()
