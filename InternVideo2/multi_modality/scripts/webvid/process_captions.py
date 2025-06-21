@@ -30,7 +30,6 @@ PROGRESS_FILE = "progress.jsonl"
 
 def create_llm_prompt(caption: str) -> str:
     """Creates the detailed prompt for the LLM."""
-    # This is the same prompt as before.
     return f"""
 Analyze the following video caption and classify if it describes an action.
 
@@ -74,6 +73,7 @@ def parse_llm_response(content: str) -> dict:
     try:
         response_match = re.search(r"<response>(.*?)</response>", content, re.DOTALL)
         if not response_match:
+            print(f"Error: {content}")
             return {"classification": "parse_error", "rewritten_caption": "no_response_tag"}
 
         response_text = response_match.group(1).strip()
@@ -96,7 +96,7 @@ def parse_llm_response(content: str) -> dict:
 # --- Asynchronous Processing Core ---
 # -----------------------------------------------------------------------------
 
-async def process_item(item, client, semaphore):
+async def process_item(item, client, semaphore, pbar):
     """Processes a single item from the dataset: calls API and parses response."""
     async with semaphore:
         videoid = item["videoid"]
@@ -107,10 +107,10 @@ async def process_item(item, client, semaphore):
             response = await client.chat.completions.create(
                 messages=[{"role": "user", "content": prompt}],
                 model=LLM_MODEL,
-                temperature=0.6,
-                max_tokens=256, # Keep it concise to save tokens
+                temperature=0.3,
+                max_tokens=256,
                 top_p=0.9,
-                frequency_penalty=1.0,
+                frequency_penalty=0.0,
             )
             
             llm_output = response.choices[0].message.content
@@ -125,7 +125,6 @@ async def process_item(item, client, semaphore):
             }
 
         except Exception as e:
-            # Catch any API or other errors and log them
             result = {
                 "videoid": videoid,
                 "original_caption": caption,
@@ -134,10 +133,10 @@ async def process_item(item, client, semaphore):
                 "status": "error"
             }
         
-        # Write progress to file immediately
         async with aiofiles.open(PROGRESS_FILE, 'a') as f:
             await f.write(json.dumps(result) + '\n')
-            
+        
+        pbar.update(1) # Manually update the progress bar on completion
         return result
 
 # --- Main Execution ---
@@ -147,7 +146,6 @@ async def main():
     """Main function to orchestrate the entire process."""
     load_dotenv()
     
-    # Authenticate
     llama_api_key = os.getenv("LLAMA_API_KEY")
     hf_token = os.getenv("HF_TOKEN")
     if not llama_api_key or not hf_token:
@@ -158,25 +156,27 @@ async def main():
 
     client = AsyncOpenAI(
         api_key=llama_api_key,
-        base_url="https://api.llama.com/compat/v1/",
+        base_url="https://api.llama.com/compat/v1",
     )
 
-    # 1. Load dataset and check for existing progress
     print("Loading dataset and checking for existing progress...")
     processed_ids = set()
     if os.path.exists(PROGRESS_FILE):
         with open(PROGRESS_FILE, 'r') as f:
             for line in f:
-                data = json.loads(line)
-                processed_ids.add(data['videoid'])
+                try:
+                    data = json.loads(line)
+                    if 'videoid' in data:
+                        processed_ids.add(data['videoid'])
+                except json.JSONDecodeError:
+                    print(f"Skipping corrupted line in progress file: {line.strip()}")
         print(f"Found {len(processed_ids)} already processed items. Resuming...")
 
     dataset = load_dataset(DATASET_NAME, split="train", streaming=True)
     
     items_to_process = []
-    for item in dataset:
-        if len(items_to_process) >= NUM_ROWS_TO_PROCESS:
-            break
+    # Take a fixed number of items to build the list
+    for item in dataset.take(NUM_ROWS_TO_PROCESS):
         if item['videoid'] not in processed_ids:
             items_to_process.append(item)
     
@@ -185,33 +185,32 @@ async def main():
     else:
         print(f"Total items to process in this run: {len(items_to_process)}")
 
-        # 2. Process items concurrently
         semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
-        tasks = [process_item(item, client, semaphore) for item in items_to_process]
         
-        print("\nStarting concurrent processing...")
-        for _ in await tqdm.gather(tasks, desc="Processing Captions", unit="caption"):
-            pass
+        # We manually create the progress bar and pass it to the worker
+        with tqdm(total=len(items_to_process), desc="Processing Captions", unit="caption") as pbar:
+            tasks = [process_item(item, client, semaphore, pbar) for item in items_to_process]
+            # THE FIX: Unpack the 'tasks' list with the * operator
+            await asyncio.gather(*tasks)
+
         print("\nAll items processed.")
 
-    # 3. Finalize and upload to Hugging Face Hub
     print("\nFinalizing results and preparing for upload...")
     final_results = []
     with open(PROGRESS_FILE, 'r') as f:
         for line in f:
-            final_results.append(json.loads(line))
+             try:
+                final_results.append(json.loads(line))
+             except json.JSONDecodeError:
+                print(f"Skipping corrupted line during finalization: {line.strip()}")
 
-    # Create a Hugging Face Dataset
     final_dataset = Dataset.from_list(final_results)
 
     print(f"Uploading dataset to Hugging Face Hub at '{HF_HUB_REPO_ID}'...")
-    final_dataset.push_to_hub(HF_HUB_REPO_ID, private=True) # Set private=False for a public repo
+    final_dataset.push_to_hub(HF_HUB_REPO_ID, private=True)
     
     print("\n--- All Done! ---")
     print(f"Visit your dataset at: https://huggingface.co/datasets/{HF_HUB_REPO_ID}")
-    # Optional: Clean up progress file after successful upload
-    # os.remove(PROGRESS_FILE)
-    # print(f"Removed temporary progress file: {PROGRESS_FILE}")
 
 if __name__ == "__main__":
     asyncio.run(main())
