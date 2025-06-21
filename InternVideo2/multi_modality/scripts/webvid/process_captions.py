@@ -22,7 +22,7 @@ HF_HUB_REPO_ID = "qingy2024/webvid-10M-classified" # <<<--- CHANGE THIS
 # API and Rate Limiting Configuration
 # Meta's default is 3000 RPM. 3000/60 = 50 RPS.
 # We set max concurrent requests slightly lower to be safe.
-MAX_CONCURRENT_REQUESTS = 30
+MAX_CONCURRENT_REQUESTS = 5
 # New: Token-per-minute limit for the Llama.com API
 MAX_TOKENS_PER_MINUTE = 900_000 # Set slightly below the 1M limit for safety
 
