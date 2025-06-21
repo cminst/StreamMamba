@@ -48,8 +48,8 @@ image = (
 
 image = image.env({
     "HF_HUB_ENABLE_HF_TRANSFER": "1",
-    "HF_TOKEN": "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",
-    "WANDB_API_KEY": "0aee5395a94fbd8e33ada07b71309b1f30561cac",
+    "HF_TOKEN": os.environ['HF_TOKEN'],
+    "WANDB_API_KEY": os.environ['WANDB_API_KEY'],
     "PYTORCH_CUDA_ALLOC_CONF":"expandable_segments:True"
 })
 
@@ -102,12 +102,12 @@ def runwithgpu():
         logger.info("Added [PAD] token since pad_token was None")
 
     tokenizer.add_special_tokens({'additional_special_tokens': special_tokens_to_add})
-    
+
     model.resize_token_embeddings(len(tokenizer))
     logger.info(f"Resized token embeddings to {len(tokenizer)}")
 
     EOS_TOKEN = tokenizer.eos_token
-    
+
     logger.info(f"Using EOS Token: {EOS_TOKEN}")
     logger.info(f"Pad token: {tokenizer.pad_token} (ID: {tokenizer.pad_token_id})")
 
@@ -150,7 +150,7 @@ def runwithgpu():
     dataset = load_dataset("qingy2024/webvid-10M-classified", split = "train")
 
     dataset = dataset.filter(lambda row: row['classification'] == 'action')
-    
+
     dataset = dataset.map(formatting_prompts_func, batched = True,)
     logger.info(f"Dataset loaded with {len(dataset)} examples")
 

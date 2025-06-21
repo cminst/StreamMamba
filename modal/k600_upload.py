@@ -34,7 +34,7 @@ image = (
     # speedier HF downloads
     .env({
         "HF_HUB_ENABLE_HF_TRANSFER": "1",
-        "HF_TOKEN": "lIpxcDdlfsJzTIAqZZAvGUKaYdlyOPrpLI_fh"[::-1]
+        "HF_TOKEN": os.environ['HF_TOKEN']
     })
 )
 
