@@ -1,0 +1,240 @@
+import os
+import secrets
+from random import randint
+import subprocess
+import pathlib
+import modal
+
+image = (
+    modal.Image.from_registry("nvidia/cuda:12.6.3-devel-ubuntu22.04", add_python="3.10")
+    .pip_install("jupyterlab")
+    .pip_install("ipywidgets")
+    .pip_install("hf_transfer")
+    .pip_install("jupyter")
+    .pip_install('packaging')
+    .pip_install('ninja')
+    .run_commands(
+        "apt-get update -y",
+        "apt-get install git curl -y",
+    )
+    .pip_install('torch>=2.4.0')
+    .pip_install('torchvision')
+    .pip_install('numpy')
+    .pip_install('wandb')
+    .pip_install('pandas')
+    .pip_install('tensorboard')
+    .run_commands('pip install https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.0.6/flash_attn-2.7.4.post1+cu126torch2.4-cp310-cp310-linux_x86_64.whl')
+    .pip_install('flash-attn')
+    .pip_install('vllm==0.7.3')
+    .pip_install(
+        "bitsandbytes==0.45.3",
+        "protobuf==6.31.0",
+    )
+    .pip_install('pyzmq==26.4.0')
+    .pip_install('accelerate==1.7.0')
+    .pip_install('xformers==0.0.29.post3')
+    .pip_install('peft==0.15.2')
+    .pip_install('triton==2.3.0')
+    .pip_install('cut_cross_entropy==25.1.1')
+    .pip_install('unsloth_zoo')
+    .pip_install('sentencepiece==0.2.0')
+    .pip_install('datasets==3.6.0')
+    .pip_install('huggingface-hub==0.31.2')
+    .pip_install('unsloth')
+    .pip_install('evaluate==0.4.3')
+    .pip_install('regex==2024.11.6')
+    .pip_install('matplotlib==3.10.3')
+)
+
+image = image.env({
+    "HF_HUB_ENABLE_HF_TRANSFER": "1",
+    "HF_TOKEN": "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",
+    "WANDB_API_KEY": "0aee5395a94fbd8e33ada07b71309b1f30561cac",
+    "PYTORCH_CUDA_ALLOC_CONF":"expandable_segments:True"
+})
+
+image = image.run_commands(
+    "huggingface-cli download unsloth/Qwen2.5-1.5B",
+)
+
+app = modal.App(image=image, name="ReAction Training")
+
+@app.function(gpu="H100:1", timeout=86400)
+def runwithgpu():
+    from unsloth import FastLanguageModel
+    from datasets import load_dataset, Dataset
+    import os
+    import torch
+    import random
+    import logging
+
+    # Configure logging
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    logger = logging.getLogger(__name__)
+
+    logger.info("Starting model training script")
+
+    max_seq_length = 16384
+    dtype = None
+
+    logger.info(f"Loading model with max_seq_length={max_seq_length}")
+    model, tokenizer = FastLanguageModel.from_pretrained(
+        model_name = f"unsloth/Qwen2.5-1.5B",
+        max_seq_length = max_seq_length,
+        dtype = dtype,
+        load_in_4bit=False,
+        load_in_8bit=False,
+        full_finetuning = True,
+    )
+    logger.info(f"Model loaded successfully!")
+
+    # Set the chat template.
+    CHAT_TEMPLATE = "{%- if tools %}\n    {{- '<|im_start|>system\\n' }}\n    {%- if messages[0]['role'] == 'system' %}\n        {{- messages[0]['content'] }}\n    {%- else %}\n        {{- 'You are ReAction, a helpful assistant for rewriting video captions.' }}\n    {%- endif %}\n    {{- \"\\n\\n# Tools\\n\\nYou may call one or more functions to assist with the user query.\\n\\nYou are provided with function signatures within <tools></tools> XML tags:\\n<tools>\" }}\n    {%- for tool in tools %}\n        {{- \"\\n\" }}\n        {{- tool | tojson }}\n    {%- endfor %}\n    {{- \"\\n</tools>\\n\\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\\n<tool_call>\\n{\\\"name\\\": <function-name>, \\\"arguments\\\": <args-json-object>}\\n</tool_call><|im_end|>\\n\" }}\n{%- else %}\n    {%- if messages[0]['role'] == 'system' %}\n        {{- '<|im_start|>system\\n' + messages[0]['content'] + '<|im_end|>\\n' }}\n    {%- else %}\n        {{- '<|im_start|>system\\nYou are ReAction, a helpful assistant for rewriting video captions.<|im_end|>\\n' }}\n    {%- endif %}\n{%- endif %}\n{%- for message in messages %}\n    {%- if (message.role == \"user\") or (message.role == \"system\" and not loop.first) or (message.role == \"assistant\" and not message.tool_calls) %}\n        {{- '<|im_start|>' + message.role + '\\n' + message.content + '<|im_end|>' + '\\n' }}\n    {%- elif message.role == \"assistant\" %}\n        {{- '<|im_start|>' + message.role }}\n        {%- if message.content %}\n            {{- '\\n' + message.content }}\n        {%- endif %}\n        {%- for tool_call in message.tool_calls %}\n            {%- if tool_call.function is defined %}\n                {%- set tool_call = tool_call.function %}\n            {%- endif %}\n            {{- '\\n<tool_call>\\n{\"name\": \"' }}\n            {{- tool_call.name }}\n            {{- '\", \"arguments\": ' }}\n            {{- tool_call.arguments | tojson }}\n            {{- '}\\n</tool_call>' }}\n        {%- endfor %}\n        {{- '<|im_end|>\\n' }}\n    {%- elif message.role == \"tool\" %}\n        {%- if (loop.index0 == 0) or (messages[loop.index0 - 1].role != \"tool\") %}\n            {{- '<|im_start|>user' }}\n        {%- endif %}\n        {{- '\\n<tool_response>\\n' }}\n        {{- message.content }}\n        {{- '\\n</tool_response>' }}\n        {%- if loop.last or (messages[loop.index0 + 1].role != \"tool\") %}\n            {{- '<|im_end|>\\n' }}\n        {%- endif %}\n    {%- endif %}\n{%- endfor %}\n{%- if add_generation_prompt %}\n    {{- '<|im_start|>assistant\\n' }}\n{%- endif %}\n".strip()
+
+    model.config.chat_template = CHAT_TEMPLATE
+    tokenizer.chat_template = CHAT_TEMPLATE
+    logger.info(f"Set tokenizer.chat_template to:\n{tokenizer.chat_template}\n")
+
+    special_tokens_to_add = []
+    if tokenizer.pad_token is None:
+        # Many models don't have a pad token by default, use EOS or a new one
+        special_tokens_to_add.append("[PAD]")
+        logger.info("Added [PAD] token since pad_token was None")
+
+    tokenizer.add_special_tokens({'additional_special_tokens': special_tokens_to_add})
+    
+    model.resize_token_embeddings(len(tokenizer))
+    logger.info(f"Resized token embeddings to {len(tokenizer)}")
+
+    EOS_TOKEN = tokenizer.eos_token
+    
+    logger.info(f"Using EOS Token: {EOS_TOKEN}")
+    logger.info(f"Pad token: {tokenizer.pad_token} (ID: {tokenizer.pad_token_id})")
+
+    logger.info("Chat Template set up!")
+
+    # Testing chat template
+    template_test = tokenizer.apply_chat_template(
+        [{"role": "user", "content": "Action"}, {"role": "assistant", "content": "Rewritten Action"}, {"role": "user", "content": "another action"}],
+        tokenize = False,
+        add_generation_prompt = True,
+    )
+    logger.info(f"Chat template test:\n\n{template_test}\n\n")
+
+    BASE_SEED = 42
+    logger.info(f"Using BASE_SEED={BASE_SEED}")
+
+    random.seed(BASE_SEED)
+
+    def formatting_prompts_func(examples):
+        original_captions = examples["original_caption"]
+        rewritten_captions = examples["rewritten_caption"]
+
+        texts = []
+
+        for i in range(len(original_captions)):
+            original_caption = original_captions[i]
+            rewritten_caption = rewritten_captions[i]
+
+            # Create the chat-template-formatted string
+            text = tokenizer.apply_chat_template(
+                [{"role": "user", "content": original_caption}, {"role": "assistant", "content": rewritten_caption}],
+                tokenize = False,
+                add_generation_prompt = False,
+            )
+            texts.append(text)
+
+        return {"text": texts}
+
+    logger.info("Loading dataset...")
+    dataset = load_dataset("qingy2024/webvid-10M-classified", split = "train")
+
+    dataset = dataset.filter(lambda row: row['classification'] == 'action')
+    
+    dataset = dataset.map(formatting_prompts_func, batched = True,)
+    logger.info(f"Dataset loaded with {len(dataset)} examples")
+
+    # Sample a random example to check formatting
+    index = random.randint(0, len(dataset) - 1)
+    logger.info(f"==== Sample example (index {index}) ====")
+    logger.info(dataset[index]['text'])
+    inputs = tokenizer(dataset[index]['text'], return_tensors="pt").to(model.device)
+    logger.info("Tokenized sample:")
+    logger.info(inputs)
+
+    from trl import SFTTrainer
+    from transformers import TrainingArguments
+    from unsloth import is_bfloat16_supported
+
+    logger.info("Setting up SFTTrainer...")
+    trainer = SFTTrainer(
+        model = model,
+        tokenizer = tokenizer,
+        train_dataset = dataset,
+        dataset_text_field = "text",
+        max_seq_length = max_seq_length,
+        dataset_num_proc = 2,
+        packing = False,
+        args = TrainingArguments(
+            per_device_train_batch_size = 8,
+            gradient_accumulation_steps = 2,
+            warmup_steps = 180,
+            num_train_epochs = 1,
+            learning_rate = 5e-5,
+            fp16 = not is_bfloat16_supported(),
+            bf16 = is_bfloat16_supported(),
+            logging_steps = 10,
+            optim = "adamw_8bit",
+            weight_decay = 0.01,
+            lr_scheduler_type = "cosine",
+            save_strategy = "no",
+            seed = 3407,
+            output_dir = "outputs",
+            run_name=f"ReAction-1.5B",
+            report_to = "wandb",
+        ),
+    )
+    logger.info("SFTTrainer setup complete")
+
+    # Show current memory stats
+    gpu_stats = torch.cuda.get_device_properties(0)
+    start_gpu_memory = round(torch.cuda.max_memory_reserved() / 1024 / 1024 / 1024, 3)
+    max_memory = round(gpu_stats.total_memory / 1024 / 1024 / 1024, 3)
+    logger.info(f"GPU = {gpu_stats.name}. Max memory = {max_memory} GB.")
+    logger.info(f"{start_gpu_memory} GB of memory reserved.")
+
+    logger.info("Starting training...")
+    trainer_stats = trainer.train()
+    logger.info("Training completed")
+
+    # Show final memory and time stats
+    used_memory = round(torch.cuda.max_memory_reserved() / 1024 / 1024 / 1024, 3)
+    used_memory_for_lora = round(used_memory - start_gpu_memory, 3)
+    used_percentage = round(used_memory / max_memory * 100, 3)
+    lora_percentage = round(used_memory_for_lora / max_memory * 100, 3)
+    logger.info(f"{trainer_stats.metrics['train_runtime']} seconds used for training.")
+    logger.info(f"{round(trainer_stats.metrics['train_runtime']/60, 2)} minutes used for training.")
+    logger.info(f"Peak reserved memory = {used_memory} GB.")
+    logger.info(f"Peak reserved memory for training = {used_memory_for_lora} GB.")
+    logger.info(f"Peak reserved memory % of max memory = {used_percentage} %.")
+    logger.info(f"Peak reserved memory for training % of max memory = {lora_percentage} %.")
+
+    logger.info("Pushing model to Hugging Face Hub...")
+    model.push_to_hub(f"qingy2024/ReAction-1.5B", token = os.environ['HF_TOKEN'])
+    tokenizer.push_to_hub(f"qingy2024/ReAction-1.5B", token = os.environ['HF_TOKEN'])
+    logger.info("Model and tokenizer pushed to hub successfully")
+
+    logger.info(f"Model embedding size: {model.get_input_embeddings().weight.shape[0]}")
+    logger.info(f"Tokenizer vocabulary size: {len(tokenizer)}")
+
+    # Print token IDs for verification
+    logger.info(f"ID for {EOS_TOKEN}: {tokenizer.eos_token_id}")
+    logger.info(f"ID for PAD: {tokenizer.pad_token_id}")
+
+    logger.info("Script completed successfully")
+
+# Define a local entrypoint function for the Modal application.
+@app.local_entrypoint()
+def main():
+    print("========== Running with GPU!! ==========")
+    runwithgpu.remote()
