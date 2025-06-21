@@ -145,7 +145,7 @@ def main(json_path: str):
         print("No video files found in the JSON.")
         return
 
-    video_files = video_files[0:10]
+    # video_files = video_files[0:10]
     print(f"===== Found {len(video_files)} videos to process. =====")
     print(f"Starting the SPAWN")
     embed_video.spawn_map(video_files)
