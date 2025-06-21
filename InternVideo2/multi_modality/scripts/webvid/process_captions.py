@@ -108,7 +108,7 @@ async def process_item(item, client, semaphore, pbar):
                 messages=[{"role": "user", "content": prompt}],
                 model=LLM_MODEL,
                 temperature=0.3,
-                max_tokens=256,
+                max_tokens=4096,
                 top_p=0.9,
                 frequency_penalty=0.0,
             )
