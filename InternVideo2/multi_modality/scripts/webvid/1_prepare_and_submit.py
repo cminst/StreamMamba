@@ -56,7 +56,7 @@ def prepare_batch_file():
     print(f"Loading the first {NUM_ROWS} rows from '{DATASET_NAME}'...")
     # Using streaming=True is memory-efficient for large datasets
     dataset = load_dataset(DATASET_NAME, split="train", streaming=True)
-    
+
     print(f"Creating '{INPUT_FILENAME}' for the batch job...")
     count = 0
     with open(INPUT_FILENAME, "w") as f:
@@ -89,7 +89,7 @@ def prepare_batch_file():
 def main():
     """Main function to run the script."""
     load_dotenv()
-    
+
     api_key = os.getenv("MISTRAL_API_KEY")
     if not api_key:
         raise ValueError("MISTRAL_API_KEY not found in .env file")
@@ -102,8 +102,12 @@ def main():
 
     # 3. Upload the batch file
     print(f"\nUploading '{INPUT_FILENAME}' to Mistral...")
-    with open(INPUT_FILENAME, "rb") as f:
-        batch_file = client.files.upload(file=f, purpose="batch")
+    # CORRECTION: The 'file' argument must be a dictionary with 'file_name' and 'content' keys.
+    with open(INPUT_FILENAME, "rb") as f_content:
+        batch_file = client.files.upload(
+            file={"file_name": INPUT_FILENAME, "content": f_content},
+            purpose="batch"
+        )
     print(f"File uploaded successfully. File ID: {batch_file.id}")
 
     # 4. Create and launch the batch job
