@@ -141,7 +141,7 @@ def runwithgpu():
                 [{"role": "user", "content": original_caption}, {"role": "assistant", "content": rewritten_caption}],
                 tokenize = False,
                 add_generation_prompt = False,
-            )
+            ) + EOS_TOKEN
             texts.append(text)
 
         return {"text": texts}
@@ -190,7 +190,7 @@ def runwithgpu():
             save_strategy = "no",
             seed = 3407,
             output_dir = "outputs",
-            run_name=f"ReAction-1.5B",
+            run_name="ReAction-1.5B",
             report_to = "wandb",
         ),
     )
