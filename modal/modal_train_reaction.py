@@ -54,7 +54,7 @@ image = image.env({
 })
 
 image = image.run_commands(
-    "huggingface-cli download unsloth/Qwen2.5-1.5B",
+    "huggingface-cli download unsloth/Qwen2.5-1.5B-Instruct",
 )
 
 app = modal.App(image=image, name="ReAction Training")
@@ -79,32 +79,16 @@ def runwithgpu():
 
     logger.info(f"Loading model with max_seq_length={max_seq_length}")
     model, tokenizer = FastLanguageModel.from_pretrained(
-        model_name = f"unsloth/Qwen2.5-1.5B",
+        model_name = "unsloth/Qwen2.5-1.5B-Instruct",
         max_seq_length = max_seq_length,
         dtype = dtype,
         load_in_4bit=False,
         load_in_8bit=False,
         full_finetuning = True,
     )
-    logger.info(f"Model loaded successfully!")
+    logger.info("Model loaded successfully!")
 
-    # Set the chat template.
-    CHAT_TEMPLATE = "{%- if tools %}\n    {{- '<|im_start|>system\\n' }}\n    {%- if messages[0]['role'] == 'system' %}\n        {{- messages[0]['content'] }}\n    {%- else %}\n        {{- 'You are ReAction, a helpful assistant for rewriting video captions.' }}\n    {%- endif %}\n    {{- \"\\n\\n# Tools\\n\\nYou may call one or more functions to assist with the user query.\\n\\nYou are provided with function signatures within <tools></tools> XML tags:\\n<tools>\" }}\n    {%- for tool in tools %}\n        {{- \"\\n\" }}\n        {{- tool | tojson }}\n    {%- endfor %}\n    {{- \"\\n</tools>\\n\\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\\n<tool_call>\\n{\\\"name\\\": <function-name>, \\\"arguments\\\": <args-json-object>}\\n</tool_call><|im_end|>\\n\" }}\n{%- else %}\n    {%- if messages[0]['role'] == 'system' %}\n        {{- '<|im_start|>system\\n' + messages[0]['content'] + '<|im_end|>\\n' }}\n    {%- else %}\n        {{- '<|im_start|>system\\nYou are ReAction, a helpful assistant for rewriting video captions.<|im_end|>\\n' }}\n    {%- endif %}\n{%- endif %}\n{%- for message in messages %}\n    {%- if (message.role == \"user\") or (message.role == \"system\" and not loop.first) or (message.role == \"assistant\" and not message.tool_calls) %}\n        {{- '<|im_start|>' + message.role + '\\n' + message.content + '<|im_end|>' + '\\n' }}\n    {%- elif message.role == \"assistant\" %}\n        {{- '<|im_start|>' + message.role }}\n        {%- if message.content %}\n            {{- '\\n' + message.content }}\n        {%- endif %}\n        {%- for tool_call in message.tool_calls %}\n            {%- if tool_call.function is defined %}\n                {%- set tool_call = tool_call.function %}\n            {%- endif %}\n            {{- '\\n<tool_call>\\n{\"name\": \"' }}\n            {{- tool_call.name }}\n            {{- '\", \"arguments\": ' }}\n            {{- tool_call.arguments | tojson }}\n            {{- '}\\n</tool_call>' }}\n        {%- endfor %}\n        {{- '<|im_end|>\\n' }}\n    {%- elif message.role == \"tool\" %}\n        {%- if (loop.index0 == 0) or (messages[loop.index0 - 1].role != \"tool\") %}\n            {{- '<|im_start|>user' }}\n        {%- endif %}\n        {{- '\\n<tool_response>\\n' }}\n        {{- message.content }}\n        {{- '\\n</tool_response>' }}\n        {%- if loop.last or (messages[loop.index0 + 1].role != \"tool\") %}\n            {{- '<|im_end|>\\n' }}\n        {%- endif %}\n    {%- endif %}\n{%- endfor %}\n{%- if add_generation_prompt %}\n    {{- '<|im_start|>assistant\\n' }}\n{%- endif %}\n".strip()
-
-    model.config.chat_template = CHAT_TEMPLATE
-    tokenizer.chat_template = CHAT_TEMPLATE
-    logger.info(f"Set tokenizer.chat_template to:\n{tokenizer.chat_template}\n")
-
-    special_tokens_to_add = []
-    if tokenizer.pad_token is None:
-        # Many models don't have a pad token by default, use EOS or a new one
-        special_tokens_to_add.append("[PAD]")
-        logger.info("Added [PAD] token since pad_token was None")
-
-    tokenizer.add_special_tokens({'additional_special_tokens': special_tokens_to_add})
-
-    model.resize_token_embeddings(len(tokenizer))
-    logger.info(f"Resized token embeddings to {len(tokenizer)}")
+    logger.info(f"Chat template is:\n{tokenizer.chat_template}\n")
 
     EOS_TOKEN = tokenizer.eos_token
 
@@ -138,10 +122,10 @@ def runwithgpu():
 
             # Create the chat-template-formatted string
             text = tokenizer.apply_chat_template(
-                [{"role": "user", "content": original_caption}, {"role": "assistant", "content": rewritten_caption}],
+                [{"role": "system", "content": "You are ReAction, an assistant to rewrite video caption to make them clearer. Rewrite the user's video caption."} ,{"role": "user", "content": original_caption}, {"role": "assistant", "content": rewritten_caption}],
                 tokenize = False,
                 add_generation_prompt = False,
-            ).strip() + EOS_TOKEN
+            ).strip()
             texts.append(text)
 
         return {"text": texts}
@@ -220,8 +204,8 @@ def runwithgpu():
     logger.info(f"Peak reserved memory for training % of max memory = {lora_percentage} %.")
 
     logger.info("Pushing model to Hugging Face Hub...")
-    model.push_to_hub(f"qingy2024/ReAction-1.5B", token = os.environ['HF_TOKEN'])
-    tokenizer.push_to_hub(f"qingy2024/ReAction-1.5B", token = os.environ['HF_TOKEN'])
+    model.push_to_hub("qingy2024/ReAction-1.5B", token = os.environ['HF_TOKEN'])
+    tokenizer.push_to_hub("qingy2024/ReAction-1.5B", token = os.environ['HF_TOKEN'])
     logger.info("Model and tokenizer pushed to hub successfully")
 
     logger.info(f"Model embedding size: {model.get_input_embeddings().weight.shape[0]}")
