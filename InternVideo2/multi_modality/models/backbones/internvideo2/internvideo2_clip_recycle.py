@@ -1,5 +1,16 @@
 # --- Reused/Adapted Components from InternVideo2 ---
-from .internvideo2_clip_vision import CrossAttention, AttentiveBlock, AttentionPoolingBlock, RMSNorm, LayerScale, Attention, Mlp, Block, PatchEmbed
+from .internvideo2_clip_vision import (
+    CrossAttention,
+    AttentiveBlock,
+    AttentionPoolingBlock,
+    RMSNorm,
+    LayerScale,
+    Attention,
+    Mlp,
+    Block,
+    PatchEmbed,
+)
+from .ssm_block import SimpleStateSpaceBlock
 
 from .mobileclip import TextTransformer, ClipTokenizer, VisionTransformer, vit_b16
 
@@ -54,7 +65,7 @@ class StreamingInternVideo2Student(nn.Module):
             vit_lite_proj_dim=512, # Projection dimension
             vit_lite_embed_dim=768, # Output dimension
             # --- RNN parameters ---
-            rnn_type='lstm', # 'lstm' or 'gru'
+            rnn_type='lstm', # 'lstm', 'gru', or 'ssm'
             rnn_hidden_size=1024,
             rnn_num_layers=1,
             rnn_dropout=0.0, # Dropout for RNN layers (if rnn_num_layers > 1)
@@ -92,8 +103,15 @@ class StreamingInternVideo2Student(nn.Module):
                 batch_first=True,
                 dropout=rnn_dropout if rnn_num_layers > 1 else 0.0
             )
+        elif self.rnn_type == 'ssm':
+            self.rnn = SimpleStateSpaceBlock(
+                input_size=vit_lite_embed_dim,
+                hidden_size=rnn_hidden_size,
+            )
         else:
-            raise NotImplementedError(f"Unsupported RNN type: {rnn_type}. Choose 'lstm' / 'gru'.")
+            raise NotImplementedError(
+                f"Unsupported RNN type: {rnn_type}. Choose 'lstm' / 'gru' / 'ssm'."
+            )
 
         # Fully Connected layers to project RNN output to teacher's embedding dimension
         fc_layers = []
@@ -145,11 +163,12 @@ class StreamingInternVideo2Student(nn.Module):
         # Here, seq_len is 1 because we process one ViT-Lite output at a time
         rnn_input = frame_feature.unsqueeze(1) # (B, 1, student_embed_dim)
 
-        rnn_output, current_hidden_state = self.rnn(rnn_input, prev_hidden_state)
-        # rnn_output shape: (B, 1, rnn_hidden_size)
-
-        # We only care about the output of the last (and only) time step
-        rnn_output_last_step = rnn_output.squeeze(1) # (B, rnn_hidden_size)
+        if self.rnn_type in ["lstm", "gru"]:
+            rnn_output, current_hidden_state = self.rnn(rnn_input, prev_hidden_state)
+            rnn_output_last_step = rnn_output.squeeze(1)
+        else:  # ssm
+            current_hidden_state = self.rnn(frame_feature, prev_hidden_state)
+            rnn_output_last_step = current_hidden_state
 
         student_embedding = self.output_fc(rnn_output_last_step) # (B, teacher_clip_embed_dim)
 
@@ -182,7 +201,7 @@ if __name__ == '__main__':
         "vit_qk_normalization": False,
         "vit_sep_pos_embed": True, # Try True or False
         "vit_norm_layer_type": "rmsnorm",
-        "rnn_type": 'lstm',
+        "rnn_type": 'ssm',
         "rnn_hidden_size": 512,
         "rnn_num_layers": 1,
         "fc_hidden_layers": [256],
@@ -211,8 +230,10 @@ if __name__ == '__main__':
         print(f"Step {i+1}: Output embedding shape: {output_embedding.shape}")
         if student_config["rnn_type"] == 'lstm':
             print(f"  LSTM hidden state h shape: {current_hidden[0].shape}, c shape: {current_hidden[1].shape}")
-        else:
+        elif student_config["rnn_type"] == 'gru':
             print(f"  GRU hidden state shape: {current_hidden.shape}")
+        else:
+            print(f"  SSM state shape: {current_hidden.shape}")
 
     # To train this model, you would:
     # 1. Generate target embeddings from the full InternVideo2 for sliding windows.

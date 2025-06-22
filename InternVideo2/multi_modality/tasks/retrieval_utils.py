@@ -15,6 +15,23 @@ from utils.distributed import get_rank, get_world_size
 logger = logging.getLogger(__name__)
 
 
+def benchmark_streaming_latency(model, device, num_frames: int = 30, height: int = 224, width: int = 224):
+    """Measure average per-frame latency for streaming vision encoder."""
+    if not hasattr(model, "streaming_vision_encoder"):
+        return None
+
+    dummy = torch.randn(1, 3, height, width, device=device)
+    hidden = model.streaming_vision_encoder.init_hidden(1, device)
+    torch.cuda.synchronize(device)
+    start = time.time()
+    with torch.no_grad():
+        for _ in range(num_frames):
+            _, hidden = model.streaming_vision_encoder(dummy, hidden)
+    torch.cuda.synchronize(device)
+    elapsed = time.time() - start
+    return elapsed * 1000.0 / num_frames
+
+
 def extract_text_feats(texts, max_txt_l, tokenizer, model, device, return_ids=False):
     num_text = len(texts)
     text_bs = 256
@@ -220,6 +237,10 @@ def evaluation_wrapper(model, data_loader, tokenizer, device, config, prefix="")
             txt2img_ids = data_loader.dataset.txt2img
             img2txt_ids = data_loader.dataset.img2txt
             res[name] = itm_eval(i2t, t2i, txt2img_ids, img2txt_ids)
+
+    latency = benchmark_streaming_latency(model, device)
+    if latency is not None:
+        res[prefix + "_latency_ms"] = latency
     return res
 
 

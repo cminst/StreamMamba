@@ -4,3 +4,4 @@ from .internvideo2_clip_vision import InternVideo2
 from .internvideo2_clip_recycle import StreamingInternVideo2Student
 from .internvideo2_clip_text import LLaMA, Tokenizer
 from .mobileclip import TextTransformer, ClipTokenizer, VisionTransformer, vit_b16
+from .ssm_block import SimpleStateSpaceBlock
