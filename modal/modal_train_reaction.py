@@ -141,7 +141,7 @@ def runwithgpu():
                 [{"role": "user", "content": original_caption}, {"role": "assistant", "content": rewritten_caption}],
                 tokenize = False,
                 add_generation_prompt = False,
-            ) + EOS_TOKEN
+            ).strip() + EOS_TOKEN
             texts.append(text)
 
         return {"text": texts}
