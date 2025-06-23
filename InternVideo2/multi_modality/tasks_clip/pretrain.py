@@ -30,6 +30,28 @@ from utils.logger import log_dict_to_wandb, setup_wandb
 
 logger = logging.getLogger(__name__)
 
+
+def info_nce_loss(query, key, captions, temperature=0.07):
+    """Compute InfoNCE loss using in-batch negatives with caption masking."""
+    # query, key: [B, D]
+    query = torch.nn.functional.normalize(query, dim=1)
+    key = torch.nn.functional.normalize(key, dim=1)
+    logits = query @ key.t() / temperature
+
+    B = logits.size(0)
+    if isinstance(captions, (list, tuple)):
+        captions_tensor = [str(c) for c in captions]
+    else:
+        captions_tensor = [str(c) for c in captions]
+    same_caption = torch.zeros((B, B), dtype=torch.bool, device=logits.device)
+    for i in range(B):
+        for j in range(B):
+            if i != j and captions_tensor[i] == captions_tensor[j]:
+                same_caption[i, j] = True
+    logits = logits.masked_fill(same_caption, float('-inf'))
+    targets = torch.arange(B, device=logits.device)
+    return torch.nn.functional.cross_entropy(logits, targets)
+
 def save_debug_step_data(output_dir, global_step, frame_idx,
                          new_frame_input, # Input to streaming_vision_encoder
                          current_hidden_state_input, # Hidden state input to streaming_vision_encoder
@@ -363,6 +385,7 @@ def train(
     metric_logger = MetricLogger(delimiter="  ")
     metric_logger.add_meter("lr", SmoothedValue(window=1, fmt="{value:.6f}"))
     metric_logger.add_meter("temperature", SmoothedValue(window=1, fmt="{value:.4f}"))
+    metric_logger.add_meter("video-stream-nce-loss", SmoothedValue(window=1, fmt="{value:.4f}"))
     metric_logger.add_meter("eval_avg_sim", SmoothedValue(window=1, fmt="{value:.4f}")) # For periodic eval
 
     header = f"Training: [Epoch {epoch}]"
@@ -400,6 +423,13 @@ def train(
 
         image = image.to(device, non_blocking=True)
 
+        nce_start = int(num_batches_train * getattr(config, 'contrastive_warmup_pct', 0.0))
+        if i >= nce_start:
+            ramp = min((i - nce_start) / float(getattr(config, 'contrastive_ramp_iters', 1)), 1.0)
+            nce_lambda = getattr(config, 'contrastive_lambda', 0.0) * ramp
+        else:
+            nce_lambda = 0.0
+
         if log_debug and i == 0 :
             logger.info(f"Original data: image shape: {image.shape}, text: {text}")
 
@@ -423,6 +453,7 @@ def train(
             assert num_sliding_windows >= 1, "Number of sliding windows must be at least 1 for loss calculation."
 
             batch_total_loss_for_logging = 0.0
+            batch_total_nce_for_logging = 0.0
             batch_total_sim_for_logging = 0.0
 
             for frame_window_step_idx in range(num_sliding_windows):
@@ -453,10 +484,18 @@ def train(
                     target_embedding = aligned_target_emb_orig / (aligned_target_emb_orig.norm(dim=-1, keepdim=True) + 1e-9)
 
                 # --- Loss Calculation (for this sliding window step) ---
-                loss = cosine_sim_loss(stream_embedding, target_embedding)
+                cosine_loss_val = cosine_sim_loss(stream_embedding, target_embedding)
+                info_nce_val = info_nce_loss(
+                    stream_embedding,
+                    target_embedding,
+                    text,
+                    temperature=getattr(config, 'contrastive_temperature', 0.07),
+                ) if nce_lambda > 0 else torch.tensor(0.0, device=device)
+                loss = cosine_loss_val + nce_lambda * info_nce_val
 
                 # Accumulate loss and similarity for batch-level logging
-                batch_total_loss_for_logging += loss.item()
+                batch_total_loss_for_logging += cosine_loss_val.item()
+                batch_total_nce_for_logging += info_nce_val.item()
                 current_sim_for_logging = torch.nn.functional.cosine_similarity(
                     stream_embedding.detach(), target_embedding.detach(), dim=1 # .detach() for sim calculation if embeddings might be reused
                 ).mean().item()
@@ -503,11 +542,13 @@ def train(
         # --- End of autocast context ---
 
         # Calculate averages for logging (these are Python floats now)
-        final_batch_loss_for_logging = batch_total_loss_for_logging / num_sliding_windows
+        final_batch_cosine_loss_for_logging = batch_total_loss_for_logging / num_sliding_windows
+        final_batch_nce_loss_for_logging = batch_total_nce_for_logging / num_sliding_windows
         average_cosine_sim_for_logging = batch_total_sim_for_logging / num_sliding_windows
 
         # --- Logging Metrics (after all windows in a batch item are processed) ---
-        metric_logger.update(**{'video-stream-target-loss': final_batch_loss_for_logging})
+        metric_logger.update(**{'video-stream-target-loss': final_batch_cosine_loss_for_logging})
+        metric_logger.update(**{'video-stream-nce-loss': final_batch_nce_loss_for_logging})
         metric_logger.update(**{'video-stream-target-sim': average_cosine_sim_for_logging})
         metric_logger.update(lr=optimizer.param_groups[0]["lr"]) # LR after the last window's update in this batch
         if hasattr(model_without_ddp, 'temp'):
@@ -532,7 +573,8 @@ def train(
         if i % log_freq == 0:
             log_payload = {
                 "lr": optimizer.param_groups[0]["lr"],
-                "video_stream_target_loss": final_batch_loss_for_logging,
+                "video_stream_target_loss": final_batch_cosine_loss_for_logging,
+                "video-stream-nce-loss": final_batch_nce_loss_for_logging,
                 "video_stream_target_sim": average_cosine_sim_for_logging
             }
             if hasattr(model_without_ddp, 'temp'): log_payload["temp"] = model_without_ddp.temp.item()
