@@ -19,11 +19,11 @@ from .pos_embed import get_3d_sincos_pos_embed, get_2d_sincos_pos_embed, get_1d_
 class StreamingInternVideo2Student(nn.Module):
     def __init__(
             self,
-            # --- Parameters for the MobileCLIP ViT ---
+            # Parameters for the MobileCLIP ViT
             vit_lite_model_name="vit_b16",
             vit_lite_proj_dim=512, # Projection dimension
             vit_lite_embed_dim=768, # Output dimension
-            # --- RNN parameters ---
+            # RNN parameters
             rnn_type='lstm', # 'lstm', 'gru', or 'mamba'
             rnn_hidden_size=1024,
             rnn_num_layers=1,
