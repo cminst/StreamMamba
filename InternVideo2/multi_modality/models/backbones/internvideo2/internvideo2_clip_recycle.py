@@ -1,11 +1,10 @@
-# --- Reused/Adapted Components from InternVideo2 ---
 from .internvideo2_clip_vision import CrossAttention, AttentiveBlock, AttentionPoolingBlock, RMSNorm, LayerScale, Attention, Mlp, Block, PatchEmbed
 
 from .mobileclip import TextTransformer, ClipTokenizer, VisionTransformer, vit_b16
 from .video_mamba_block import VideoMambaBlock
 
 import logging
-import math
+import numpy as np
 import torch
 import timm
 import torch.nn.functional as F
@@ -13,37 +12,7 @@ from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 from timm.models.registry import register_model
 from torch import nn
 
-import torch.utils.checkpoint as checkpoint
-from functools import partial
-from einops import rearrange
-
-# Assuming your provided InternVideo2 components (CrossAttention, AttentiveBlock, etc.)
-# are in the same file or accessible via relative import like `.pos_embed`.
-# For this example, I'll assume they are in the current scope or a utils file.
-# You might need to adjust imports based on your project structure.
-try:
-    from .pos_embed import get_3d_sincos_pos_embed, get_2d_sincos_pos_embed, get_1d_sincos_pos_embed
-except ImportError:
-    # Fallback if running as a script, assuming pos_embed.py is in the same directory
-    # You'll need to create a dummy pos_embed.py with these functions if it doesn't exist
-    # or provide the actual implementation.
-    def get_2d_sincos_pos_embed(embed_dim, grid_size, cls_token=False):
-        # Dummy implementation
-        grid_h = grid_w = grid_size
-        grid = np.arange(grid_h * grid_w).reshape(grid_h, grid_w)
-        pos_embed = np.zeros((grid_h * grid_w, embed_dim))
-        if cls_token:
-            pos_embed = np.zeros((1 + grid_h * grid_w, embed_dim))
-        print(f"Warning: Using dummy get_2d_sincos_pos_embed. Output shape: {pos_embed.shape}")
-        return pos_embed
-
-    def get_1d_sincos_pos_embed(embed_dim, t_size):
-        # Dummy implementation
-        pos_embed = np.zeros((t_size, embed_dim))
-        print(f"Warning: Using dummy get_1d_sincos_pos_embed. Output shape: {pos_embed.shape}")
-        return pos_embed
-
-    import numpy as np
+from .pos_embed import get_3d_sincos_pos_embed, get_2d_sincos_pos_embed, get_1d_sincos_pos_embed
 
 # --- Start of Streaming Student Model ---
 
@@ -164,12 +133,7 @@ class StreamingInternVideo2Student(nn.Module):
 
         return student_embedding, current_hidden_state
 
-# --- Example Usage (Illustrative) ---
 if __name__ == '__main__':
-    # --- Make sure the InternVideo2 components are defined or imported above ---
-    # This is just to make the script runnable standalone for basic checks.
-    # You would integrate this into your actual training/inference pipeline.
-
     # Configuration for the student model
     batch_size = 2
     img_size = 224 # Should match teacher's patch processing
@@ -178,26 +142,15 @@ if __name__ == '__main__':
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     student_config = {
-        "in_chans": 3,
-        "patch_size": patch_size,
-        "img_size": img_size,
-        "vit_qkv_bias": True,
-        "vit_drop_path_rate": 0.05,
-        "student_embed_dim": 384,   # Smaller ViT
-        "student_depth": 4,         # Fewer layers
-        "student_num_heads": 6,
-        "vit_mlp_ratio": 3.0,
-        "vit_init_values": None, # LayerScale disabled by default
-        "vit_qk_normalization": False,
-        "vit_sep_pos_embed": True, # Try True or False
-        "vit_norm_layer_type": "rmsnorm",
+        "vit_lite_model_name": "vit_b16",
+        "vit_lite_proj_dim": 512,
+        "vit_lite_embed_dim": 768,
         "rnn_type": 'mamba',
         "rnn_hidden_size": 512,
         "rnn_num_layers": 1,
+        "rnn_dropout": 0.0,
         "fc_hidden_layers": [256],
         "teacher_clip_embed_dim": teacher_output_dim,
-        "student_num_frames_processed_by_vit": 1, # Process 1 frame at a time in ViT-Lite
-        "student_tubelet_size_for_vit": 1,
     }
 
     student_model = StreamingInternVideo2Student(**student_config).to(device)
@@ -225,10 +178,3 @@ if __name__ == '__main__':
         else:
             conv_state, ssm_state = current_hidden
             print(f"  Mamba conv state: {conv_state.shape}, ssm state: {ssm_state.shape}")
-
-    # To train this model, you would:
-    # 1. Generate target embeddings from the full InternVideo2 for sliding windows.
-    # 2. For each window, unroll the student model frame by frame.
-    # 3. At each step (or at the end of the window), compare the student's output
-    #    embedding with the teacher's embedding for that window.
-    # 4. Calculate a loss (e.g., MSE or CosineEmbeddingLoss) and backpropagate.

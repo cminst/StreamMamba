@@ -69,11 +69,11 @@ model = dict(
     ),
     streaming_vision_encoder = dict(
         vit_lite_embed_dim = 768,
-        rnn_type = 'lstm',
+        rnn_type = 'mamba',
         rnn_hidden_size = 1024,
         rnn_num_layers = 3,
         rnn_dropout = 0.0,
-        fc_hidden_layers = [512],
+        fc_hidden_layers = [768],
         teacher_clip_embed_dim = 768
     ),
     mobileclip_type=dict(
