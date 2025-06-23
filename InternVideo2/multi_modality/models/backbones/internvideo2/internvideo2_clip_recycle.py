@@ -2,6 +2,7 @@
 from .internvideo2_clip_vision import CrossAttention, AttentiveBlock, AttentionPoolingBlock, RMSNorm, LayerScale, Attention, Mlp, Block, PatchEmbed
 
 from .mobileclip import TextTransformer, ClipTokenizer, VisionTransformer, vit_b16
+from .video_mamba_block import VideoMambaBlock
 
 import logging
 import math
@@ -54,7 +55,7 @@ class StreamingInternVideo2Student(nn.Module):
             vit_lite_proj_dim=512, # Projection dimension
             vit_lite_embed_dim=768, # Output dimension
             # --- RNN parameters ---
-            rnn_type='lstm', # 'lstm' or 'gru'
+            rnn_type='lstm', # 'lstm', 'gru', or 'mamba'
             rnn_hidden_size=1024,
             rnn_num_layers=1,
             rnn_dropout=0.0, # Dropout for RNN layers (if rnn_num_layers > 1)
@@ -92,23 +93,34 @@ class StreamingInternVideo2Student(nn.Module):
                 batch_first=True,
                 dropout=rnn_dropout if rnn_num_layers > 1 else 0.0
             )
+        elif self.rnn_type == 'mamba':
+            self.rnn = VideoMambaBlock(
+                in_dim=vit_lite_embed_dim,
+                hidden_dim=rnn_hidden_size,
+                clip_dim=teacher_clip_embed_dim,
+            )
         else:
-            raise NotImplementedError(f"Unsupported RNN type: {rnn_type}. Choose 'lstm' / 'gru'.")
+            raise NotImplementedError(
+                f"Unsupported RNN type: {rnn_type}. Choose 'lstm', 'gru' or 'mamba'."
+            )
 
         # Fully Connected layers to project RNN output to teacher's embedding dimension
-        fc_layers = []
-        current_dim = rnn_hidden_size
-        if fc_hidden_layers:
-            for h_dim in fc_hidden_layers:
-                fc_layers.append(nn.Linear(current_dim, h_dim))
-                fc_layers.append(nn.ReLU()) # Or other activation
-                # fc_layers.append(nn.LayerNorm(h_dim)) # Optional LayerNorm
-                # fc_layers.append(nn.Dropout(0.1)) # Optional Dropout
-                current_dim = h_dim
-        fc_layers.append(nn.Linear(current_dim, teacher_clip_embed_dim))
-        self.output_fc = nn.Sequential(*fc_layers)
+        if self.rnn_type != 'mamba':
+            fc_layers = []
+            current_dim = rnn_hidden_size
+            if fc_hidden_layers:
+                for h_dim in fc_hidden_layers:
+                    fc_layers.append(nn.Linear(current_dim, h_dim))
+                    fc_layers.append(nn.ReLU())
+                    current_dim = h_dim
+            fc_layers.append(nn.Linear(current_dim, teacher_clip_embed_dim))
+            self.output_fc = nn.Sequential(*fc_layers)
+        else:
+            self.output_fc = nn.Identity()
 
     def init_hidden(self, batch_size, device):
+        if self.rnn_type == 'mamba':
+            return self.rnn.init_state(batch_size, device)
         h0 = torch.zeros(self.rnn_num_layers, batch_size, self.rnn_hidden_size).to(device)
         if self.rnn_type == 'lstm':
             c0 = torch.zeros(self.rnn_num_layers, batch_size, self.rnn_hidden_size).to(device)
@@ -141,17 +153,14 @@ class StreamingInternVideo2Student(nn.Module):
 
         frame_feature, _ = self.vit_lite.extract_features(single_frame_input) # (B, student_embed_dim)
 
-        # RNN expects input of shape (batch, seq_len, input_size)
-        # Here, seq_len is 1 because we process one ViT-Lite output at a time
-        rnn_input = frame_feature.unsqueeze(1) # (B, 1, student_embed_dim)
+        if self.rnn_type == 'mamba':
+            student_embedding, current_hidden_state = self.rnn(frame_feature, prev_hidden_state)
+            return student_embedding, current_hidden_state
 
+        rnn_input = frame_feature.unsqueeze(1)
         rnn_output, current_hidden_state = self.rnn(rnn_input, prev_hidden_state)
-        # rnn_output shape: (B, 1, rnn_hidden_size)
-
-        # We only care about the output of the last (and only) time step
-        rnn_output_last_step = rnn_output.squeeze(1) # (B, rnn_hidden_size)
-
-        student_embedding = self.output_fc(rnn_output_last_step) # (B, teacher_clip_embed_dim)
+        rnn_output_last_step = rnn_output.squeeze(1)
+        student_embedding = self.output_fc(rnn_output_last_step)
 
         return student_embedding, current_hidden_state
 
@@ -182,7 +191,7 @@ if __name__ == '__main__':
         "vit_qk_normalization": False,
         "vit_sep_pos_embed": True, # Try True or False
         "vit_norm_layer_type": "rmsnorm",
-        "rnn_type": 'lstm',
+        "rnn_type": 'mamba',
         "rnn_hidden_size": 512,
         "rnn_num_layers": 1,
         "fc_hidden_layers": [256],
@@ -211,8 +220,11 @@ if __name__ == '__main__':
         print(f"Step {i+1}: Output embedding shape: {output_embedding.shape}")
         if student_config["rnn_type"] == 'lstm':
             print(f"  LSTM hidden state h shape: {current_hidden[0].shape}, c shape: {current_hidden[1].shape}")
-        else:
+        elif student_config["rnn_type"] == 'gru':
             print(f"  GRU hidden state shape: {current_hidden.shape}")
+        else:
+            conv_state, ssm_state = current_hidden
+            print(f"  Mamba conv state: {conv_state.shape}, ssm state: {ssm_state.shape}")
 
     # To train this model, you would:
     # 1. Generate target embeddings from the full InternVideo2 for sliding windows.
