@@ -8,17 +8,17 @@ MODEL_FILES = [
     {
         "repo_id": "OpenGVLab/InternVideo2_distillation_models",
         "path_in_repo": "stage1/B14/B14_dist_1B_stage2/pytorch_model.bin",
-        "local_path": "models/stage1/B14/B14_dist_1B_stage2/pytorch_model.bin",
+        "local_path": "./models/",
     },
     {
         "repo_id": "OpenGVLab/InternVideo2_distillation_models",
         "path_in_repo": "clip/B14/pytorch_model.bin",
-        "local_path": "models/clip/B14/pytorch_model.bin",
+        "local_path": "./models/",
     },
     {
         "repo_id": "apple/MobileCLIP-B-LT",
         "path_in_repo": "mobileclip_blt.pt",
-        "local_path": "models/mobileclip_blt.pt",
+        "local_path": "./models/",
     }
 ]
 
