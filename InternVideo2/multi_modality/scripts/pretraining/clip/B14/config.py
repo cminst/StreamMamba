@@ -161,6 +161,7 @@ deepspeed = dict(
 )
 
 # ====================== contrastive distillation =====================
+enable_contrastive_distillation = True
 contrastive_temperature = 0.07
 contrastive_lambda = 0.5
 contrastive_warmup_pct = 0.3

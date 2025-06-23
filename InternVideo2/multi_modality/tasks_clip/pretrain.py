@@ -423,10 +423,13 @@ def train(
 
         image = image.to(device, non_blocking=True)
 
-        nce_start = int(num_batches_train * getattr(config, 'contrastive_warmup_pct', 0.0))
-        if i >= nce_start:
-            ramp = min((i - nce_start) / float(getattr(config, 'contrastive_ramp_iters', 1)), 1.0)
-            nce_lambda = getattr(config, 'contrastive_lambda', 0.0) * ramp
+        if getattr(config, 'enable_contrastive_distillation', False):
+            nce_start = int(num_batches_train * getattr(config, 'contrastive_warmup_pct', 0.0))
+            if i >= nce_start:
+                ramp = min((i - nce_start) / float(getattr(config, 'contrastive_ramp_iters', 1)), 1.0)
+                nce_lambda = getattr(config, 'contrastive_lambda', 0.0) * ramp
+            else:
+                nce_lambda = 0.0
         else:
             nce_lambda = 0.0
 
