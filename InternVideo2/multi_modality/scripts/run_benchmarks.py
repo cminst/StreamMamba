@@ -4,6 +4,11 @@ import logging
 import os
 import subprocess
 import sys
+import re
+
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 
 
 def ensure_dependencies():
@@ -23,6 +28,7 @@ def ensure_dependencies():
             "protobuf",
             "sentencepiece",
             "iv2-utils",
+            "matplotlib",
         ])
     print("Installed packages")
 
@@ -49,6 +55,11 @@ def parse_args():
         default="delta",
         choices=list(branch_switch.keys()),
         help="Configuration name",
+    )
+    parser.add_argument(
+        "--output-graph",
+        default="accuracy_graph.png",
+        help="Path to output PNG graph of accuracy",
     )
     return parser.parse_args()
 
@@ -86,6 +97,13 @@ def compute_accuracy(preds: list[int], dataset: list) -> dict:
     percentages = {f"within_{t}": totals[t] * 100.0 / n for t in thresholds}
     percentages["average"] = sum(percentages.values()) / len(thresholds)
     return percentages
+
+
+def checkpoint_step(path: str) -> int:
+    """Extract numeric step from checkpoint path."""
+    dirname = os.path.basename(os.path.dirname(path))
+    digits = re.findall(r"\d+", dirname)
+    return int(digits[-1]) if digits else 0
 
 
 def main():
@@ -278,6 +296,21 @@ def main():
     if results:
         best_ckpt, best_score = max(results.items(), key=lambda x: x[1])
         print(f"Best checkpoint: {best_ckpt} (average {best_score:.2f})")
+
+        steps = []
+        accs = []
+        for ckpt, score in sorted(results.items(), key=lambda x: checkpoint_step(x[0])):
+            steps.append(checkpoint_step(ckpt))
+            accs.append(score)
+
+        plt.figure()
+        plt.plot(steps, accs, marker="o")
+        plt.xlabel("checkpoint step")
+        plt.ylabel("mean accuracy")
+        plt.title("Mean accuracy over time")
+        plt.grid(True)
+        plt.savefig(args.output_graph)
+        print(f"Saved accuracy graph to {args.output_graph}")
 
 
 if __name__ == "__main__":
