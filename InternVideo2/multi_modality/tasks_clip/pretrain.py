@@ -240,10 +240,7 @@ def evaluate_streaming_similarity(
             # Preprocess all frames in the window and stack them
             # List of [1, C, H, W] tensors -> Stack -> [MODEL_MAX_FRAMES, 1, C, H, W]
             list_of_frame_tensors = [preprocess_frame(f, regular_transform, device) for f in current_window_frames_data]
-            stacked_window_tensor_T_B_C_H_W = torch.stack(list_of_frame_tensors, dim=0) # Shape: [T, B=1, C, H, W]
-
-            # Reshape for the full vision encoder [B, C, T, H, W]
-            window_tensor_full = stacked_window_tensor_T_B_C_H_W.unsqueeze(0).squeeze(2).permute(0, 2, 1, 3, 4) # Shape: [1, C, MODEL_MAX_FRAMES, H, W]
+            window_tensor_full = torch.stack(list_of_frame_tensors, dim=2) # Shape: [B=1, C, T, H, W]
 
             # Pass the full window tensor to the full vision encoder
             raw_target_embedding = model.vision_encoder(window_tensor_full)
