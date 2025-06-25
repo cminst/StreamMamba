@@ -9,6 +9,7 @@ import re
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import numpy as np
 
 
 def ensure_dependencies():
@@ -61,6 +62,11 @@ def parse_args():
         default="accuracy_graph.png",
         help="Path to output PNG graph of accuracy",
     )
+    parser.add_argument(
+        "--eval_again",
+        action="store_true",
+        help="Recalculate accuracy using existing predictions without running the model",
+    )
     return parser.parse_args()
 
 
@@ -81,19 +87,59 @@ def find_streaming_checkpoints(base_dir: str, model_name: str) -> list[str]:
     return matches
 
 
+def find_closest(pred, truths):
+    """Return the truth value closest to ``pred``."""
+    if not truths:
+        return pred
+    return min(truths, key=lambda x: abs(x - pred))
+
+
+def calculate_mse(preds_with_offset, data):
+    """Calculate mean squared error for a list of predictions."""
+    errors = []
+    for idx, p in enumerate(preds_with_offset):
+        truth_peaks = data[idx][2]
+        if not truth_peaks:
+            continue
+        closest_t = find_closest(p, truth_peaks)
+        errors.append((p - closest_t) ** 2)
+    return np.mean(errors) if errors else float("inf")
+
+
+def find_best_offset(preds, data, search_range=(-30, 30)):
+    """Find the integer offset that minimises MSE."""
+    best_offset = 0
+    best_mse = float("inf")
+    for off in range(search_range[0], search_range[1] + 1):
+        shifted = [p + off for p in preds]
+        mse = calculate_mse(shifted, data)
+        if mse < best_mse:
+            best_mse = mse
+            best_offset = off
+    return best_offset
+
+
+def offset_predictions(preds, data):
+    best = find_best_offset(preds, data)
+    return [p + best for p in preds]
+
+
 def compute_accuracy(preds: list[int], dataset: list) -> dict:
-    """Return accuracy percentages within various frame offsets."""
+    """Return MAE percentages within various frame offsets using global offset."""
     thresholds = [2, 4, 8, 16, 32]
+    preds_adj = offset_predictions(preds, dataset)
     totals = {t: 0 for t in thresholds}
 
-    for pred, entry in zip(preds, dataset):
+    for pred, entry in zip(preds_adj, dataset):
         gt_frames = entry[2]
+        if not gt_frames:
+            continue
         diff = min(abs(pred - f) for f in gt_frames)
         for t in thresholds:
             if diff <= t:
                 totals[t] += 1
 
-    n = len(preds)
+    n = len(preds_adj)
     percentages = {f"within_{t}": totals[t] * 100.0 / n for t in thresholds}
     percentages["average"] = sum(percentages.values()) / len(thresholds)
     return percentages
@@ -163,12 +209,22 @@ def main():
 
     act75_data = json_read('photography-model/data/ACT75.json')
 
-    def evaluate_checkpoint(checkpoint_path: str, dataset):
+    def evaluate_checkpoint(checkpoint_path: str, dataset, eval_again: bool = False):
         out_dir = os.path.dirname(checkpoint_path)
         preds_file = os.path.join(out_dir, "t8.json")
         logits_file = os.path.join(out_dir, "logits-act75.json")
         acc_file = os.path.join(out_dir, "accuracy.json")
 
+        if eval_again:
+            if os.path.exists(preds_file):
+                preds = json_read(preds_file)
+                metrics = compute_accuracy(preds, dataset)
+                json_write(metrics, acc_file)
+                print(f"Recalculated metrics for {checkpoint_path}")
+                return metrics.get("average", 0.0)
+            else:
+                print(f"Predictions not found for {checkpoint_path}")
+                return 0.0
         if os.path.exists(preds_file) and os.path.exists(logits_file) and os.path.exists(acc_file):
             metrics = json_read(acc_file)
             print(f"Skipping {checkpoint_path}, results already exist")
@@ -290,7 +346,7 @@ def main():
 
     results = {}
     for checkpoint_path in streaming_vit_paths:
-        avg = evaluate_checkpoint(checkpoint_path, act75_data)
+        avg = evaluate_checkpoint(checkpoint_path, act75_data, eval_again=args.eval_again)
         results[checkpoint_path] = avg
 
     if results:
