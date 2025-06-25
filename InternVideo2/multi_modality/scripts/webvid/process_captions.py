@@ -12,19 +12,14 @@ from tqdm.asyncio import tqdm
 import aiofiles
 
 # --- Configuration ---
-# -----------------------------------------------------------------------------
-# Dataset and Model Configuration
+
 DATASET_NAME = "TempoFunk/webvid-10M"
 NUM_ROWS_TO_PROCESS = 100_000
-LLM_MODEL = "Llama-3.3-70B-Instruct"  # Or another suitable model
-HF_HUB_REPO_ID = "qingy2024/webvid-10M-classified" # <<<--- CHANGE THIS
+LLM_MODEL = "meta-llama/Llama-3.3-70B-Instruct"
+HF_HUB_REPO_ID = "qingy2024/webvid-10M-scored"
 
-# API and Rate Limiting Configuration
-# Meta's default is 3000 RPM. 3000/60 = 50 RPS.
-# We set max concurrent requests slightly lower to be safe.
-MAX_CONCURRENT_REQUESTS = 5
-# New: Token-per-minute limit for the Llama.com API
-MAX_TOKENS_PER_MINUTE = 900_000 # Set slightly below the 1M limit for safety
+MAX_CONCURRENT_REQUESTS = 20
+MAX_TOKENS_PER_MINUTE = 2_000_000
 
 # Retry Configuration
 MAX_RETRIES = 5
@@ -33,8 +28,7 @@ INITIAL_RETRY_DELAY_S = 2 # Initial delay in seconds for the first retry
 # File Configuration
 PROGRESS_FILE = "progress.jsonl"
 
-# --- NEW: Rate Limiter and Retry Utilities ---
-# -----------------------------------------------------------------------------
+# Rate Limiter and Retry Utilities
 
 class AsyncTokenRateLimiter:
     """
@@ -110,43 +104,76 @@ def async_retry(max_retries=3, initial_delay=1, backoff_factor=2,
     return decorator
 
 
-# --- LLM Prompt and Parsing (Unchanged) ---
-# -----------------------------------------------------------------------------
+# LLM Prompt and Parsing
 
 def create_llm_prompt(caption: str) -> str:
-    """Creates the detailed prompt for the LLM."""
+    """Creates the detailed prompt for the LLM to rate action intensity."""
     return f"""
-Analyze the following video caption and classify if it describes an action.
+Analyze the following video caption and rate its "action intensity" on a scale from 0 to 5. The key factor is the presence of a clear, dynamic "peak moment" of action.
 
 Your task is to:
 1.  Carefully read the caption.
-2.  Think step by step inside <thinking> tags.
-3.  Determine if it describes a distinct action (a subject performing a verb).
-4.  If there is an action, rewrite the caption to be more descriptive, starting with "A video of...". Do not add new information.
-5.  If there is no action (e.g., it's just a list of keywords, a title card, or a static description), classify it as "no_action".
-6.  You MUST provide your response in the specified format below, including the <thinking> and <response> tags.
+2.  Think step-by-step inside <thinking> tags about the type of action described.
+3.  Assign an `action_score` from 0 to 5 based on the scale below.
+4.  If the score is 1 or higher, rewrite the caption to be more descriptive, starting with "A video of...". Do not add new information.
+5.  If the score is 0, the rewritten caption should be `none`.
+6.  You MUST provide your response in the specified format, including the <thinking> and <response> tags.
+
+**Action Score Scale:**
+*   **0 (Static/Scenic):** No action or subject. Describes a static scene, a location, or is just a list of keywords.
+    (e.g., "A mushroom in a forest", "New York City skyline", "background animation texture")
+*   **1 (Ambient/Subtle Motion):** Very low-energy, passive, or ambient movement. No clear subject performing an intentional action.
+    (e.g., "Clouds drifting in the sky", "Water gently rippling", "Sunlight shining through branches")
+*   **2 (Low-Energy/Sustained Action):** A clear action is present, but it's calm, sustained, or lacks a distinct peak.
+    (e.g., "A person sitting on a bench and reading a book", "Kids playing with toys on the floor", "Someone walking down a street")
+*   **3 (Moderate Action):** A more dynamic or purposeful action that has energy but may not have a single, dramatic peak.
+    (e.g., "A group of people dancing", "A car driving on a highway", "A chef chopping vegetables quickly")
+*   **4 (High-Energy Action/Clear Peak):** A high-energy action with a clear and distinct peak moment. The action builds to or completes a significant, visually interesting point.
+    (e.g., "A whale jumping out of the water", "A soccer player scoring a goal", "A gymnast landing a routine")
+*   **5 (Peak Moment/Climactic Action):** The caption describes the absolute climax or the most intense, singular moment of an action. This is the apex.
+    (e.g., "A person performs a backflip, midair", "A lightning strike illuminating the sky", "An explosion erupting")
 
 Caption to analyze: "{caption}"
 
 ---
-Example 1 (Action):
-Caption: "Funny naughty cat gnaws rope from the balloon."
+**Example 1 (Peak Moment):**
+Caption: "Man does a backflip on a trampoline"
 <thinking>
-The caption describes a clear action. The subject is "cat", the verb is "gnaws", and the object is "rope". I will classify this as 'action' and rewrite the sentence to start with "A video of...".
+The caption describes a very high-energy, specific action: a backflip. This action has a clear and dramatic peak moment when the person is inverted in the air. This fits the definition of a score 5, as it's the climax of the action. I will rewrite the caption.
 </thinking>
 <response>
-classification:action
-rewritten_caption:A video of a funny, naughty cat gnawing on a rope from a balloon.
+action_score:5
+rewritten_caption:A video of a man doing a backflip on a trampoline.
 </response>
 
-Example 2 (No Action):
-Caption: "Michigan mi road map word travel tourism destination 3d animation"
+**Example 2 (Sustained Action):**
+Caption: "woman sitting on a park bench reading"
 <thinking>
-This caption is a list of keywords and concepts related to a 3D animation. It does not describe a specific subject performing an action. I will classify this as 'no_action'.
+The caption describes an action (reading), but it is a calm, low-energy, and sustained activity. There is no peak moment or high drama. This perfectly matches the description for a score of 2. I will rewrite the caption.
 </thinking>
 <response>
-classification:no_action
+action_score:2
+rewritten_caption:A video of a woman sitting on a park bench and reading a book.
+</response>
+
+**Example 3 (Static Scene):**
+Caption: "A beautiful mushroom in the forest"
+<thinking>
+This caption describes a static object in a scene. There is no subject performing any action. This is a classic example of a score 0. The rewritten caption will be 'none'.
+</thinking>
+<response>
+action_score:0
 rewritten_caption:none
+</response>
+
+**Example 4 (High-Energy with Peak):**
+Caption: "A whale breaches the surface of the ocean"
+<thinking>
+The caption describes a powerful, high-energy event. A whale breaching has a very clear peak moment as it emerges from the water. This is a strong example of a score 4. I will rewrite the caption.
+</thinking>
+<response>
+action_score:4
+rewritten_caption:A video of a whale breaching the surface of the ocean.
 </response>
 ---
 
@@ -158,30 +185,36 @@ def parse_llm_response(content: str) -> dict:
     try:
         response_match = re.search(r"<response>(.*?)</response>", content, re.DOTALL)
         if not response_match:
-            print(f"Error: {content}")
-            return {"classification": "parse_error", "rewritten_caption": "no_response_tag"}
+            print(f"Parse Error: No <response> tag found in content: {content}")
+            return {"action_score": -1, "rewritten_caption": "no_response_tag"}
 
         response_text = response_match.group(1).strip()
 
-        classification = "parse_error"
+        action_score = -1 # Default to -1 for error
         rewritten_caption = "missing_caption"
 
-        class_match = re.search(r"classification:(.*)", response_text)
-        if class_match:
-            classification = class_match.group(1).strip()
+        score_match = re.search(r"action_score:\s*(\d+)", response_text)
+        if score_match:
+            try:
+                # Convert the extracted score to an integer
+                action_score = int(score_match.group(1).strip())
+            except (ValueError, TypeError):
+                print(f"Parse Error: Could not convert action_score to int in response: {response_text}")
+                action_score = -1 # Mark as error if not a valid integer
+        else:
+            rewritten_caption = "missing_action_score"
+
 
         caption_match = re.search(r"rewritten_caption:(.*)", response_text, re.DOTALL)
         if caption_match:
             rewritten_caption = caption_match.group(1).strip()
 
-        return {"classification": classification, "rewritten_caption": rewritten_caption}
+        return {"action_score": action_score, "rewritten_caption": rewritten_caption}
     except Exception as e:
-        return {"classification": "parse_error", "rewritten_caption": str(e)}
+        return {"action_score": -1, "rewritten_caption": str(e)}
 
-# --- Asynchronous Processing Core (Updated) ---
-# -----------------------------------------------------------------------------
+# Asynchronous Processing Core
 
-# Apply the retry decorator to the processing function
 @async_retry(max_retries=MAX_RETRIES, initial_delay=INITIAL_RETRY_DELAY_S)
 async def process_item(item, client, semaphore, pbar, token_limiter):
     """Processes a single item: waits for limits, calls API, and parses response."""
@@ -202,34 +235,32 @@ async def process_item(item, client, semaphore, pbar, token_limiter):
                 top_p=0.9,
             )
 
-            llm_output = response.completion_message["content"]["text"]
+            llm_output = response.choices[0].message.content
             parsed_data = parse_llm_response(llm_output)
 
             # Record token usage on success
             tokens_used = 0
             try:
-                # Using the specific metric structure for Llama.com API
-                tokens_used = int(response.metrics[-1]['value'])
+                tokens_used = response.usage.total_tokens
                 await token_limiter.add_usage(tokens_used)
             except (KeyError, IndexError, TypeError):
                 print(f"Warning: Could not extract token count for videoid {videoid}. Usage not recorded.")
 
-
+            # Log result
             result = {
                 "videoid": videoid,
                 "original_caption": caption,
-                "classification": parsed_data["classification"],
+                "action_score": parsed_data["action_score"],
                 "rewritten_caption": parsed_data["rewritten_caption"],
-                "tokens_used": tokens_used, # Optional: good to log
+                "tokens_used": tokens_used,
                 "status": "success"
             }
 
         except Exception as e:
-            # This block now catches errors that persist *after* all retries
             result = {
                 "videoid": videoid,
                 "original_caption": caption,
-                "classification": "api_error",
+                "action_score": -1, # Use -1 to indicate an API or other error
                 "rewritten_caption": str(e),
                 "tokens_used": 0,
                 "status": "error"
@@ -238,28 +269,27 @@ async def process_item(item, client, semaphore, pbar, token_limiter):
         async with aiofiles.open(PROGRESS_FILE, 'a') as f:
             await f.write(json.dumps(result) + '\n')
 
-        pbar.update(1) # Manually update the progress bar on completion
+        pbar.update(1)
         return result
 
-# --- Main Execution (Updated) ---
-# -----------------------------------------------------------------------------
 
 async def main():
     """Main function to orchestrate the entire process."""
     load_dotenv()
 
-    llama_api_key = os.getenv("LLAMA_API_KEY")
+    nebius_api_key = os.getenv("NEBIUS_API_KEY")
     hf_token = os.getenv("HF_TOKEN")
-    if not llama_api_key or not hf_token:
-        raise ValueError("LLAMA_API_KEY or HF_TOKEN not found in .env file.")
+    if not nebius_api_key or not hf_token:
+        raise ValueError("NEBIUS_API_KEY or HF_TOKEN not found in .env file.")
 
     client = AsyncOpenAI(
-        api_key=llama_api_key,
-        base_url="https://api.llama.com/v1",
+        api_key=nebius_api_key,
+        base_url="https://api.studio.nebius.com/v1",
     )
 
     print("---- Configuration ----")
     print(f"Model: {LLM_MODEL}")
+    print(f"Repo ID: {HF_HUB_REPO_ID}")
     print(f"Max Concurrent Requests: {MAX_CONCURRENT_REQUESTS}")
     print(f"Max Tokens per Minute: {MAX_TOKENS_PER_MINUTE:,}")
     print(f"Max Retries: {MAX_RETRIES}")
