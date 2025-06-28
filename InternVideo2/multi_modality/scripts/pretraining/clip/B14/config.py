@@ -164,7 +164,7 @@ deepspeed = dict(
 enable_contrastive_distillation = True
 contrastive_temperature = 0.07
 contrastive_lambda = 0.5
-contrastive_warmup_pct = 0.3
+contrastive_warmup_pct = 0.25
 contrastive_ramp_iters = 300
 
 # hf_hub_download(repo_id="google/fleurs", filename="fleurs.py", repo_type="dataset")
