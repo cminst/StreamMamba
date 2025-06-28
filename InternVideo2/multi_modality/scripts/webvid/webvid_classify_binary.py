@@ -10,7 +10,7 @@ from tqdm.auto import tqdm
 import numpy as np
 
 # --- Configuration ---
-CLASSIFICATION_MODEL = "./RCJ/action_classifier/"
+CLASSIFICATION_MODEL = "./ActionBert-109M/"
 GENERATION_MODEL = "./ReAction-1.5B/"
 DATASET_ID = "TempoFunk/webvid-10M"
 OUTPUT_HF_REPO = "qingy2024/webvid-10M-pro"
@@ -40,24 +40,24 @@ def main():
     if os.path.exists(CLASSIFICATION_OUTPUT_FILE):
         logger.info(f"Found existing classification file: {CLASSIFICATION_OUTPUT_FILE}")
         logger.info("Loading classifications from file...")
-        
+
         # Load classifications from file
         classifications = []
         action_count = 0
         no_action_count = 0
-        
+
         try:
             with open(CLASSIFICATION_OUTPUT_FILE, 'r', encoding='utf-8') as f:
                 for line in tqdm(f, desc="Loading classifications"):
                     data = json.loads(line.strip())
                     classification = data['classification']
                     classifications.append(classification)
-                    
+
                     if classification == 'action':
                         action_count += 1
                     elif classification == 'no_action':
                         no_action_count += 1
-            
+
             # Verify we have the right number of classifications
             if len(classifications) != len(dataset):
                 logger.warning(f"Number of classifications ({len(classifications)}) doesn't match dataset size ({len(dataset)})")
@@ -67,7 +67,7 @@ def main():
             else:
                 logger.info(f"Successfully loaded {len(classifications)} classifications")
                 logger.info(f"Found {action_count} 'action' captions and {no_action_count} 'no_action' captions.")
-        
+
         except Exception as e:
             logger.error(f"Error loading classification file: {e}")
             logger.info("Re-running classification...")
