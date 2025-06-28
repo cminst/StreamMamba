@@ -91,9 +91,7 @@ def main():
             )
 
             for idx, result in progress_bar:
-                # The pipeline returns a list, e.g., [{'label': 'LABEL_0', 'score': 3.925}].
-                # We need the score from the first (and only) dictionary in the list.
-                score = result[0]['score']
+                score = result['score']
                 scores.append(score)
 
                 # Save score result to JSONL file for caching
