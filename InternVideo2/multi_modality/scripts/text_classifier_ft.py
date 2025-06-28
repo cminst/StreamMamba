@@ -1,5 +1,6 @@
 import argparse
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -333,7 +334,18 @@ def main():
 
 
     # 5. Data Collator
-    data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
+    class RegressionDataCollator(DataCollatorWithPadding):
+        def __call__(self, features):
+            batch = super().__call__(features)
+            # For regression, ensure labels are float type
+            if "labels" in batch:
+                batch["labels"] = batch["labels"].float()
+            return batch
+
+    if args.num_output:
+        data_collator = RegressionDataCollator(tokenizer=tokenizer)
+    else:
+        data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
 
     # 6. Compute Metrics function
     def compute_metrics(eval_pred):
@@ -341,6 +353,7 @@ def main():
         if args.num_output:
             # Regression metrics
             predictions = predictions.flatten()  # Remove extra dimensions
+            labels = labels.flatten()  # Ensure labels are also flattened
             mse = mean_squared_error(labels, predictions)
             mae = mean_absolute_error(labels, predictions)
             # Calculate R² manually
@@ -420,6 +433,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 """
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118 # Adjust cuXXX for your CUDA version, or use cpuonly
