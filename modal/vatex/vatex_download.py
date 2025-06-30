@@ -62,6 +62,10 @@ def download_and_process_vatex(cookies_texts: list[str], hf_dataset_name: str):
     cookies_arg = ",".join(cookies_paths)
     print(f"Wrote cookies to {cookies_arg}")
 
+    vatex_volume.commit()
+
+    vatex_volume.reload()
+
     print("Cloning and installing video2dataset...")
     subprocess.run(["git", "clone", "https://github.com/qingy1337/video2dataset"], check=True)
     os.chdir("video2dataset")
