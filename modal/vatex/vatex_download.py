@@ -3,7 +3,10 @@ import subprocess
 import os
 
 image = (
-    modal.Image.debian_slim()
+    modal.Image.from_registry(
+        "nvidia/cuda:12.6.3-devel-ubuntu22.04",
+        add_python="3.10"
+    )
     .pip_install(
         "httpx",
         "tqdm",
