@@ -81,7 +81,7 @@ def download_and_process_vatex(cookies_texts: list[str], hf_dataset_name: str):
         "--url_col=videoID",
         "--caption_col=enCap",
         f"--output_folder={output_folder_in_volume}",
-        f"--cookies_file={cookies_arg}",
+        f"--cookies_file=\"{cookies_arg}\"",
     ]
     subprocess.run(video2dataset_command, check=True)
     print("video2dataset command finished.")
