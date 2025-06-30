@@ -43,13 +43,20 @@ vatex_volume = modal.Volume.from_name("vatex-dataset", create_if_missing=True)
     timeout=86_400,
     cpu=16.0
 )
-def download_and_process_vatex(hf_dataset_name: str):
-    # 1. Download the JSON file to the volume
+def download_and_process_vatex(cookies_text: str, hf_dataset_name: str):
+    # 1. Download the JSON file to the volume and write cookies txt file
     json_url = "https://eric-xw.github.io/vatex-website/data/vatex_training_v1.0.json"
     local_json_path = "/data/vatex_training_v1.0.json"
+    cookies_txt_path = "/data/cookies.txt"
+
     print(f"Downloading {json_url} to {local_json_path}...")
     subprocess.run(["wget", "-O", local_json_path, json_url], check=True)
     print("Download complete.")
+
+    with open(cookies_txt_path, "w") as cookies_file:
+        cookies_file.write(cookies_text)
+
+    print(f"Wrote cookies to {cookies_txt_path}")
 
     # 2. Clone video2dataset, change directory, and install in editable mode
     print("Cloning and installing video2dataset...")
@@ -69,7 +76,8 @@ def download_and_process_vatex(hf_dataset_name: str):
         "--input_format=json",
         "--url_col=videoID",
         "--caption_col=enCap",
-        f"--output_folder={output_folder_in_volume}"
+        f"--output_folder={output_folder_in_volume}",
+        f"--cookies_file={cookies_txt_path}",
     ]
     subprocess.run(video2dataset_command, check=True)
     print("video2dataset command finished.")
@@ -92,6 +100,12 @@ def download_and_process_vatex(hf_dataset_name: str):
     print(f"\n\n{'-'*50}\n\nFinished uploading dataset: https://huggingface.co/datasets/{hf_dataset_name}")
 
 @app.local_entrypoint()
-def main(hf_dataset_name: str):
+def main(cookies_file_path: str, hf_dataset_name: str):
     print("Starting script!")
-    download_and_process_vatex.remote(hf_dataset_name)
+    print(f"  > Cookies file path: {cookies_file_path}")
+    print(f"  > Output HF dataset name: {hf_dataset_name}")
+
+    with open(cookies_file_path, 'r') as file:
+        cookies_text = file.read()
+
+    download_and_process_vatex.remote(cookies_text, hf_dataset_name)
