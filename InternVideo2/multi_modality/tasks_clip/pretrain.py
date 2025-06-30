@@ -444,7 +444,7 @@ def train(
                 cosine_loss_val = cosine_sim_loss(stream_embedding, target_embedding)
                 info_nce_val = info_nce_loss(
                     stream_embedding,
-                    target_embedding,
+                    stream_embedding.detach(), # Stop gradient for the key side.
                     text,
                     temperature=getattr(config, 'contrastive_temperature', 0.07),
                 ) if nce_lambda > 0 else torch.tensor(0.0, device=device)
