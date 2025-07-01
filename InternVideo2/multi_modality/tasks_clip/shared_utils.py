@@ -157,8 +157,10 @@ def setup_model(
                 optimizer.load_state_dict(checkpoint["optimizer"])
                 scheduler.load_state_dict(checkpoint["scheduler"])
                 scaler.load_state_dict(checkpoint["scaler"])
-                start_epoch = checkpoint["epoch"] + 1
                 global_step = checkpoint["global_step"]
+                start_epoch = checkpoint["epoch"]
+                if num_steps_per_epoch > 0 and global_step % num_steps_per_epoch == 0:
+                    start_epoch += 1
 
             msg = model_without_ddp.load_state_dict(state_dict, strict=False)
             logger.info(msg)

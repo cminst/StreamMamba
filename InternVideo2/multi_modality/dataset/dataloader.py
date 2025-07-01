@@ -57,8 +57,8 @@ class MetaLoader(object):
 
 
 class MetaLoader_rs(object):
-    """ wraps multiple data loader """
-    def __init__(self, name2loader, skip_num=0):
+    """Wraps multiple data loaders with optional deterministic ordering."""
+    def __init__(self, name2loader, skip_num=0, seed=None):
         """Iterates over multiple dataloaders, it ensures all processes
         work on data from the same dataloader. This loader will end when
         the shorter dataloader raises StopIteration exception.
@@ -71,9 +71,13 @@ class MetaLoader_rs(object):
 
         iter_order = []
         for n, l in name2loader.items():
-            iter_order.extend([name2index[n]]*len(l))
+            iter_order.extend([name2index[n]] * len(l))
 
-        random.shuffle(iter_order)
+        if seed is not None:
+            rng = random.Random(seed)
+            rng.shuffle(iter_order)
+        else:
+            random.shuffle(iter_order)
         iter_order = torch.Tensor(iter_order).to(torch.device("cuda")).to(torch.uint8)
 
         # sync
