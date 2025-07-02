@@ -131,6 +131,7 @@ def setup_model(
         else:
             checkpoint = torch.load(config.pretrained_path, map_location="cpu")
         logger.info(f"Loading checkpoint from {config.pretrained_path}")
+        logger.info(f"Checkpoint contains keys: {list(checkpoint.keys())}")
         try:
             if "model" in checkpoint.keys():
                 state_dict = checkpoint["model"]
@@ -147,14 +148,30 @@ def setup_model(
 
         if config.resume:
             assert not (hasattr(config, "deepspeed") and config.deepspeed.enable), "Deepspeed should run here!!!"
-            optimizer.load_state_dict(checkpoint["optimizer"])
-            scheduler.load_state_dict(checkpoint["scheduler"])
-            scaler.load_state_dict(checkpoint["scaler"])
+            if "optimizer" in checkpoint:
+                optimizer.load_state_dict(checkpoint["optimizer"])
+                logger.info("Loaded optimizer state from checkpoint")
+            else:
+                logger.warning("Optimizer state not found in checkpoint")
+
+            if "scheduler" in checkpoint:
+                scheduler.load_state_dict(checkpoint["scheduler"])
+                logger.info("Loaded scheduler state from checkpoint")
+            else:
+                logger.warning("Scheduler state not found in checkpoint")
+
+            if "scaler" in checkpoint and scaler is not None:
+                scaler.load_state_dict(checkpoint["scaler"])
+                logger.info("Loaded scaler state from checkpoint")
+            elif scaler is not None:
+                logger.warning("Scaler state not found in checkpoint")
+
             if 'local_step' in checkpoint.keys():
                 start_epoch = checkpoint['epoch']
             else:
-                start_epoch = checkpoint["epoch"] + 1
-            global_step = checkpoint["global_step"]
+                start_epoch = checkpoint.get("epoch", -1) + 1
+            global_step = checkpoint.get("global_step", 0)
+            logger.info(f"Resumed from epoch {start_epoch}, global_step {global_step}")
 
         elif not pretrain:  # downstream init from pretrained ckpt 
 
@@ -191,6 +208,11 @@ def setup_model(
 
         msg = model_without_ddp.load_state_dict(state_dict, strict=False)
         logger.info(msg)
+        if hasattr(msg, "missing_keys") and hasattr(msg, "unexpected_keys"):
+            if msg.missing_keys:
+                logger.info(f"Missing keys when loading model: {msg.missing_keys}")
+            if msg.unexpected_keys:
+                logger.info(f"Unexpected keys when loading model: {msg.unexpected_keys}")
         logger.info(f"Loaded checkpoint from {config.pretrained_path}")
     else:
         if not config.resume:

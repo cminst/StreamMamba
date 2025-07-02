@@ -148,6 +148,7 @@ def setup_model(
         if osp.isfile(config.pretrained_path):
             checkpoint = torch.load(config.pretrained_path, map_location="cpu")
             logger.info(f"Load pretrained model from {config.pretrained_path}")
+            logger.info(f"Checkpoint contains keys: {list(checkpoint.keys())}")
             if 'model' in checkpoint.keys():
                 state_dict = checkpoint["model"]
             elif 'module' in checkpoint.keys():
@@ -158,10 +159,19 @@ def setup_model(
             if config.resume:
                 if "optimizer" in checkpoint:
                     optimizer.load_state_dict(checkpoint["optimizer"])
+                    logger.info("Loaded optimizer state from checkpoint")
+                else:
+                    logger.warning("Optimizer state not found in checkpoint")
                 if "scheduler" in checkpoint:
                     scheduler.load_state_dict(checkpoint["scheduler"])
+                    logger.info("Loaded scheduler state from checkpoint")
+                else:
+                    logger.warning("Scheduler state not found in checkpoint")
                 if "scaler" in checkpoint and scaler is not None:
                     scaler.load_state_dict(checkpoint["scaler"])
+                    logger.info("Loaded scaler state from checkpoint")
+                elif scaler is not None:
+                    logger.warning("Scaler state not found in checkpoint")
 
                 global_step = checkpoint.get("global_step", 0)
                 start_epoch = checkpoint.get("epoch", 0)
@@ -171,6 +181,11 @@ def setup_model(
 
             msg = model_without_ddp.load_state_dict(state_dict, strict=False)
             logger.info(msg)
+            if hasattr(msg, "missing_keys") and hasattr(msg, "unexpected_keys"):
+                if msg.missing_keys:
+                    logger.info(f"Missing keys when loading model: {msg.missing_keys}")
+                if msg.unexpected_keys:
+                    logger.info(f"Unexpected keys when loading model: {msg.unexpected_keys}")
             # Handle optional streaming student checkpoint
             if isinstance(checkpoint, dict):
                 student_key = None
