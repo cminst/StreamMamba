@@ -144,9 +144,16 @@ def setup_model(
             args=config, model=model, model_parameters=optimizer_params, dist_init_required=not config.distributed,
             lr_scheduler=lambda opt: create_scheduler(config.scheduler, opt)
         )
-        if osp.isdir(config.pretrained_path):
-            logger.info(f"Load pretrained model from {config.pretrained_path}")
-            output_dir, tag = os.path.split(config.pretrained_path)
+        # Determine which checkpoint directory to use when resuming training
+        ckpt_dir = None
+        if getattr(config, "student_ckpt_path", None) and osp.isdir(config.student_ckpt_path):
+            ckpt_dir = config.student_ckpt_path
+        elif osp.isdir(config.pretrained_path):
+            ckpt_dir = config.pretrained_path
+
+        if ckpt_dir is not None:
+            logger.info(f"Load pretrained model from {ckpt_dir}")
+            output_dir, tag = os.path.split(ckpt_dir)
             if config.resume:
                 _, client_state = model.load_checkpoint(output_dir, tag=tag, load_module_strict=False)
                 global_step = model.global_steps
@@ -154,7 +161,7 @@ def setup_model(
                 start_epoch = global_step // num_steps_per_epoch
             else:
                 _, client_state = model.load_checkpoint(
-                    output_dir, tag=tag, load_module_strict=False, 
+                    output_dir, tag=tag, load_module_strict=False,
                     load_optimizer_states=False, load_lr_scheduler_states=False,
                     load_module_only=True
                 )
