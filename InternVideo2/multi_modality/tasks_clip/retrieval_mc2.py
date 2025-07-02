@@ -304,7 +304,6 @@ def main(config):
                 for k in list(state_dict.keys()):
                     if k in param_grad_dict.keys() and not param_grad_dict[k]:
                         # delete parameters that do not require gradient
-                        logger.info(f"Not saving {k}")
                         del state_dict[k]
 
                 save_obj = {
