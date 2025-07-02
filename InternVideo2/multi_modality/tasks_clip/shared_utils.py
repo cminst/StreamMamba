@@ -82,40 +82,44 @@ def setup_model(
         model_best = join(config.output_dir, "ckpt_best.pth")
 
         large_step_num = -1
+        large_step_path = None
         large_epoch_num = -1
+        large_epoch_path = None
         for fname in os.listdir(config.output_dir):
             if fname.startswith("ckpt_iter"):
                 step_str = fname[len("ckpt_iter"):]
                 if step_str.endswith(".pth"):
-                    step_str = step_str[:-4]
-                if step_str.isdigit():
-                    step_num = int(step_str)
-                    large_step_num = max(large_step_num, step_num)
+                    step_str_nosuffix = step_str[:-4]
+                else:
+                    step_str_nosuffix = step_str
+                if step_str_nosuffix.isdigit():
+                    step_num = int(step_str_nosuffix)
+                    if step_num > large_step_num:
+                        large_step_num = step_num
+                        large_step_path = join(config.output_dir, fname)
             elif fname.startswith("ckpt_"):
                 epoch_str = fname[len("ckpt_"):]
                 if epoch_str.endswith(".pth"):
-                    epoch_str = epoch_str[:-4]
-                if epoch_str.isdigit():
-                    epoch_num = int(epoch_str)
-                    large_epoch_num = max(large_epoch_num, epoch_num)
+                    epoch_str_nosuffix = epoch_str[:-4]
+                else:
+                    epoch_str_nosuffix = epoch_str
+                if epoch_str_nosuffix.isdigit():
+                    epoch_num = int(epoch_str_nosuffix)
+                    if epoch_num > large_epoch_num:
+                        large_epoch_num = epoch_num
+                        large_epoch_path = join(config.output_dir, fname)
 
         if large_step_num != -1:
             logger.info(f"Load the latest step: {large_step_num}")
-            file_candidate = join(config.output_dir, f"ckpt_iter{large_step_num}.pth")
-            dir_candidate = join(config.output_dir, f"ckpt_iter{large_step_num}")
-            if osp.isfile(file_candidate):
-                model_latest = file_candidate
-            elif osp.isdir(dir_candidate):
-                model_latest = dir_candidate
+            candidate = large_step_path
+            if candidate and (osp.isfile(candidate) or osp.isdir(candidate)):
+                model_latest = candidate
 
         if large_epoch_num != -1 and (large_epoch_num + 1) * num_steps_per_epoch > large_step_num:
             logger.info(f"Load the latest epoch: {large_epoch_num}")
-            file_candidate = join(config.output_dir, f"ckpt_{large_epoch_num}.pth")
-            dir_candidate = join(config.output_dir, f"ckpt_{large_epoch_num}")
-            if osp.isfile(file_candidate):
-                model_latest = file_candidate
-            elif osp.isdir(dir_candidate):
-                model_latest = dir_candidate
+            candidate = large_epoch_path
+            if candidate and (osp.isfile(candidate) or osp.isdir(candidate)):
+                model_latest = candidate
 
         if hasattr(config, "deepspeed") and config.deepspeed.enable:
             if osp.isfile(model_latest) or osp.isdir(model_latest):
