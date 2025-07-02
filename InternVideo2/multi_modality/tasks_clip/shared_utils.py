@@ -165,6 +165,7 @@ def setup_model(
 
                 global_step = checkpoint.get("global_step", 0)
                 start_epoch = checkpoint.get("epoch", 0)
+                
                 if num_steps_per_epoch > 0 and global_step % num_steps_per_epoch == 0:
                     start_epoch += 1
 
