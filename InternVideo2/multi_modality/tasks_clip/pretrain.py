@@ -49,10 +49,14 @@ def set_rng_state(state):
     if not state:
         return
     try:
-        random.setstate(state.get("random_state"))
-        np.random.set_state(state.get("numpy_state"))
-        torch.set_rng_state(state.get("torch_state"))
-        torch.cuda.set_rng_state_all(state.get("cuda_state"))
+        if "random_state" in state and state["random_state"] is not None:
+            random.setstate(state["random_state"])
+        if "numpy_state" in state and state["numpy_state"] is not None:
+            np.random.set_state(state["numpy_state"])
+        if "torch_state" in state and state["torch_state"] is not None:
+            torch.set_rng_state(state["torch_state"])
+        if "cuda_state" in state and state["cuda_state"] is not None and torch.cuda.is_available():
+            torch.cuda.set_rng_state_all(state["cuda_state"])
     except Exception as e:
         logger.warning(f"Failed to restore RNG state: {e}")
 

@@ -82,24 +82,26 @@ def setup_model(
         model_best = join(config.output_dir, "ckpt_best.pth")
 
         large_step_num = -1
-        large_num = -1
-        for p in os.listdir(config.output_dir):
-            if 'ckpt_iter' in p:
-                num = p.split('_iter')[1].split('.')[0]
-                if str.isnumeric(num):
-                    if int(num) > large_step_num:
-                        large_step_num = int(num)
-            elif 'ckpt_' in p:
-                num = p.split('_')[1].split('.')[0]
-                if str.isnumeric(num):
-                    if int(num) > large_num:
-                        large_num = int(num)
+        large_epoch_num = -1
+        for fname in os.listdir(config.output_dir):
+            if fname.startswith("ckpt_iter") and fname.endswith(".pth"):
+                step_str = fname[len("ckpt_iter") : -4]
+                if step_str.isdigit():
+                    step_num = int(step_str)
+                    large_step_num = max(large_step_num, step_num)
+            elif fname.startswith("ckpt_") and fname.endswith(".pth"):
+                epoch_str = fname[len("ckpt_") : -4]
+                if epoch_str.isdigit():
+                    epoch_num = int(epoch_str)
+                    large_epoch_num = max(large_epoch_num, epoch_num)
+
         if large_step_num != -1:
             logger.info(f"Load the latest step: {large_step_num}")
-            model_latest = join(config.output_dir, f"ckpt_iter{large_step_num:02d}.pth")
-        if large_num != -1 and (large_num + 1) * num_steps_per_epoch > large_step_num:
-            logger.info(f"Load the latest epoch: {large_num}")
-            model_latest = join(config.output_dir, f"ckpt_{large_num:02d}.pth")
+            model_latest = join(config.output_dir, f"ckpt_iter{large_step_num:07d}.pth")
+
+        if large_epoch_num != -1 and (large_epoch_num + 1) * num_steps_per_epoch > large_step_num:
+            logger.info(f"Load the latest epoch: {large_epoch_num}")
+            model_latest = join(config.output_dir, f"ckpt_{large_epoch_num:02d}.pth")
 
         if hasattr(config, "deepspeed") and config.deepspeed.enable:
             if osp.isdir(model_latest):
@@ -154,16 +156,36 @@ def setup_model(
                 state_dict = checkpoint
             # resume optimizer
             if config.resume:
-                optimizer.load_state_dict(checkpoint["optimizer"])
-                scheduler.load_state_dict(checkpoint["scheduler"])
-                scaler.load_state_dict(checkpoint["scaler"])
-                global_step = checkpoint["global_step"]
-                start_epoch = checkpoint["epoch"]
+                if "optimizer" in checkpoint:
+                    optimizer.load_state_dict(checkpoint["optimizer"])
+                if "scheduler" in checkpoint:
+                    scheduler.load_state_dict(checkpoint["scheduler"])
+                if "scaler" in checkpoint and scaler is not None:
+                    scaler.load_state_dict(checkpoint["scaler"])
+
+                global_step = checkpoint.get("global_step", 0)
+                start_epoch = checkpoint.get("epoch", 0)
+                
                 if num_steps_per_epoch > 0 and global_step % num_steps_per_epoch == 0:
                     start_epoch += 1
 
             msg = model_without_ddp.load_state_dict(state_dict, strict=False)
             logger.info(msg)
+            # Handle optional streaming student checkpoint
+            if isinstance(checkpoint, dict):
+                student_key = None
+                if "streaming_student" in checkpoint:
+                    student_key = "streaming_student"
+                elif "streaming_vision_encoder" in checkpoint:
+                    student_key = "streaming_vision_encoder"
+                if student_key is not None:
+                    try:
+                        model_without_ddp.streaming_vision_encoder.load_state_dict(
+                            checkpoint[student_key]
+                        )
+                        logger.info("Loaded streaming student model from checkpoint")
+                    except Exception as e:
+                        logger.warning(f"Failed to load streaming student model: {e}")
             logger.info(f"Loaded checkpoint from {config.pretrained_path}")
         else:
             logger.warning("No pretrained checkpoint provided, training from scratch")
