@@ -106,17 +106,23 @@ def setup_model(
         model_best = join(config.output_dir, "ckpt_best.pth")
         large_num = -1
         for p in os.listdir(config.output_dir):
-            if 'ckpt' in p:
-                num = p.split('_')[1].split('.')[0]
+            if p.startswith("ckpt_"):
+                num = p[len("ckpt_"):]
+                if num.endswith(".pth"):
+                    num = num[:-4]
                 if str.isnumeric(num):
-                    if int(num) > large_num:
-                        large_num = int(num)
+                    large_num = max(large_num, int(num))
         if large_num != -1:
-            model_latest = join(config.output_dir, f"ckpt_{large_num:02d}.pth")
-        if osp.isfile(model_latest):
+            file_candidate = join(config.output_dir, f"ckpt_{large_num}.pth")
+            dir_candidate = join(config.output_dir, f"ckpt_{large_num}")
+            if osp.isfile(file_candidate):
+                model_latest = file_candidate
+            elif osp.isdir(dir_candidate):
+                model_latest = dir_candidate
+        if osp.isfile(model_latest) or osp.isdir(model_latest):
             config.pretrained_path = model_latest
             config.resume = True
-        elif osp.isfile(model_best):
+        elif osp.isfile(model_best) or osp.isdir(model_best):
             config.pretrained_path = model_best
             config.resume = True
         else:

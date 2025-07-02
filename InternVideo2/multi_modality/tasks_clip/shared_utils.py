@@ -84,30 +84,44 @@ def setup_model(
         large_step_num = -1
         large_epoch_num = -1
         for fname in os.listdir(config.output_dir):
-            if fname.startswith("ckpt_iter") and fname.endswith(".pth"):
-                step_str = fname[len("ckpt_iter") : -4]
+            if fname.startswith("ckpt_iter"):
+                step_str = fname[len("ckpt_iter"):]
+                if step_str.endswith(".pth"):
+                    step_str = step_str[:-4]
                 if step_str.isdigit():
                     step_num = int(step_str)
                     large_step_num = max(large_step_num, step_num)
-            elif fname.startswith("ckpt_") and fname.endswith(".pth"):
-                epoch_str = fname[len("ckpt_") : -4]
+            elif fname.startswith("ckpt_"):
+                epoch_str = fname[len("ckpt_"):]
+                if epoch_str.endswith(".pth"):
+                    epoch_str = epoch_str[:-4]
                 if epoch_str.isdigit():
                     epoch_num = int(epoch_str)
                     large_epoch_num = max(large_epoch_num, epoch_num)
 
         if large_step_num != -1:
             logger.info(f"Load the latest step: {large_step_num}")
-            model_latest = join(config.output_dir, f"ckpt_iter{large_step_num:07d}.pth")
+            file_candidate = join(config.output_dir, f"ckpt_iter{large_step_num}.pth")
+            dir_candidate = join(config.output_dir, f"ckpt_iter{large_step_num}")
+            if osp.isfile(file_candidate):
+                model_latest = file_candidate
+            elif osp.isdir(dir_candidate):
+                model_latest = dir_candidate
 
         if large_epoch_num != -1 and (large_epoch_num + 1) * num_steps_per_epoch > large_step_num:
             logger.info(f"Load the latest epoch: {large_epoch_num}")
-            model_latest = join(config.output_dir, f"ckpt_{large_epoch_num:02d}.pth")
+            file_candidate = join(config.output_dir, f"ckpt_{large_epoch_num}.pth")
+            dir_candidate = join(config.output_dir, f"ckpt_{large_epoch_num}")
+            if osp.isfile(file_candidate):
+                model_latest = file_candidate
+            elif osp.isdir(dir_candidate):
+                model_latest = dir_candidate
 
         if hasattr(config, "deepspeed") and config.deepspeed.enable:
-            if osp.isdir(model_latest):
+            if osp.isfile(model_latest) or osp.isdir(model_latest):
                 config.pretrained_path = model_latest
                 config.resume = True
-            elif osp.isdir(model_best):
+            elif osp.isfile(model_best) or osp.isdir(model_best):
                 config.pretrained_path = model_best
                 config.resume = True
             else:
