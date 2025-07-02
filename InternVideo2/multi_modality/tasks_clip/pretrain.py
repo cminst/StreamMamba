@@ -4,6 +4,8 @@ import logging
 import os
 import pickle
 import time
+import random
+import numpy as np
 from os.path import join
 
 # Third-party imports
@@ -32,6 +34,27 @@ from utils.distributed import get_rank, is_main_process
 from utils.logger import log_dict_to_wandb, setup_wandb
 
 logger = logging.getLogger(__name__)
+
+
+def get_rng_state():
+    return {
+        "random_state": random.getstate(),
+        "numpy_state": np.random.get_state(),
+        "torch_state": torch.get_rng_state(),
+        "cuda_state": torch.cuda.get_rng_state_all(),
+    }
+
+
+def set_rng_state(state):
+    if not state:
+        return
+    try:
+        random.setstate(state.get("random_state"))
+        np.random.set_state(state.get("numpy_state"))
+        torch.set_rng_state(state.get("torch_state"))
+        torch.cuda.set_rng_state_all(state.get("cuda_state"))
+    except Exception as e:
+        logger.warning(f"Failed to restore RNG state: {e}")
 
 def save_debug_step_data(output_dir, global_step, frame_idx,
                          new_frame_input, # Input to streaming_vision_encoder
@@ -330,7 +353,12 @@ def train(
         for loader in train_loaders: loader.sampler.set_epoch(epoch)
 
     # Aggregate loaders
-    train_loader_agg = MetaLoader_rs(name2loader=dict(list(zip(media_types, train_loaders))), skip_num=skip_num)
+    seed = config.seed + epoch
+    train_loader_agg = MetaLoader_rs(
+        name2loader=dict(list(zip(media_types, train_loaders))),
+        skip_num=skip_num,
+        seed=seed,
+    )
 
     num_batches_train = len(train_loader_agg)
 
@@ -551,7 +579,10 @@ def train(
                     "optimizer": optimizer.state_dict(),
                     "scheduler": scheduler.state_dict(),
                     "scaler": scaler.state_dict() if config.use_half_precision else None,
-                    "config": config, "epoch": epoch, "global_step": global_step,
+                    "config": config,
+                    "epoch": epoch,
+                    "global_step": global_step,
+                    "rng_state": get_rng_state(),
                 }
                 checkpoint_filename = join(config.output_dir, f"ckpt_iter{global_step:07d}.pth")
                 torch.save(save_obj, checkpoint_filename)
@@ -651,7 +682,7 @@ def main(config):
     cudnn.benchmark = len(train_media_types) == 1
 
     model_cls = eval(config.model.get('model_cls', 'InternVideo2_CLIP'))
-    (
+    ( 
         model,
         model_without_ddp,
         optimizer,
@@ -667,6 +698,14 @@ def main(config):
         find_unused_parameters=True,
         num_steps_per_epoch=num_steps_per_epoch,
     )
+
+    # restore RNG state from checkpoint if available
+    if config.resume and os.path.isfile(config.pretrained_path):
+        try:
+            ckpt = torch.load(config.pretrained_path, map_location="cpu")
+            set_rng_state(ckpt.get("rng_state"))
+        except Exception as e:
+            logger.warning(f"Failed to load RNG state from checkpoint: {e}")
     if is_main_process() and config.wandb.enable:
         wandb.watch(model)
 
@@ -724,6 +763,7 @@ def main(config):
                 "config": config,
                 "epoch": epoch,
                 "global_step": global_step,
+                "rng_state": get_rng_state(),
             }
             if config.get("save_latest", False):
                 torch.save(save_obj, join(config.output_dir, "ckpt_latest.pth"))
