@@ -81,35 +81,25 @@ class InternVideo2_CLIP_small(nn.Module):
         if self.config.model.freeze_vision:
             for name, p in self.vision_encoder.named_parameters():
                 if self.config.model.open_vision_clip_projector and name.startswith('clip_projector'):
-                    logger.info(f"Unfreeze {name}")
-                else:
-                    logger.info(f"Freeze {name}")
                     p.requires_grad = False
-
-            logger.info("---- Froze all the vision encoder params ----")
+                else:
+                    p.requires_grad = False
 
             for name, p in self.vision_align.named_parameters():
                 if self.config.model.open_vision_clip_projector and name.startswith('clip_projector'):
-                    logger.info(f"Unfreeze {name}")
-                else:
-                    logger.info(f"Freeze {name}")
                     p.requires_grad = False
-
-            logger.info("---- Froze all the vision align params ----")
+                else:
+                    p.requires_grad = False
 
         if self.config.model.freeze_mobileclip_vision:
             for name, p in self.streaming_vision_encoder.vit_lite.named_parameters():
-                logger.info(f"Freeze {name}")
                 p.requires_grad = False
-
-            logger.info("---- Froze all the MobileCLIP vision encoder params ----")
 
         if self.config.model.freeze_mobileclip_text:
             for name, p in self.text_encoder.named_parameters():
                 if self.config.model.open_text_projection and name.startswith('projection_layer'):
-                    logger.info(f"Unfreeze {name}")
+                    p.requires_grad = False
                 else:
-                    logger.info(f"Freeze {name}")
                     p.requires_grad = False
 
         # Define image transformation pipeline
