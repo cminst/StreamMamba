@@ -308,15 +308,6 @@ def train(
     model_without_ddp = model.module if config.distributed else model
     model.train()
 
-    logger.info('-'*20)
-
-    # Sanity check for which params are unfrozen
-    for name, param in model_without_ddp.named_parameters():
-        if param.requires_grad:
-            logger.info(f"Unfrozen Parameter: {name}")
-
-    logger.info('-'*20)
-
     try:
         inference_transform = model_without_ddp.transform
         IMG_SIZE = model_without_ddp.config.model.vision_encoder.img_size
@@ -756,7 +747,6 @@ def main(config):
             }
             for k in list(state_dict.keys()):
                 if k in param_grad_dict.keys() and not param_grad_dict[k]:
-                    logger.info(f"Not saving {k}")
                     del state_dict[k]
 
             save_obj = {
