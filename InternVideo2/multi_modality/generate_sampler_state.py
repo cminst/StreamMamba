@@ -121,7 +121,7 @@ if __name__ == "__main__":
     
     # Parse only the arguments specific to this script first
     # This allows setup_main to parse the config_file and opts later
-    args, unknown = parser.parse_known_known_args()
+    args, unknown = parser.parse_known_args()
 
     # Reconstruct sys.argv for setup_main to parse the config_file and opts
     # The first element is always the script name
