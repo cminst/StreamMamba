@@ -28,9 +28,11 @@ def get_media_types(datasources):
     else:
         datasets = datasources
     media_types = [
-        dataset.datasets[0].media_type
-        if isinstance(dataset, ConcatDataset)
-        else dataset.media_type
+        (
+            dataset.datasets[0].media_type
+            if isinstance(dataset, ConcatDataset)
+            else dataset.media_type
+        )
         for dataset in datasets
     ]
 
@@ -38,7 +40,11 @@ def get_media_types(datasources):
 
 
 def setup_model(
-    config, model_cls, pretrain=False, find_unused_parameters=False, num_steps_per_epoch=-1,
+    config,
+    model_cls,
+    pretrain=False,
+    find_unused_parameters=False,
+    num_steps_per_epoch=-1,
 ):
     logger.info("Creating model")
     config = copy.deepcopy(config)
@@ -47,7 +53,7 @@ def setup_model(
 
     model = model.to(torch.device(config.device))
     if config.use_half_precision:
-        if config.get('bf16', True):
+        if config.get("bf16", True):
             logger.info("Change to bfloat16 for model")
             model = model.to(torch.bfloat16)
         else:
@@ -70,14 +76,16 @@ def setup_model(
 
         optimizer = create_optimizer(config.optimizer, model)
         scheduler = create_scheduler(config.scheduler, optimizer)
-        scaler = torch.cuda.amp.GradScaler(enabled=config.use_half_precision) # This is never used actually if we fixed bf16
+        scaler = torch.cuda.amp.GradScaler(
+            enabled=config.use_half_precision
+        )  # This is never used actually if we fixed bf16
 
     start_epoch = 0
     global_step = 0
 
     # initialize deepspeed engine when enabled
     if hasattr(config, "deepspeed") and config.deepspeed.enable:
-        logger.info('Use deepspeed to initialize model')
+        logger.info("Use deepspeed to initialize model")
         model = model_without_ddp
         model, optimizer, _, _ = deepspeed.initialize(
             args=config,
@@ -90,14 +98,16 @@ def setup_model(
     # ----- New resume logic -----
     if config.resume and config.pretrained_path:
         logger.info(f"Resuming training from {config.pretrained_path}")
-        model_state_file = os.path.join(config.pretrained_path, "mp_rank_00_model_states.pt")
+        model_state_file = os.path.join(
+            config.pretrained_path, "mp_rank_00_model_states.pt"
+        )
         optim_state_file = os.path.join(
             config.pretrained_path,
             "bf16_zero_pp_rank_0_mp_rank_00_optim_states.pt",
         )
 
         if osp.isfile(model_state_file):
-            state = torch.load(model_state_file, map_location="cpu")
+            state = torch.load(model_state_file, map_location="cpu", weights_only=False)
             logger.info(f"Model state keys: {list(state.keys())}")
             for key in state.keys():
                 logger.info(f"Loaded {key} from model state")
@@ -107,12 +117,16 @@ def setup_model(
             if "lr_scheduler" in state and scheduler is not None:
                 scheduler.load_state_dict(state["lr_scheduler"])
             start_epoch = state.get("epoch", start_epoch)
-            global_step = state.get("global_step", state.get("global_steps", global_step))
+            global_step = state.get(
+                "global_step", state.get("global_steps", global_step)
+            )
         else:
             logger.warning(f"Model state file not found: {model_state_file}")
 
         if osp.isfile(optim_state_file):
-            opt_state = torch.load(optim_state_file, map_location="cpu")
+            opt_state = torch.load(
+                optim_state_file, map_location="cpu", weights_only=False
+            )
             logger.info(f"Optimizer state keys: {list(opt_state.keys())}")
             if "optimizer_state_dict" in opt_state:
                 optimizer.load_state_dict(opt_state["optimizer_state_dict"])
@@ -120,8 +134,10 @@ def setup_model(
             logger.warning(f"Optimizer state file not found: {optim_state_file}")
     else:
         logger.info("No resume checkpoint provided, starting from scratch")
-    
-    logger.info(f"Cuda memory after create model: {torch.cuda.memory_allocated() // 1024**2}M, Max mem: {torch.cuda.max_memory_allocated() // 1024**2}M")
+
+    logger.info(
+        f"Cuda memory after create model: {torch.cuda.memory_allocated() // 1024**2}M, Max mem: {torch.cuda.max_memory_allocated() // 1024**2}M"
+    )
 
     return (
         model,
