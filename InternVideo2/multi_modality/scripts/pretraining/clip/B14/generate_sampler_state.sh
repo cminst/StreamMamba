@@ -14,6 +14,8 @@ NUM_GPUS=1
 NUM_CPU=64
 
 # Using torchrun directly instead of the wrapper script
+export MASTER_ADDR="127.0.0.1"
+export MASTER_PORT="29500"
 torchrun \
     --nnodes=${NNODE} \
     --nproc_per_node=${NUM_GPUS} \
