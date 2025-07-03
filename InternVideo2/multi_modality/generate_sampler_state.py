@@ -63,8 +63,8 @@ def setup_dataloaders(config, mode="pt", samplers_state=None):
     test_name2loaders = dict(zip(test_dataset_names, test_loaders))
     return train_loaders, test_name2loaders, media_types, samplers
 
-def generate_sampler_states(config_path, target_global_step, output_path):
-    cfg = setup_main(config_path) # Assuming setup_main can take a config path
+def generate_sampler_states(target_global_step, output_path):
+    cfg = setup_main()
     
     # Ensure distributed setup is consistent if original training was distributed
     # This part might need adjustment based on how your distributed setup is typically initialized
@@ -105,13 +105,28 @@ def generate_sampler_states(config_path, target_global_step, output_path):
 
 if __name__ == "__main__":
     import argparse
+    import sys
     from torch.utils.data._utils.collate import default_collate # Added import
 
+    # Temporarily store original sys.argv
+    original_argv = sys.argv
+    
+    # Parse arguments for generate_sampler_state.py itself
     parser = argparse.ArgumentParser(description="Generate sampler states for resuming training.")
-    parser.add_argument("--config", type=str, required=True, help="Path to the training configuration file.")
+    parser.add_argument("config_file", type=str, help="Path to the training configuration file.")
     parser.add_argument("--global_step", type=int, required=True, help="The global step at which to capture sampler states.")
     parser.add_argument("--output_path", type=str, default="sampler_states.pkl", help="Path to save the generated sampler states.")
-    args = parser.parse_args()
+    
+    # Parse only the arguments specific to this script first
+    # This allows setup_main to parse the config_file and opts later
+    args, unknown = parser.parse_known_args()
+
+    # Reconstruct sys.argv for setup_main to parse the config_file and opts
+    # The first element is always the script name
+    sys.argv = [original_argv[0], args.config_file] + unknown
 
     logging.basicConfig(level=logging.INFO) # Basic logging setup
-    generate_sampler_states(args.config, args.global_step, args.output_path)
+    generate_sampler_states(args.global_step, args.output_path)
+
+    # Restore original sys.argv to avoid side effects
+    sys.argv = original_argv
