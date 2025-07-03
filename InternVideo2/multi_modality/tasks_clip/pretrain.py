@@ -694,13 +694,6 @@ def main(config):
         num_steps_per_epoch=num_steps_per_epoch,
     )
 
-    # restore RNG state from checkpoint if available
-    if config.resume and os.path.isfile(config.pretrained_path):
-        try:
-            ckpt = torch.load(config.pretrained_path, map_location="cpu")
-            set_rng_state(ckpt.get("rng_state"))
-        except Exception as e:
-            logger.warning(f"Failed to load RNG state from checkpoint: {e}")
     if is_main_process() and config.wandb.enable:
         wandb.watch(model)
 

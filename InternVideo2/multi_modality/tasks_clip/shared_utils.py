@@ -75,149 +75,51 @@ def setup_model(
     start_epoch = 0
     global_step = 0
 
-    # auto resume the latest checkpoint
-    if config.get("auto_resume", False):
-        logger.info("Auto resuming")
-        model_latest = join(config.output_dir, "ckpt_latest.pth")
-        model_best = join(config.output_dir, "ckpt_best.pth")
-
-        large_step_num = -1
-        large_epoch_num = -1
-        for fname in os.listdir(config.output_dir):
-            if fname.startswith("ckpt_iter"):
-                step_str = fname[len("ckpt_iter"):]
-                if step_str.endswith(".pth"):
-                    step_str = step_str[:-4]
-                if step_str.isdigit():
-                    step_num = int(step_str)
-                    large_step_num = max(large_step_num, step_num)
-            elif fname.startswith("ckpt_"):
-                epoch_str = fname[len("ckpt_"):]
-                if epoch_str.endswith(".pth"):
-                    epoch_str = epoch_str[:-4]
-                if epoch_str.isdigit():
-                    epoch_num = int(epoch_str)
-                    large_epoch_num = max(large_epoch_num, epoch_num)
-
-        if large_step_num != -1:
-            logger.info(f"Load the latest step: {large_step_num}")
-            file_candidate = join(config.output_dir, f"ckpt_iter{large_step_num}.pth")
-            dir_candidate = join(config.output_dir, f"ckpt_iter{large_step_num}")
-            if osp.isfile(file_candidate):
-                model_latest = file_candidate
-            elif osp.isdir(dir_candidate):
-                model_latest = dir_candidate
-
-        if large_epoch_num != -1 and (large_epoch_num + 1) * num_steps_per_epoch > large_step_num:
-            logger.info(f"Load the latest epoch: {large_epoch_num}")
-            file_candidate = join(config.output_dir, f"ckpt_{large_epoch_num}.pth")
-            dir_candidate = join(config.output_dir, f"ckpt_{large_epoch_num}")
-            if osp.isfile(file_candidate):
-                model_latest = file_candidate
-            elif osp.isdir(dir_candidate):
-                model_latest = dir_candidate
-
-        if hasattr(config, "deepspeed") and config.deepspeed.enable:
-            if osp.isfile(model_latest) or osp.isdir(model_latest):
-                config.pretrained_path = model_latest
-                config.resume = True
-            elif osp.isfile(model_best) or osp.isdir(model_best):
-                config.pretrained_path = model_best
-                config.resume = True
-            else:
-                logger.info(f"Not found checkpoint in {config.output_dir}")
-        else:
-            if osp.isfile(model_latest):
-                config.pretrained_path = model_latest
-                config.resume = True
-            elif osp.isfile(model_best):
-                config.pretrained_path = model_best
-                config.resume = True
-            else:
-                logger.info(f"Not found checkpoint in {config.output_dir}")
-
-    # load pretrained model
+    # initialize deepspeed engine when enabled
     if hasattr(config, "deepspeed") and config.deepspeed.enable:
-        logger.info('Use deepspeed to initialize model!!!')
+        logger.info('Use deepspeed to initialize model')
         model = model_without_ddp
         model, optimizer, _, _ = deepspeed.initialize(
-            args=config, model=model, model_parameters=optimizer_params, dist_init_required=not config.distributed,
-            lr_scheduler=lambda opt: create_scheduler(config.scheduler, opt)
+            args=config,
+            model=model,
+            model_parameters=optimizer_params,
+            dist_init_required=not config.distributed,
+            lr_scheduler=lambda opt: create_scheduler(config.scheduler, opt),
         )
-        if osp.isdir(config.pretrained_path):
-            logger.info(f"Load pretrained model from {config.pretrained_path}")
-            output_dir, tag = os.path.split(config.pretrained_path)
-            if config.resume:
-                _, client_state = model.load_checkpoint(output_dir, tag=tag, load_module_strict=False)
-                global_step = model.global_steps
-                assert num_steps_per_epoch > 0, "Please provide num_steps_per_epoch"
-                start_epoch = global_step // num_steps_per_epoch
-            else:
-                _, client_state = model.load_checkpoint(
-                    output_dir, tag=tag, load_module_strict=False, 
-                    load_optimizer_states=False, load_lr_scheduler_states=False,
-                    load_module_only=True
-                )
-    else:
-        if osp.isfile(config.pretrained_path):
-            checkpoint = torch.load(config.pretrained_path, map_location="cpu")
-            logger.info(f"Load pretrained model from {config.pretrained_path}")
-            logger.info(f"Checkpoint contains keys: {list(checkpoint.keys())}")
-            if 'model' in checkpoint.keys():
-                state_dict = checkpoint["model"]
-            elif 'module' in checkpoint.keys():
-                state_dict = checkpoint["module"]
-            else:
-                state_dict = checkpoint
-            # resume optimizer
-            if config.resume:
-                if "optimizer" in checkpoint:
-                    optimizer.load_state_dict(checkpoint["optimizer"])
-                    logger.info("Loaded optimizer state from checkpoint")
-                else:
-                    logger.warning("Optimizer state not found in checkpoint")
-                if "scheduler" in checkpoint:
-                    scheduler.load_state_dict(checkpoint["scheduler"])
-                    logger.info("Loaded scheduler state from checkpoint")
-                else:
-                    logger.warning("Scheduler state not found in checkpoint")
-                if "scaler" in checkpoint and scaler is not None:
-                    scaler.load_state_dict(checkpoint["scaler"])
-                    logger.info("Loaded scaler state from checkpoint")
-                elif scaler is not None:
-                    logger.warning("Scaler state not found in checkpoint")
 
-                global_step = checkpoint.get("global_step", 0)
-                start_epoch = checkpoint.get("epoch", 0)
-                
-                if num_steps_per_epoch > 0 and global_step % num_steps_per_epoch == 0:
-                    start_epoch += 1
+    # ----- New resume logic -----
+    if config.resume and config.pretrained_path:
+        logger.info(f"Resuming training from {config.pretrained_path}")
+        model_state_file = os.path.join(config.pretrained_path, "mp_rank_00_model_states.pt")
+        optim_state_file = os.path.join(
+            config.pretrained_path,
+            "bf16_zero_pp_rank_0_mp_rank_00_optim_states.pt",
+        )
 
-            msg = model_without_ddp.load_state_dict(state_dict, strict=False)
-            logger.info(msg)
-            if hasattr(msg, "missing_keys") and hasattr(msg, "unexpected_keys"):
-                if msg.missing_keys:
-                    logger.info(f"Missing keys when loading model: {msg.missing_keys}")
-                if msg.unexpected_keys:
-                    logger.info(f"Unexpected keys when loading model: {msg.unexpected_keys}")
-            # Handle optional streaming student checkpoint
-            if isinstance(checkpoint, dict):
-                student_key = None
-                if "streaming_student" in checkpoint:
-                    student_key = "streaming_student"
-                elif "streaming_vision_encoder" in checkpoint:
-                    student_key = "streaming_vision_encoder"
-                if student_key is not None:
-                    try:
-                        model_without_ddp.streaming_vision_encoder.load_state_dict(
-                            checkpoint[student_key]
-                        )
-                        logger.info("Loaded streaming student model from checkpoint")
-                    except Exception as e:
-                        logger.warning(f"Failed to load streaming student model: {e}")
-            logger.info(f"Loaded checkpoint from {config.pretrained_path}")
+        if osp.isfile(model_state_file):
+            state = torch.load(model_state_file, map_location="cpu")
+            logger.info(f"Model state keys: {list(state.keys())}")
+            for key in state.keys():
+                logger.info(f"Loaded {key} from model state")
+
+            if "module" in state:
+                model.load_state_dict(state["module"], strict=False)
+            if "lr_scheduler" in state and scheduler is not None:
+                scheduler.load_state_dict(state["lr_scheduler"])
+            start_epoch = state.get("epoch", start_epoch)
+            global_step = state.get("global_step", state.get("global_steps", global_step))
         else:
-            logger.warning("No pretrained checkpoint provided, training from scratch")
+            logger.warning(f"Model state file not found: {model_state_file}")
+
+        if osp.isfile(optim_state_file):
+            opt_state = torch.load(optim_state_file, map_location="cpu")
+            logger.info(f"Optimizer state keys: {list(opt_state.keys())}")
+            if "optimizer_state_dict" in opt_state:
+                optimizer.load_state_dict(opt_state["optimizer_state_dict"])
+        else:
+            logger.warning(f"Optimizer state file not found: {optim_state_file}")
+    else:
+        logger.info("No resume checkpoint provided, starting from scratch")
     
     logger.info(f"Cuda memory after create model: {torch.cuda.memory_allocated() // 1024**2}M, Max mem: {torch.cuda.max_memory_allocated() // 1024**2}M")
 
