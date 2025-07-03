@@ -14,30 +14,56 @@ from utils.scheduler import create_scheduler
 logger = logging.getLogger(__name__)
 
 
-def resume_from_checkpoint(checkpoint_dir, model, optimizer, scheduler):
-    """Load DeepSpeed model and optimizer states from ``checkpoint_dir``.
+def _find_latest_checkpoint(path):
+    """Return the directory of the latest DeepSpeed checkpoint under ``path``."""
 
-    Returns the start epoch and global step restored from the checkpoint.
-    """
+    if osp.isfile(path):
+        return osp.dirname(path)
+
+    if not osp.isdir(path):
+        return path
+
+    candidates = []
+    for name in os.listdir(path):
+        full = osp.join(path, name)
+        if osp.isdir(full) and name.startswith("ckpt_iter"):
+            step_str = "".join(ch for ch in name if ch.isdigit())
+            if step_str.isdigit():
+                candidates.append((int(step_str), full))
+
+    if not candidates:
+        return path
+
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    return candidates[0][1]
+
+
+def resume_from_checkpoint(path, model, optimizer, scheduler):
+    """Resume training from a DeepSpeed checkpoint directory or file."""
+
+    ckpt_dir = _find_latest_checkpoint(path)
+    logger.info(f"Resuming training from {ckpt_dir}")
 
     start_epoch = 0
     global_step = 0
 
-    model_state_file = os.path.join(checkpoint_dir, "mp_rank_00_model_states.pt")
-    optim_state_file = os.path.join(
-        checkpoint_dir, "bf16_zero_pp_rank_0_mp_rank_00_optim_states.pt"
+    model_state_file = osp.join(ckpt_dir, "mp_rank_00_model_states.pt")
+    optim_state_file = osp.join(
+        ckpt_dir, "bf16_zero_pp_rank_0_mp_rank_00_optim_states.pt"
     )
 
     if osp.isfile(model_state_file):
         state = torch.load(model_state_file, map_location="cpu", weights_only=False)
         logger.info(f"Loaded model state from {model_state_file}")
-        for key in state.keys():
-            logger.info(f" - {key}")
-
+        for k in state.keys():
+            logger.info(f" - {k}")
         if "module" in state:
             model.load_state_dict(state["module"], strict=False)
         if "lr_scheduler" in state and scheduler is not None:
-            scheduler.load_state_dict(state["lr_scheduler"])
+            try:
+                scheduler.load_state_dict(state["lr_scheduler"])
+            except Exception as e:
+                logger.warning(f"Failed to load scheduler state: {e}")
         start_epoch = state.get("epoch", start_epoch)
         global_step = state.get("global_step", state.get("global_steps", global_step))
     else:
@@ -46,18 +72,18 @@ def resume_from_checkpoint(checkpoint_dir, model, optimizer, scheduler):
     if osp.isfile(optim_state_file):
         opt_state = torch.load(optim_state_file, map_location="cpu", weights_only=False)
         logger.info(f"Loaded optimizer state from {optim_state_file}")
-        logger.info(f"Optimizer state keys: {list(opt_state.keys())}")
+        for k in opt_state.keys():
+            logger.info(f" - {k}")
         opt_sd = opt_state.get("optimizer_state_dict")
         if opt_sd is not None:
+            if isinstance(opt_sd, dict) and 0 in opt_sd:
+                opt_sd = opt_sd[0]
+            elif isinstance(opt_sd, list) and len(opt_sd) > 0:
+                opt_sd = opt_sd[0]
             try:
                 optimizer.load_state_dict(opt_sd)
-            except KeyError:
-                if isinstance(opt_sd, dict) and 0 in opt_sd:
-                    optimizer.load_state_dict(opt_sd[0])
-                elif isinstance(opt_sd, list) and len(opt_sd) > 0:
-                    optimizer.load_state_dict(opt_sd[0])
-                else:
-                    logger.error(f"Unexpected optimizer state format: {type(opt_sd)}")
+            except Exception as e:
+                logger.error(f"Failed to load optimizer state: {e}")
     else:
         logger.warning(f"Optimizer state file not found: {optim_state_file}")
 
