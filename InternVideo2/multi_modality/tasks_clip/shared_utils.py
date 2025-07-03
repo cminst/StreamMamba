@@ -14,6 +14,56 @@ from utils.scheduler import create_scheduler
 logger = logging.getLogger(__name__)
 
 
+def resume_from_checkpoint(checkpoint_dir, model, optimizer, scheduler):
+    """Load DeepSpeed model and optimizer states from ``checkpoint_dir``.
+
+    Returns the start epoch and global step restored from the checkpoint.
+    """
+
+    start_epoch = 0
+    global_step = 0
+
+    model_state_file = os.path.join(checkpoint_dir, "mp_rank_00_model_states.pt")
+    optim_state_file = os.path.join(
+        checkpoint_dir, "bf16_zero_pp_rank_0_mp_rank_00_optim_states.pt"
+    )
+
+    if osp.isfile(model_state_file):
+        state = torch.load(model_state_file, map_location="cpu", weights_only=False)
+        logger.info(f"Loaded model state from {model_state_file}")
+        for key in state.keys():
+            logger.info(f" - {key}")
+
+        if "module" in state:
+            model.load_state_dict(state["module"], strict=False)
+        if "lr_scheduler" in state and scheduler is not None:
+            scheduler.load_state_dict(state["lr_scheduler"])
+        start_epoch = state.get("epoch", start_epoch)
+        global_step = state.get("global_step", state.get("global_steps", global_step))
+    else:
+        logger.warning(f"Model state file not found: {model_state_file}")
+
+    if osp.isfile(optim_state_file):
+        opt_state = torch.load(optim_state_file, map_location="cpu", weights_only=False)
+        logger.info(f"Loaded optimizer state from {optim_state_file}")
+        logger.info(f"Optimizer state keys: {list(opt_state.keys())}")
+        opt_sd = opt_state.get("optimizer_state_dict")
+        if opt_sd is not None:
+            try:
+                optimizer.load_state_dict(opt_sd)
+            except KeyError:
+                if isinstance(opt_sd, dict) and 0 in opt_sd:
+                    optimizer.load_state_dict(opt_sd[0])
+                elif isinstance(opt_sd, list) and len(opt_sd) > 0:
+                    optimizer.load_state_dict(opt_sd[0])
+                else:
+                    logger.error(f"Unexpected optimizer state format: {type(opt_sd)}")
+    else:
+        logger.warning(f"Optimizer state file not found: {optim_state_file}")
+
+    return start_epoch, global_step
+
+
 def get_media_types(datasources):
     """get the media types for for all the dataloaders.
 
@@ -98,54 +148,9 @@ def setup_model(
     # ----- New resume logic -----
     if config.resume and config.pretrained_path:
         logger.info(f"Resuming training from {config.pretrained_path}")
-        model_state_file = os.path.join(
-            config.pretrained_path, "mp_rank_00_model_states.pt"
+        start_epoch, global_step = resume_from_checkpoint(
+            config.pretrained_path, model, optimizer, scheduler
         )
-        optim_state_file = os.path.join(
-            config.pretrained_path,
-            "bf16_zero_pp_rank_0_mp_rank_00_optim_states.pt",
-        )
-
-        if osp.isfile(model_state_file):
-            state = torch.load(model_state_file, map_location="cpu", weights_only=False)
-            logger.info(f"Model state keys: {list(state.keys())}")
-            for key in state.keys():
-                logger.info(f"Loaded {key} from model state")
-
-            if "module" in state:
-                model.load_state_dict(state["module"], strict=False)
-            if "lr_scheduler" in state and scheduler is not None:
-                scheduler.load_state_dict(state["lr_scheduler"])
-            start_epoch = state.get("epoch", start_epoch)
-            global_step = state.get(
-                "global_step", state.get("global_steps", global_step)
-            )
-        else:
-            logger.warning(f"Model state file not found: {model_state_file}")
-
-        if osp.isfile(optim_state_file):
-            opt_state = torch.load(
-                optim_state_file, map_location="cpu", weights_only=False
-            )
-            logger.info(f"Optimizer state keys: {list(opt_state.keys())}")
-            opt_sd = opt_state.get("optimizer_state_dict")
-            if opt_sd is not None:
-                try:
-                    optimizer.load_state_dict(opt_sd)
-                except KeyError:
-                    # deepspeed checkpoints may index state dicts by dp rank
-                    if isinstance(opt_sd, dict) and 0 in opt_sd:
-                        optimizer.load_state_dict(opt_sd[0])
-                    elif isinstance(opt_sd, list) and len(opt_sd) > 0:
-                        optimizer.load_state_dict(opt_sd[0])
-                    else:
-                        logger.error(
-                            "Unexpected optimizer state format: %s", type(opt_sd)
-                        )
-            else:
-                logger.warning("optimizer_state_dict key not found in optimizer state")
-        else:
-            logger.warning(f"Optimizer state file not found: {optim_state_file}")
     else:
         logger.info("No resume checkpoint provided, starting from scratch")
 
