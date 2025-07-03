@@ -128,8 +128,22 @@ def setup_model(
                 optim_state_file, map_location="cpu", weights_only=False
             )
             logger.info(f"Optimizer state keys: {list(opt_state.keys())}")
-            if "optimizer_state_dict" in opt_state:
-                optimizer.load_state_dict(opt_state["optimizer_state_dict"])
+            opt_sd = opt_state.get("optimizer_state_dict")
+            if opt_sd is not None:
+                try:
+                    optimizer.load_state_dict(opt_sd)
+                except KeyError:
+                    # deepspeed checkpoints may index state dicts by dp rank
+                    if isinstance(opt_sd, dict) and 0 in opt_sd:
+                        optimizer.load_state_dict(opt_sd[0])
+                    elif isinstance(opt_sd, list) and len(opt_sd) > 0:
+                        optimizer.load_state_dict(opt_sd[0])
+                    else:
+                        logger.error(
+                            "Unexpected optimizer state format: %s", type(opt_sd)
+                        )
+            else:
+                logger.warning("optimizer_state_dict key not found in optimizer state")
         else:
             logger.warning(f"Optimizer state file not found: {optim_state_file}")
     else:
