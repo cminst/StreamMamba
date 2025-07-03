@@ -579,7 +579,7 @@ def train(
                     "epoch": epoch,
                     "global_step": global_step,
                     "rng_state": get_rng_state(),
-                    "samplers_state": [s.state_dict() for s in samplers],
+                    "samplers_state": [{"start_iter": s.start_iter} for s in samplers],
                 }
                 checkpoint_filename = join(config.output_dir, f"ckpt_iter{global_step:07d}.pth")
                 torch.save(save_obj, checkpoint_filename)
@@ -635,7 +635,7 @@ def setup_dataloaders(config, mode="pt", samplers_state=None):
 
     if samplers_state:
         for sampler, state in zip(samplers, samplers_state):
-            sampler.load_state_dict(state)
+            sampler.set_start_iter(state["start_iter"])
 
     train_loaders = create_loader(
         train_datasets,
