@@ -14,82 +14,6 @@ from utils.scheduler import create_scheduler
 logger = logging.getLogger(__name__)
 
 
-def _find_latest_checkpoint(path):
-    """Return the directory of the latest DeepSpeed checkpoint under ``path``."""
-
-    if osp.isfile(path):
-        return osp.dirname(path)
-
-    if not osp.isdir(path):
-        return path
-
-    candidates = []
-    for name in os.listdir(path):
-        full = osp.join(path, name)
-        if osp.isdir(full) and name.startswith("ckpt_iter"):
-            step_str = "".join(ch for ch in name if ch.isdigit())
-            if step_str.isdigit():
-                candidates.append((int(step_str), full))
-
-    if not candidates:
-        return path
-
-    candidates.sort(key=lambda x: x[0], reverse=True)
-    return candidates[0][1]
-
-
-def resume_from_checkpoint(path, model, optimizer, scheduler):
-    """Resume training from a DeepSpeed checkpoint directory or file."""
-
-    ckpt_dir = _find_latest_checkpoint(path)
-    logger.info(f"Resuming training from {ckpt_dir}")
-
-    start_epoch = 0
-    global_step = 0
-
-    model_state_file = osp.join(ckpt_dir, "mp_rank_00_model_states.pt")
-    optim_state_file = osp.join(
-        ckpt_dir, "bf16_zero_pp_rank_0_mp_rank_00_optim_states.pt"
-    )
-
-    if osp.isfile(model_state_file):
-        state = torch.load(model_state_file, map_location="cpu", weights_only=False)
-        logger.info(f"Loaded model state from {model_state_file}")
-        for k in state.keys():
-            logger.info(f" - {k}")
-        if "module" in state:
-            model.load_state_dict(state["module"], strict=False)
-        if "lr_scheduler" in state and scheduler is not None:
-            try:
-                scheduler.load_state_dict(state["lr_scheduler"])
-            except Exception as e:
-                logger.warning(f"Failed to load scheduler state: {e}")
-        start_epoch = state.get("epoch", start_epoch)
-        global_step = state.get("global_step", state.get("global_steps", global_step))
-    else:
-        logger.warning(f"Model state file not found: {model_state_file}")
-
-    if osp.isfile(optim_state_file):
-        opt_state = torch.load(optim_state_file, map_location="cpu", weights_only=False)
-        logger.info(f"Loaded optimizer state from {optim_state_file}")
-        for k in opt_state.keys():
-            logger.info(f" - {k}")
-        opt_sd = opt_state.get("optimizer_state_dict")
-        if opt_sd is not None:
-            if isinstance(opt_sd, dict) and 0 in opt_sd:
-                opt_sd = opt_sd[0]
-            elif isinstance(opt_sd, list) and len(opt_sd) > 0:
-                opt_sd = opt_sd[0]
-            try:
-                optimizer.load_state_dict(opt_sd)
-            except Exception as e:
-                logger.error(f"Failed to load optimizer state: {e}")
-    else:
-        logger.warning(f"Optimizer state file not found: {optim_state_file}")
-
-    return start_epoch, global_step
-
-
 def get_media_types(datasources):
     """get the media types for for all the dataloaders.
 
@@ -138,32 +62,19 @@ def setup_model(
     tokenizer = model.tokenizer
     model_without_ddp = model
 
-    if hasattr(config, "deepspeed") and config.deepspeed.enable:
-        optimizer_params = create_optimizer(config.optimizer, model, return_group=True)
-        scheduler = None
-        scaler = None
-    else:
-        if config.distributed:
-            model = torch.nn.parallel.DistributedDataParallel(
-                model,
-                device_ids=[config.gpu],
-                find_unused_parameters=find_unused_parameters,  # `False` for image-only task
-            )
-
-        optimizer = create_optimizer(config.optimizer, model)
-        scheduler = create_scheduler(config.scheduler, optimizer)
-        scaler = torch.cuda.amp.GradScaler(
-            enabled=config.use_half_precision
-        )  # This is never used actually if we fixed bf16
-
     start_epoch = 0
     global_step = 0
 
-    # initialize deepspeed engine when enabled
+    # These will be populated differently depending on whether we use DeepSpeed
+    optimizer = None
+    scheduler = None
+    scaler = None
+
     if hasattr(config, "deepspeed") and config.deepspeed.enable:
-        logger.info("Use deepspeed to initialize model")
-        model = model_without_ddp
-        model, optimizer, _, _ = deepspeed.initialize(
+        logger.info("Initializing model with DeepSpeed")
+        optimizer_params = create_optimizer(config.optimizer, model, return_group=True)
+        # DeepSpeed handles the scheduler, so we pass a lambda
+        model, optimizer, _, scheduler = deepspeed.initialize(
             args=config,
             model=model,
             model_parameters=optimizer_params,
@@ -171,14 +82,60 @@ def setup_model(
             lr_scheduler=lambda opt: create_scheduler(config.scheduler, opt),
         )
 
-    # ----- New resume logic -----
-    if config.resume and config.pretrained_path:
-        logger.info(f"Resuming training from {config.pretrained_path}")
-        start_epoch, global_step = resume_from_checkpoint(
-            config.pretrained_path, model, optimizer, scheduler
-        )
-    else:
-        logger.info("No resume checkpoint provided, starting from scratch")
+        # Resume deepspeed training
+        if config.resume and config.pretrained_path:
+            logger.info(f"Attempting to resume DeepSpeed training from: {config.pretrained_path}")
+            # model.load_checkpoint handles finding the latest checkpoint in the directory
+            # It also correctly loads model, optimizer, and scheduler states.
+            # The second return value is the client_state dictionary we saved.
+            load_path, client_state = model.load_checkpoint(config.pretrained_path)
+
+            if load_path is not None:
+                if client_state:
+                    # We saved epoch and global_step, so we load them back.
+                    start_epoch = client_state.get('epoch', 0)
+                    global_step = client_state.get('global_step', 0)
+                    logger.info(
+                        f"Successfully resumed from checkpoint. "
+                        f"Loaded client state: epoch={start_epoch}, global_step={global_step}"
+                    )
+                else:
+                    logger.warning(
+                        "Resumed checkpoint but no client_state found. "
+                        "Starting from epoch 0, global_step 0."
+                    )
+            else:
+                logger.warning(
+                    f"Could not find a valid checkpoint to resume from in {config.pretrained_path}. "
+                    "Starting from scratch."
+                )
+        else:
+            logger.info("No resume checkpoint provided or resume is disabled. Starting from scratch.")
+
+    else: # Fallback for standard DDP (non-DeepSpeed)
+        if config.distributed:
+            model = torch.nn.parallel.DistributedDataParallel(
+                model,
+                device_ids=[config.gpu],
+                find_unused_parameters=find_unused_parameters,
+            )
+        model_without_ddp = model.module if config.distributed else model
+
+        optimizer = create_optimizer(config.optimizer, model)
+        scheduler = create_scheduler(config.scheduler, optimizer)
+        scaler = torch.cuda.amp.GradScaler(enabled=config.use_half_precision)
+
+        if config.resume and config.pretrained_path:
+            logger.info(f"Resuming from non-DeepSpeed checkpoint: {config.pretrained_path}")
+            checkpoint = torch.load(config.pretrained_path, map_location="cpu")
+            model_without_ddp.load_state_dict(checkpoint["model"], strict=False)
+            optimizer.load_state_dict(checkpoint["optimizer"])
+            scheduler.load_state_dict(checkpoint["scheduler"])
+            if checkpoint.get("scaler") is not None:
+                scaler.load_state_dict(checkpoint["scaler"])
+            start_epoch = checkpoint.get("epoch", 0)
+            global_step = checkpoint.get("global_step", 0)
+            logger.info(f"Resumed from epoch {start_epoch}, global_step {global_step}")
 
     logger.info(
         f"Cuda memory after create model: {torch.cuda.memory_allocated() // 1024**2}M, Max mem: {torch.cuda.max_memory_allocated() // 1024**2}M"
