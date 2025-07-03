@@ -2,6 +2,8 @@ import logging
 import os
 import torch
 import pickle
+import torch.distributed as dist
+from torch.utils.data._utils.collate import default_collate
 
 from dataset import MetaLoader_rs, create_dataset, create_loader, create_stateful_sampler
 from tasks_clip.shared_utils import get_media_types
@@ -119,7 +121,7 @@ if __name__ == "__main__":
     
     # Parse only the arguments specific to this script first
     # This allows setup_main to parse the config_file and opts later
-    args, unknown = parser.parse_known_args()
+    args, unknown = parser.parse_known_known_args()
 
     # Reconstruct sys.argv for setup_main to parse the config_file and opts
     # The first element is always the script name
