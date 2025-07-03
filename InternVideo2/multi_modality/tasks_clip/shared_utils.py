@@ -70,6 +70,7 @@ def setup_model(
     scheduler = None
     scaler = None
 
+    samplers_state = None
     if hasattr(config, "deepspeed") and config.deepspeed.enable:
         logger.info("Initializing model with DeepSpeed")
         optimizer_params = create_optimizer(config.optimizer, model, return_group=True)
@@ -95,6 +96,7 @@ def setup_model(
                     # We saved epoch and global_step, so we load them back.
                     start_epoch = client_state.get('epoch', 0)
                     global_step = client_state.get('global_step', 0)
+                    samplers_state = client_state.get('data_sampler', None)
                     logger.info(
                         f"Successfully resumed from checkpoint. "
                         f"Loaded client state: epoch={start_epoch}, global_step={global_step}"
@@ -135,6 +137,7 @@ def setup_model(
                 scaler.load_state_dict(checkpoint["scaler"])
             start_epoch = checkpoint.get("epoch", 0)
             global_step = checkpoint.get("global_step", 0)
+            samplers_state = checkpoint.get('data_sampler', None)
             logger.info(f"Resumed from epoch {start_epoch}, global_step {global_step}")
 
     logger.info(
@@ -150,4 +153,5 @@ def setup_model(
         tokenizer,
         start_epoch,
         global_step,
+        samplers_state,
     )

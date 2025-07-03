@@ -299,6 +299,7 @@ def train(
     scaler,
     config,
     data_type,
+    samplers,
     skip_num=0,
     log_debug=False,
 ):
@@ -578,6 +579,7 @@ def train(
                     "epoch": epoch,
                     "global_step": global_step,
                     "rng_state": get_rng_state(),
+                    "samplers_state": [s.state_dict() for s in samplers],
                 }
                 checkpoint_filename = join(config.output_dir, f"ckpt_iter{global_step:07d}.pth")
                 torch.save(save_obj, checkpoint_filename)
@@ -585,7 +587,7 @@ def train(
             else:
                 logger.info(f"Saving checkpoint at global step {global_step}")
                 tag = f"ckpt_iter{global_step:07d}"
-                client_state = {"epoch": epoch, "global_step": global_step}
+                client_state = {"epoch": epoch, "global_step": global_step, "data_sampler": [s.state_dict() for s in samplers]}
 
                 model.save_checkpoint(config.output_dir, tag=tag, client_state=client_state)
 
@@ -619,7 +621,7 @@ def clone_collate_fn(batch):
     batch = [clone_item(sample) for sample in batch]
     return default_collate(batch)
 
-def setup_dataloaders(config, mode="pt"):
+def setup_dataloaders(config, mode="pt", samplers_state=None):
     logger.info(f"Creating dataset for {mode}")
     train_datasets = create_dataset(f"{mode}_train", config)
     media_types = get_media_types(train_datasets)
@@ -629,7 +631,11 @@ def setup_dataloaders(config, mode="pt"):
 
     # one GPU-batch size per media type
     batch_size = [config.inputs.batch_size[k] for k in media_types]
-    samplers   = create_stateful_sampler(train_datasets, batch_size)
+    samplers = create_stateful_sampler(train_datasets, batch_size)
+
+    if samplers_state:
+        for sampler, state in zip(samplers, samplers_state):
+            sampler.load_state_dict(state)
 
     train_loaders = create_loader(
         train_datasets,
@@ -654,7 +660,7 @@ def setup_dataloaders(config, mode="pt"):
     )
 
     test_name2loaders = dict(zip(test_dataset_names, test_loaders))
-    return train_loaders, test_name2loaders, media_types
+    return train_loaders, test_name2loaders, media_types, samplers
 
 def main(config):
     if is_main_process() and config.wandb.enable:
@@ -686,6 +692,7 @@ def main(config):
         tokenizer,
         start_epoch,
         global_step,
+        samplers_state,
     ) = setup_model(
         config,
         model_cls=model_cls,
@@ -694,8 +701,9 @@ def main(config):
         num_steps_per_epoch=num_steps_per_epoch,
     )
 
-    if is_main_process() and config.wandb.enable:
-        wandb.watch(model)
+    train_loaders, test_name2loaders, train_media_types, samplers = setup_dataloaders(
+        config, mode=config.mode, samplers_state=samplers_state
+    )
 
     if config.get('use_bf16', True):
         data_type = torch.bfloat16
@@ -721,6 +729,7 @@ def main(config):
                 scaler,
                 config,
                 data_type,
+                samplers,
                 skip_num = global_step - start_step,
                 log_debug = True
             )
