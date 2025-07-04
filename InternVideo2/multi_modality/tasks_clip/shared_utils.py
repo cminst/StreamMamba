@@ -71,6 +71,7 @@ def setup_model(
     scaler = None
 
     samplers_state = None
+    rng_state = None
     if hasattr(config, "deepspeed") and config.deepspeed.enable:
         logger.info("Initializing model with DeepSpeed")
         optimizer_params = create_optimizer(config.optimizer, model, return_group=True)
