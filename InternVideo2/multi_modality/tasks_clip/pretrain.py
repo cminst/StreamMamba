@@ -350,11 +350,15 @@ def train(
 
     # Aggregate loaders
     seed = config.seed + epoch
+    logger.info(f"DEBUG: In train - MetaLoader_rs seed: {seed}")
     train_loader_agg = MetaLoader_rs(
         name2loader=dict(list(zip(media_types, train_loaders))),
         skip_num=skip_num,
         seed=seed,
     )
+    logger.info(f"DEBUG: In train - skip_num: {skip_num}")
+    for i, sampler in enumerate(samplers):
+        logger.info(f"DEBUG: Sampler {i} start_iter: {sampler.start_iter}")
 
     num_batches_train = len(train_loader_agg)
 
@@ -714,6 +718,7 @@ def main(config):
     logger.info(f"Epoch: {start_epoch}")
     start_time = time.time()
     start_step = start_epoch * num_steps_per_epoch
+    logger.info(f"DEBUG: In main - start_epoch: {start_epoch}, global_step: {global_step}, num_steps_per_epoch: {num_steps_per_epoch}")
 
     for epoch in range(start_epoch, config.scheduler.epochs):
         if not config.evaluate:
