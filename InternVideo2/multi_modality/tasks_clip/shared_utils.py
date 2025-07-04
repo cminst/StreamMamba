@@ -164,4 +164,5 @@ def setup_model(
         start_epoch,
         global_step,
         samplers_state,
+        rng_state,
     )

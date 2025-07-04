@@ -590,7 +590,7 @@ def train(
             else:
                 logger.info(f"Saving checkpoint at global step {global_step}")
                 tag = f"ckpt_iter{global_step:07d}"
-                client_state = {"epoch": epoch, "global_step": global_step, "data_sampler": [{"start_iter": s.start_iter} for s in samplers]}
+                client_state = {"epoch": epoch, "global_step": global_step, "data_sampler": [{"start_iter": s.start_iter} for s in samplers], "rng_state": get_rng_state()}
 
                 model.save_checkpoint(config.output_dir, tag=tag, client_state=client_state)
 
@@ -639,6 +639,7 @@ def setup_dataloaders(config, mode="pt", samplers_state=None):
     if samplers_state:
         for i, sampler in enumerate(samplers):
             sampler.set_start_iter(samplers_state[i]["start_iter"])
+            logger.info(f"DEBUG: Sampler {i} start_iter after setting: {sampler.start_iter}")
             logger.info(f"DEBUG: Sampler {i} start_iter after setting: {sampler.start_iter}")
 
     train_loaders = create_loader(
@@ -697,6 +698,7 @@ def main(config):
         start_epoch,
         global_step,
         samplers_state,
+        rng_state,
     ) = setup_model(
         config,
         model_cls=model_cls,
@@ -704,6 +706,8 @@ def main(config):
         find_unused_parameters=True,
         num_steps_per_epoch=num_steps_per_epoch,
     )
+
+    set_rng_state(rng_state)
 
     train_loaders, test_name2loaders, train_media_types, samplers = setup_dataloaders(
         config, mode=config.mode, samplers_state=samplers_state

@@ -1,14 +1,13 @@
-2025-07-04T04:14:14 | INFO | vindlu : Logging to: scripts/pretraining/clip/B14/B14/train.log
-2025-07-04T04:14:14 | INFO | utils.config_utils : config: {
+2025-07-04T05:51:02 | INFO | utils.config_utils : config: {
   root_path: /home/zli
   available_corpus: {
       cc3m: {
           anno_path: your_path
-          data_root: 
+          data_root:
           media_type: image }
       webvid_10m: {
           anno_path: your_path
-          data_root: 
+          data_root:
           media_type: video }
       smol_test: {
           anno_path: /root/IV2/InternVideo2/multi_modality/data_test/smol_test.json
@@ -202,155 +201,157 @@
   distributed: True
   dist_backend: nccl
   deepspeed_config: scripts/pretraining/clip/B14/B14/deepspeed_config.json }
-2025-07-04T04:14:14 | WARNING | py.warnings : /home/zli/IV2/InternVideo2/multi_modality/utils/distributed.py:24: UserWarning: No device id is provided via `init_process_group` or `barrier `. Using the current device set by the user. 
+2025-07-04T05:51:03 | WARNING | py.warnings : /home/zli/IV2/InternVideo2/multi_modality/utils/distributed.py:24: UserWarning: No device id is provided via `init_process_group` or `barrier `. Using the current device set by the user.
   builtin_warn(*args, **kwargs)
 
-2025-07-04T04:14:14 | WARNING | py.warnings : /home/zli/IV2/InternVideo2/multi_modality/utils/distributed.py:24: UserWarning: No device id is provided via `init_process_group` or `barrier `. Using the current device set by the user. 
+2025-07-04T05:51:03 | WARNING | py.warnings : /home/zli/IV2/InternVideo2/multi_modality/utils/distributed.py:24: UserWarning: No device id is provided via `init_process_group` or `barrier `. Using the current device set by the user.
   builtin_warn(*args, **kwargs)
 
-2025-07-04T04:14:15 | INFO | __main__ : train_file: {'anno_path': '/home/zli/kinetics-dataset/k600/train/train/kinetics_v2.json', 'data_root': '/home/zli/kinetics-dataset/k600/train/train', 'media_type': 'video', 'min_caption_length': 1}
-2025-07-04T04:14:15 | INFO | __main__ : Creating dataset for pt
-2025-07-04T04:14:15 | WARNING | dataset : Make sure that you don't need audio input!!!
-2025-07-04T04:14:15 | INFO | dataset : dataset_type: pt_train media_type: video dataset_cls: <class 'dataset.pt_dataset.VidTxtPtTrainDataset'>
-2025-07-04T04:14:15 | INFO | dataset : dataset_type=pt_train, train_file={'anno_path': '/home/zli/kinetics-dataset/k600/train/train/kinetics_v2.json', 'data_root': '/home/zli/kinetics-dataset/k600/train/train', 'media_type': 'video', 'min_caption_length': 1}
-2025-07-04T04:14:15 | INFO | dataset : {'ann_file': {'anno_path': '/home/zli/kinetics-dataset/k600/train/train/kinetics_v2.json', 'data_root': '/home/zli/kinetics-dataset/k600/train/train', 'media_type': 'video', 'min_caption_length': 1}, 'transform': Compose(
+2025-07-04T05:51:04 | INFO | __main__ : train_file: {'anno_path': '/home/zli/kinetics-dataset/k600/train/train/kinetics_v2.json', 'data_root': '/home/zli/kinetics-dataset/k600/train/train', 'media_type': 'video', 'min_caption_length': 1}
+2025-07-04T05:51:04 | INFO | __main__ : Creating dataset for pt
+2025-07-04T05:51:04 | WARNING | dataset : Make sure that you don't need audio input!!!
+2025-07-04T05:51:04 | INFO | dataset : dataset_type: pt_train media_type: video dataset_cls: <class 'dataset.pt_dataset.VidTxtPtTrainDataset'>
+2025-07-04T05:51:04 | INFO | dataset : dataset_type=pt_train, train_file={'anno_path': '/home/zli/kinetics-dataset/k600/train/train/kinetics_v2.json', 'data_root': '/home/zli/kinetics-dataset/k600/train/train', 'media_type': 'video', 'min_caption_length': 1}
+2025-07-04T05:51:04 | INFO | dataset : {'ann_file': {'anno_path': '/home/zli/kinetics-dataset/k600/train/train/kinetics_v2.json', 'data_root': '/home/zli/kinetics-dataset/k600/train/train', 'media_type': 'video', 'min_caption_length': 1}, 'transform': Compose(
     Lambda()
     Resize(size=(224, 224), interpolation=bicubic, max_size=None, antialias=True)
     Lambda()
     Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
 ), 'num_epochs': 2, 'video_reader_type': 'decord', 'sample_type': 'all', 'num_frames': 8, 'num_tries': 10}
-2025-07-04T04:14:15 | INFO | dataset : train_transform:
-2025-07-04T04:14:15 | INFO | dataset : Compose(
+2025-07-04T05:51:04 | INFO | dataset : train_transform:
+2025-07-04T05:51:04 | INFO | dataset : Compose(
     Lambda()
     Resize(size=(224, 224), interpolation=bicubic, max_size=None, antialias=True)
     Lambda()
     Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
 )
-2025-07-04T04:14:15 | INFO | dataset.pt_dataset : ann_file: {'anno_path': '/home/zli/kinetics-dataset/k600/train/train/kinetics_v2.json', 'data_root': '/home/zli/kinetics-dataset/k600/train/train', 'media_type': 'video', 'min_caption_length': 1}
-2025-07-04T04:14:15 | INFO | dataset.pt_dataset : Loading json file /home/zli/kinetics-dataset/k600/train/train/kinetics_v2.json
-2025-07-04T04:14:15 | INFO | dataset.pt_dataset : Loading from local file!
-2025-07-04T04:14:15 | INFO | dataset.pt_dataset : Num samples: 99243
-2025-07-04T04:14:15 | INFO | dataset.pt_dataset : Num too short: 0
-2025-07-04T04:14:15 | INFO | dataset.pt_dataset : Examples of too short captions (len < 1):
-2025-07-04T04:14:15 | INFO | dataset.pt_dataset : num_examples: 99243
-2025-07-04T04:14:15 | INFO | dataset : Use ConcatDataset for video
-2025-07-04T04:14:15 | WARNING | dataset : Make sure that you don't need audio input!!!
-2025-07-04T04:14:15 | INFO | dataset : dataset_type: ret_eval media_type: video dataset_cls: <class 'dataset.ret_dataset.VidTxtRetEvalDataset'>
-2025-07-04T04:14:15 | INFO | dataset : dataset_type=pt_eval, test_file={'anno_path': '/home/zli/kinetics-dataset/k600/test/kinetics-test.json', 'data_root': '/home/zli/kinetics-dataset/k600/test/', 'media_type': 'video', 'is_act_rec': True}
-2025-07-04T04:14:15 | INFO | dataset : {'ann_file': {'anno_path': '/home/zli/kinetics-dataset/k600/test/kinetics-test.json', 'data_root': '/home/zli/kinetics-dataset/k600/test/', 'media_type': 'video', 'is_act_rec': True}, 'transform': Compose(
+2025-07-04T05:51:04 | INFO | dataset.pt_dataset : ann_file: {'anno_path': '/home/zli/kinetics-dataset/k600/train/train/kinetics_v2.json', 'data_root': '/home/zli/kinetics-dataset/k600/train/train', 'media_type': 'video', 'min_caption_length': 1}
+2025-07-04T05:51:04 | INFO | dataset.pt_dataset : Loading json file /home/zli/kinetics-dataset/k600/train/train/kinetics_v2.json
+2025-07-04T05:51:04 | INFO | dataset.pt_dataset : Loading from local file!
+2025-07-04T05:51:04 | INFO | dataset.pt_dataset : Num samples: 99243
+2025-07-04T05:51:04 | INFO | dataset.pt_dataset : Num too short: 0
+2025-07-04T05:51:04 | INFO | dataset.pt_dataset : Examples of too short captions (len < 1):
+2025-07-04T05:51:04 | INFO | dataset.pt_dataset : num_examples: 99243
+2025-07-04T05:51:04 | INFO | dataset : Use ConcatDataset for video
+2025-07-04T05:51:04 | WARNING | dataset : Make sure that you don't need audio input!!!
+2025-07-04T05:51:04 | INFO | dataset : dataset_type: ret_eval media_type: video dataset_cls: <class 'dataset.ret_dataset.VidTxtRetEvalDataset'>
+2025-07-04T05:51:04 | INFO | dataset : dataset_type=pt_eval, test_file={'anno_path': '/home/zli/kinetics-dataset/k600/test/kinetics-test.json', 'data_root': '/home/zli/kinetics-dataset/k600/test/', 'media_type': 'video', 'is_act_rec': True}
+2025-07-04T05:51:04 | INFO | dataset : {'ann_file': {'anno_path': '/home/zli/kinetics-dataset/k600/test/kinetics-test.json', 'data_root': '/home/zli/kinetics-dataset/k600/test/', 'media_type': 'video', 'is_act_rec': True}, 'transform': Compose(
     Resize(size=(224, 224), interpolation=bicubic, max_size=None, antialias=True)
     Lambda()
     Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
 ), 'video_reader_type': 'decord', 'sample_type': 'all', 'num_frames': 8, 'num_tries': 1}
-2025-07-04T04:14:15 | INFO | dataset : test_transform:
-2025-07-04T04:14:15 | INFO | dataset : Compose(
+2025-07-04T05:51:04 | INFO | dataset : test_transform:
+2025-07-04T05:51:04 | INFO | dataset : Compose(
     Resize(size=(224, 224), interpolation=bicubic, max_size=None, antialias=True)
     Lambda()
     Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
 )
-2025-07-04T04:14:15 | INFO | dataset.ret_dataset : Action recognition, number of prompts: 16
-2025-07-04T04:14:15 | INFO | dataset.ret_dataset : Action recognition, number of classes: 512
-2025-07-04T04:14:15 | INFO | dataset.ret_dataset : Action recognition, number of prompts: 16
-2025-07-04T04:14:15 | INFO | dataset.ret_dataset : Action recognition, number of classes: 512
-2025-07-04T04:14:15 | INFO | tasks_clip.shared_utils : Creating model
-2025-07-04T04:14:16 | INFO | models.internvideo2_clip_small : Load vision_encoder checkpoint from /home/zli/IV2/models/stage1/B14/B14_dist_1B_stage2/pytorch_model.bin
-2025-07-04T04:14:16 | INFO | models.internvideo2_clip_small : Load mobileclip checkpoint from /home/zli/IV2/models/mobileclip_blt.pt
-2025-07-04T04:14:16 | INFO | models.internvideo2_clip_small : Load extra checkpoint from /home/zli/IV2/models/clip/B14/pytorch_model.bin
-2025-07-04T04:14:16 | INFO | models.internvideo2_clip_small : _IncompatibleKeys(missing_keys=['streaming_vision_encoder.rnn.pre_norm.weight', 'streaming_vision_encoder.rnn.pre_norm.bias', 'streaming_vision_encoder.rnn.in_gate.weight', 'streaming_vision_encoder.rnn.in_gate.bias', 'streaming_vision_encoder.rnn.input_proj.weight', 'streaming_vision_encoder.rnn.input_proj.bias', 'streaming_vision_encoder.rnn.ssm.dt_bias', 'streaming_vision_encoder.rnn.ssm.A_log', 'streaming_vision_encoder.rnn.ssm.D', 'streaming_vision_encoder.rnn.ssm.in_proj.weight', 'streaming_vision_encoder.rnn.ssm.conv1d.weight', 'streaming_vision_encoder.rnn.ssm.conv1d.bias', 'streaming_vision_encoder.rnn.ssm.norm.weight', 'streaming_vision_encoder.rnn.ssm.out_proj.weight', 'streaming_vision_encoder.rnn.out_gate.weight', 'streaming_vision_encoder.rnn.out_gate.bias', 'streaming_vision_encoder.rnn.proj.weight', 'streaming_vision_encoder.rnn.proj.bias'], unexpected_keys=[])
-2025-07-04T04:14:16 | INFO | tasks_clip.shared_utils : Change to bfloat16 for model
-2025-07-04T04:14:16 | INFO | tasks_clip.shared_utils : Initializing model with DeepSpeed
-2025-07-04T04:14:16 | INFO | utils.optimizer : diff_names: [], diff_lr: None
-2025-07-04T04:14:16 | INFO | utils.optimizer : param temp: wd: 0, lr: 1e-05
-2025-07-04T04:14:16 | INFO | utils.optimizer : param streaming_vision_encoder.rnn.pre_norm.weight: wd: 0, lr: 1e-05
-2025-07-04T04:14:16 | INFO | utils.optimizer : param streaming_vision_encoder.rnn.pre_norm.bias: wd: 0, lr: 1e-05
-2025-07-04T04:14:16 | INFO | utils.optimizer : param streaming_vision_encoder.rnn.in_gate.weight: wd: 0.01, lr: 1e-05
-2025-07-04T04:14:16 | INFO | utils.optimizer : param streaming_vision_encoder.rnn.in_gate.bias: wd: 0, lr: 1e-05
-2025-07-04T04:14:16 | INFO | utils.optimizer : param streaming_vision_encoder.rnn.input_proj.weight: wd: 0.01, lr: 1e-05
-2025-07-04T04:14:16 | INFO | utils.optimizer : param streaming_vision_encoder.rnn.input_proj.bias: wd: 0, lr: 1e-05
-2025-07-04T04:14:16 | INFO | utils.optimizer : param streaming_vision_encoder.rnn.ssm.dt_bias: wd: 0, lr: 1e-05
-2025-07-04T04:14:16 | INFO | utils.optimizer : param streaming_vision_encoder.rnn.ssm.A_log: wd: 0, lr: 1e-05
-2025-07-04T04:14:16 | INFO | utils.optimizer : param streaming_vision_encoder.rnn.ssm.D: wd: 0, lr: 1e-05
-2025-07-04T04:14:16 | INFO | utils.optimizer : param streaming_vision_encoder.rnn.ssm.in_proj.weight: wd: 0.01, lr: 1e-05
-2025-07-04T04:14:16 | INFO | utils.optimizer : param streaming_vision_encoder.rnn.ssm.conv1d.weight: wd: 0.01, lr: 1e-05
-2025-07-04T04:14:16 | INFO | utils.optimizer : param streaming_vision_encoder.rnn.ssm.conv1d.bias: wd: 0, lr: 1e-05
-2025-07-04T04:14:16 | INFO | utils.optimizer : param streaming_vision_encoder.rnn.ssm.norm.weight: wd: 0, lr: 1e-05
-2025-07-04T04:14:16 | INFO | utils.optimizer : param streaming_vision_encoder.rnn.ssm.out_proj.weight: wd: 0.01, lr: 1e-05
-2025-07-04T04:14:16 | INFO | utils.optimizer : param streaming_vision_encoder.rnn.out_gate.weight: wd: 0.01, lr: 1e-05
-2025-07-04T04:14:16 | INFO | utils.optimizer : param streaming_vision_encoder.rnn.out_gate.bias: wd: 0, lr: 1e-05
-2025-07-04T04:14:16 | INFO | utils.optimizer : param streaming_vision_encoder.rnn.proj.weight: wd: 0.01, lr: 1e-05
-2025-07-04T04:14:16 | INFO | utils.optimizer : param streaming_vision_encoder.rnn.proj.bias: wd: 0, lr: 1e-05
-2025-07-04T04:14:16 | INFO | utils.optimizer : optimizer -- lr=1e-05 wd=0 len(p)=12
-2025-07-04T04:14:16 | INFO | utils.optimizer : optimizer -- lr=1e-05 wd=0.01 len(p)=7
-2025-07-04T04:14:16 | WARNING | py.warnings : /home/zli/IV2/InternVideo2/multi_modality/utils/distributed.py:24: UserWarning: TORCH_CUDA_ARCH_LIST is not set, all archs for visible cards are included for compilation. 
+2025-07-04T05:51:04 | INFO | dataset.ret_dataset : Action recognition, number of prompts: 16
+2025-07-04T05:51:04 | INFO | dataset.ret_dataset : Action recognition, number of classes: 512
+2025-07-04T05:51:04 | INFO | dataset.ret_dataset : Action recognition, number of prompts: 16
+2025-07-04T05:51:04 | INFO | dataset.ret_dataset : Action recognition, number of classes: 512
+2025-07-04T05:51:04 | INFO | tasks_clip.shared_utils : Creating model
+2025-07-04T05:51:05 | INFO | models.internvideo2_clip_small : Load vision_encoder checkpoint from /home/zli/IV2/models/stage1/B14/B14_dist_1B_stage2/pytorch_model.bin
+2025-07-04T05:51:05 | INFO | models.internvideo2_clip_small : Load mobileclip checkpoint from /home/zli/IV2/models/mobileclip_blt.pt
+2025-07-04T05:51:05 | INFO | models.internvideo2_clip_small : Load extra checkpoint from /home/zli/IV2/models/clip/B14/pytorch_model.bin
+2025-07-04T05:51:05 | INFO | models.internvideo2_clip_small : _IncompatibleKeys(missing_keys=['streaming_vision_encoder.rnn.pre_norm.weight', 'streaming_vision_encoder.rnn.pre_norm.bias', 'streaming_vision_encoder.rnn.in_gate.weight', 'streaming_vision_encoder.rnn.in_gate.bias', 'streaming_vision_encoder.rnn.input_proj.weight', 'streaming_vision_encoder.rnn.input_proj.bias', 'streaming_vision_encoder.rnn.ssm.dt_bias', 'streaming_vision_encoder.rnn.ssm.A_log', 'streaming_vision_encoder.rnn.ssm.D', 'streaming_vision_encoder.rnn.ssm.in_proj.weight', 'streaming_vision_encoder.rnn.ssm.conv1d.weight', 'streaming_vision_encoder.rnn.ssm.conv1d.bias', 'streaming_vision_encoder.rnn.ssm.norm.weight', 'streaming_vision_encoder.rnn.ssm.out_proj.weight', 'streaming_vision_encoder.rnn.out_gate.weight', 'streaming_vision_encoder.rnn.out_gate.bias', 'streaming_vision_encoder.rnn.proj.weight', 'streaming_vision_encoder.rnn.proj.bias'], unexpected_keys=[])
+2025-07-04T05:51:05 | INFO | tasks_clip.shared_utils : Change to bfloat16 for model
+2025-07-04T05:51:05 | INFO | tasks_clip.shared_utils : Initializing model with DeepSpeed
+2025-07-04T05:51:05 | INFO | utils.optimizer : diff_names: [], diff_lr: None
+2025-07-04T05:51:05 | INFO | utils.optimizer : param temp: wd: 0, lr: 1e-05
+2025-07-04T05:51:05 | INFO | utils.optimizer : param streaming_vision_encoder.rnn.pre_norm.weight: wd: 0, lr: 1e-05
+2025-07-04T05:51:05 | INFO | utils.optimizer : param streaming_vision_encoder.rnn.pre_norm.bias: wd: 0, lr: 1e-05
+2025-07-04T05:51:05 | INFO | utils.optimizer : param streaming_vision_encoder.rnn.in_gate.weight: wd: 0.01, lr: 1e-05
+2025-07-04T05:51:05 | INFO | utils.optimizer : param streaming_vision_encoder.rnn.in_gate.bias: wd: 0, lr: 1e-05
+2025-07-04T05:51:05 | INFO | utils.optimizer : param streaming_vision_encoder.rnn.input_proj.weight: wd: 0.01, lr: 1e-05
+2025-07-04T05:51:05 | INFO | utils.optimizer : param streaming_vision_encoder.rnn.input_proj.bias: wd: 0, lr: 1e-05
+2025-07-04T05:51:05 | INFO | utils.optimizer : param streaming_vision_encoder.rnn.ssm.dt_bias: wd: 0, lr: 1e-05
+2025-07-04T05:51:05 | INFO | utils.optimizer : param streaming_vision_encoder.rnn.ssm.A_log: wd: 0, lr: 1e-05
+2025-07-04T05:51:05 | INFO | utils.optimizer : param streaming_vision_encoder.rnn.ssm.D: wd: 0, lr: 1e-05
+2025-07-04T05:51:05 | INFO | utils.optimizer : param streaming_vision_encoder.rnn.ssm.in_proj.weight: wd: 0.01, lr: 1e-05
+2025-07-04T05:51:05 | INFO | utils.optimizer : param streaming_vision_encoder.rnn.ssm.conv1d.weight: wd: 0.01, lr: 1e-05
+2025-07-04T05:51:05 | INFO | utils.optimizer : param streaming_vision_encoder.rnn.ssm.conv1d.bias: wd: 0, lr: 1e-05
+2025-07-04T05:51:05 | INFO | utils.optimizer : param streaming_vision_encoder.rnn.ssm.norm.weight: wd: 0, lr: 1e-05
+2025-07-04T05:51:05 | INFO | utils.optimizer : param streaming_vision_encoder.rnn.ssm.out_proj.weight: wd: 0.01, lr: 1e-05
+2025-07-04T05:51:05 | INFO | utils.optimizer : param streaming_vision_encoder.rnn.out_gate.weight: wd: 0.01, lr: 1e-05
+2025-07-04T05:51:05 | INFO | utils.optimizer : param streaming_vision_encoder.rnn.out_gate.bias: wd: 0, lr: 1e-05
+2025-07-04T05:51:05 | INFO | utils.optimizer : param streaming_vision_encoder.rnn.proj.weight: wd: 0.01, lr: 1e-05
+2025-07-04T05:51:05 | INFO | utils.optimizer : param streaming_vision_encoder.rnn.proj.bias: wd: 0, lr: 1e-05
+2025-07-04T05:51:05 | INFO | utils.optimizer : optimizer -- lr=1e-05 wd=0 len(p)=12
+2025-07-04T05:51:05 | INFO | utils.optimizer : optimizer -- lr=1e-05 wd=0.01 len(p)=7
+2025-07-04T05:51:05 | WARNING | py.warnings : /home/zli/IV2/InternVideo2/multi_modality/utils/distributed.py:24: UserWarning: TORCH_CUDA_ARCH_LIST is not set, all archs for visible cards are included for compilation.
 If this is not desired, please set os.environ['TORCH_CUDA_ARCH_LIST'].
   builtin_warn(*args, **kwargs)
 
-2025-07-04T04:14:16 | WARNING | py.warnings : /home/zli/IV2/InternVideo2/multi_modality/utils/distributed.py:24: UserWarning: TORCH_CUDA_ARCH_LIST is not set, all archs for visible cards are included for compilation. 
+2025-07-04T05:51:05 | WARNING | py.warnings : /home/zli/IV2/InternVideo2/multi_modality/utils/distributed.py:24: UserWarning: TORCH_CUDA_ARCH_LIST is not set, all archs for visible cards are included for compilation.
 If this is not desired, please set os.environ['TORCH_CUDA_ARCH_LIST'].
   builtin_warn(*args, **kwargs)
 
-2025-07-04T04:14:17 | INFO | tasks_clip.shared_utils : Attempting to resume DeepSpeed training from: scripts/pretraining/clip/B14/B14/
-2025-07-04T04:14:17 | INFO | tasks_clip.shared_utils : Successfully resumed from checkpoint. Loaded client state: epoch=0, global_step=85
-2025-07-04T04:14:17 | INFO | tasks_clip.shared_utils : Cuda memory after create model: 623M, Max mem: 623M
-2025-07-04T04:14:17 | INFO | __main__ : Creating dataset for pt
-2025-07-04T04:14:17 | WARNING | dataset : Make sure that you don't need audio input!!!
-2025-07-04T04:14:17 | INFO | dataset : dataset_type: pt_train media_type: video dataset_cls: <class 'dataset.pt_dataset.VidTxtPtTrainDataset'>
-2025-07-04T04:14:17 | INFO | dataset : dataset_type=pt_train, train_file={'anno_path': '/home/zli/kinetics-dataset/k600/train/train/kinetics_v2.json', 'data_root': '/home/zli/kinetics-dataset/k600/train/train', 'media_type': 'video', 'min_caption_length': 1}
-2025-07-04T04:14:17 | INFO | dataset : {'ann_file': {'anno_path': '/home/zli/kinetics-dataset/k600/train/train/kinetics_v2.json', 'data_root': '/home/zli/kinetics-dataset/k600/train/train', 'media_type': 'video', 'min_caption_length': 1}, 'transform': Compose(
+2025-07-04T05:51:06 | INFO | tasks_clip.shared_utils : DEBUG: Initial LR (before resume attempt): 1.0000000000000001e-07
+2025-07-04T05:51:06 | INFO | tasks_clip.shared_utils : Attempting to resume DeepSpeed training from: scripts/pretraining/clip/B14/B14/
+2025-07-04T05:51:06 | INFO | tasks_clip.shared_utils : DEBUG: DeepSpeed load_path: scripts/pretraining/clip/B14/B14/ckpt_iter0000085/mp_rank_00_model_states.pt
+2025-07-04T05:51:06 | INFO | tasks_clip.shared_utils : DEBUG: DeepSpeed client_state: {'buffer_names': ['streaming_vision_encoder.vit_lite.patch_emb.0.block.norm.running_mean', 'streaming_vision_encoder.vit_lite.patch_emb.0.block.norm.running_var', 'streaming_vision_encoder.vit_lite.patch_emb.0.block.norm.num_batches_tracked', 'streaming_vision_encoder.vit_lite.patch_emb.1.block.norm.running_mean', 'streaming_vision_encoder.vit_lite.patch_emb.1.block.norm.running_var', 'streaming_vision_encoder.vit_lite.patch_emb.1.block.norm.num_batches_tracked'], 'param_shapes': [OrderedDict([('temp', torch.Size([])), ('streaming_vision_encoder.rnn.pre_norm.weight', torch.Size([768])), ('streaming_vision_encoder.rnn.pre_norm.bias', torch.Size([768])), ('streaming_vision_encoder.rnn.in_gate.bias', torch.Size([1024])), ('streaming_vision_encoder.rnn.input_proj.bias', torch.Size([1024])), ('streaming_vision_encoder.rnn.ssm.dt_bias', torch.Size([32])), ('streaming_vision_encoder.rnn.ssm.A_log', torch.Size([32])), ('streaming_vision_encoder.rnn.ssm.D', torch.Size([32])), ('streaming_vision_encoder.rnn.ssm.conv1d.bias', torch.Size([2560])), ('streaming_vision_encoder.rnn.ssm.norm.weight', torch.Size([2048])), ('streaming_vision_encoder.rnn.out_gate.bias', torch.Size([1024])), ('streaming_vision_encoder.rnn.proj.bias', torch.Size([768]))]), OrderedDict([('streaming_vision_encoder.rnn.in_gate.weight', torch.Size([1024, 768])), ('streaming_vision_encoder.rnn.input_proj.weight', torch.Size([1024, 768])), ('streaming_vision_encoder.rnn.ssm.in_proj.weight', torch.Size([4640, 1024])), ('streaming_vision_encoder.rnn.ssm.conv1d.weight', torch.Size([2560, 1, 4])), ('streaming_vision_encoder.rnn.ssm.out_proj.weight', torch.Size([1024, 2048])), ('streaming_vision_encoder.rnn.out_gate.weight', torch.Size([1024, 1024])), ('streaming_vision_encoder.rnn.proj.weight', torch.Size([768, 1024]))])], 'frozen_param_shapes': None, 'shared_params': {}, 'frozen_param_fragments': None, 'global_samples': 163880, 'ds_config': 'scripts/pretraining/clip/B14/B14/deepspeed_config.json', 'ds_version': '0.16.7', 'epoch': 0, 'global_step': 85}
+2025-07-04T05:51:06 | INFO | tasks_clip.shared_utils : Successfully resumed from checkpoint. Loaded client state: epoch=0, global_step=85
+2025-07-04T05:51:06 | INFO | tasks_clip.shared_utils : DEBUG: LR after DeepSpeed resume attempt: 6.685628591057218e-07
+2025-07-04T05:51:06 | INFO | tasks_clip.shared_utils : Cuda memory after create model: 623M, Max mem: 623M
+2025-07-04T05:51:06 | INFO | __main__ : Creating dataset for pt
+2025-07-04T05:51:06 | WARNING | dataset : Make sure that you don't need audio input!!!
+2025-07-04T05:51:06 | INFO | dataset : dataset_type: pt_train media_type: video dataset_cls: <class 'dataset.pt_dataset.VidTxtPtTrainDataset'>
+2025-07-04T05:51:06 | INFO | dataset : dataset_type=pt_train, train_file={'anno_path': '/home/zli/kinetics-dataset/k600/train/train/kinetics_v2.json', 'data_root': '/home/zli/kinetics-dataset/k600/train/train', 'media_type': 'video', 'min_caption_length': 1}
+2025-07-04T05:51:06 | INFO | dataset : {'ann_file': {'anno_path': '/home/zli/kinetics-dataset/k600/train/train/kinetics_v2.json', 'data_root': '/home/zli/kinetics-dataset/k600/train/train', 'media_type': 'video', 'min_caption_length': 1}, 'transform': Compose(
     Lambda()
     Resize(size=(224, 224), interpolation=bicubic, max_size=None, antialias=True)
     Lambda()
     Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
 ), 'num_epochs': 2, 'video_reader_type': 'decord', 'sample_type': 'all', 'num_frames': 8, 'num_tries': 10}
-2025-07-04T04:14:17 | INFO | dataset : train_transform:
-2025-07-04T04:14:17 | INFO | dataset : Compose(
+2025-07-04T05:51:06 | INFO | dataset : train_transform:
+2025-07-04T05:51:06 | INFO | dataset : Compose(
     Lambda()
     Resize(size=(224, 224), interpolation=bicubic, max_size=None, antialias=True)
     Lambda()
     Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
 )
-2025-07-04T04:14:17 | INFO | dataset.pt_dataset : ann_file: {'anno_path': '/home/zli/kinetics-dataset/k600/train/train/kinetics_v2.json', 'data_root': '/home/zli/kinetics-dataset/k600/train/train', 'media_type': 'video', 'min_caption_length': 1}
-2025-07-04T04:14:17 | INFO | dataset.pt_dataset : Loading json file /home/zli/kinetics-dataset/k600/train/train/kinetics_v2.json
-2025-07-04T04:14:17 | INFO | dataset.pt_dataset : Loading from local file!
-2025-07-04T04:14:17 | INFO | dataset.pt_dataset : Num samples: 99243
-2025-07-04T04:14:17 | INFO | dataset.pt_dataset : Num too short: 0
-2025-07-04T04:14:17 | INFO | dataset.pt_dataset : Examples of too short captions (len < 1):
-2025-07-04T04:14:17 | INFO | dataset.pt_dataset : num_examples: 99243
-2025-07-04T04:14:17 | INFO | dataset : Use ConcatDataset for video
-2025-07-04T04:14:17 | WARNING | dataset : Make sure that you don't need audio input!!!
-2025-07-04T04:14:17 | INFO | dataset : dataset_type: ret_eval media_type: video dataset_cls: <class 'dataset.ret_dataset.VidTxtRetEvalDataset'>
-2025-07-04T04:14:17 | INFO | dataset : dataset_type=pt_eval, test_file={'anno_path': '/home/zli/kinetics-dataset/k600/test/kinetics-test.json', 'data_root': '/home/zli/kinetics-dataset/k600/test/', 'media_type': 'video', 'is_act_rec': True}
-2025-07-04T04:14:17 | INFO | dataset : {'ann_file': {'anno_path': '/home/zli/kinetics-dataset/k600/test/kinetics-test.json', 'data_root': '/home/zli/kinetics-dataset/k600/test/', 'media_type': 'video', 'is_act_rec': True}, 'transform': Compose(
+2025-07-04T05:51:06 | INFO | dataset.pt_dataset : ann_file: {'anno_path': '/home/zli/kinetics-dataset/k600/train/train/kinetics_v2.json', 'data_root': '/home/zli/kinetics-dataset/k600/train/train', 'media_type': 'video', 'min_caption_length': 1}
+2025-07-04T05:51:06 | INFO | dataset.pt_dataset : Loading json file /home/zli/kinetics-dataset/k600/train/train/kinetics_v2.json
+2025-07-04T05:51:06 | INFO | dataset.pt_dataset : Loading from local file!
+2025-07-04T05:51:06 | INFO | dataset.pt_dataset : Num samples: 99243
+2025-07-04T05:51:06 | INFO | dataset.pt_dataset : Num too short: 0
+2025-07-04T05:51:06 | INFO | dataset.pt_dataset : Examples of too short captions (len < 1):
+2025-07-04T05:51:06 | INFO | dataset.pt_dataset : num_examples: 99243
+2025-07-04T05:51:06 | INFO | dataset : Use ConcatDataset for video
+2025-07-04T05:51:06 | WARNING | dataset : Make sure that you don't need audio input!!!
+2025-07-04T05:51:06 | INFO | dataset : dataset_type: ret_eval media_type: video dataset_cls: <class 'dataset.ret_dataset.VidTxtRetEvalDataset'>
+2025-07-04T05:51:06 | INFO | dataset : dataset_type=pt_eval, test_file={'anno_path': '/home/zli/kinetics-dataset/k600/test/kinetics-test.json', 'data_root': '/home/zli/kinetics-dataset/k600/test/', 'media_type': 'video', 'is_act_rec': True}
+2025-07-04T05:51:06 | INFO | dataset : {'ann_file': {'anno_path': '/home/zli/kinetics-dataset/k600/test/kinetics-test.json', 'data_root': '/home/zli/kinetics-dataset/k600/test/', 'media_type': 'video', 'is_act_rec': True}, 'transform': Compose(
     Resize(size=(224, 224), interpolation=bicubic, max_size=None, antialias=True)
     Lambda()
     Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
 ), 'video_reader_type': 'decord', 'sample_type': 'all', 'num_frames': 8, 'num_tries': 1}
-2025-07-04T04:14:17 | INFO | dataset : test_transform:
-2025-07-04T04:14:17 | INFO | dataset : Compose(
+2025-07-04T05:51:06 | INFO | dataset : test_transform:
+2025-07-04T05:51:06 | INFO | dataset : Compose(
     Resize(size=(224, 224), interpolation=bicubic, max_size=None, antialias=True)
     Lambda()
     Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
 )
-2025-07-04T04:14:17 | INFO | dataset.ret_dataset : Action recognition, number of prompts: 16
-2025-07-04T04:14:17 | INFO | dataset.ret_dataset : Action recognition, number of classes: 512
-2025-07-04T04:14:17 | INFO | dataset.ret_dataset : Action recognition, number of prompts: 16
-2025-07-04T04:14:17 | INFO | dataset.ret_dataset : Action recognition, number of classes: 512
-2025-07-04T04:14:17 | INFO | __main__ : Start training
-2025-07-04T04:14:17 | INFO | __main__ : Epoch: 0
-2025-07-04T04:14:17 | INFO | __main__ : Getting evaluation video from qingy2024/backflip_train (1.mp4)
-2025-07-04T04:14:18 | INFO | dataset.dataloader : video dataloader skip steps: 85
-2025-07-04T04:14:18 | INFO | dataset.dataloader : MetaLoader has 1 dataloaders, 12320 batches in total
-dataloader index=0 name=video, batch-size=8 length(#batches)=12320 
-2025-07-04T04:14:18 | INFO | __main__ : Training loader set up, 12320 batches.
-2025-07-04T04:14:32 | INFO | __main__ : Original data: image shape: torch.Size([8, 248, 3, 224, 224]), text: ['blasting sand', 'pillow fight', 'playing cricket', 'faceplanting', 'playing basketball', 'ski jumping', 'parkour', 'sailing']
-2025-07-04T04:14:32 | WARNING | py.warnings : /home/zli/miniconda3/lib/python3.10/site-packages/typing_extensions.py:2949: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+2025-07-04T05:51:06 | INFO | dataset.ret_dataset : Action recognition, number of prompts: 16
+2025-07-04T05:51:06 | INFO | dataset.ret_dataset : Action recognition, number of classes: 512
+2025-07-04T05:51:06 | INFO | dataset.ret_dataset : Action recognition, number of prompts: 16
+2025-07-04T05:51:06 | INFO | dataset.ret_dataset : Action recognition, number of classes: 512
+2025-07-04T05:51:06 | INFO | __main__ : Start training
+2025-07-04T05:51:06 | INFO | __main__ : Epoch: 0
+2025-07-04T05:51:06 | INFO | __main__ : Getting evaluation video from qingy2024/backflip_train (1.mp4)
+2025-07-04T05:51:06 | INFO | dataset.dataloader : video dataloader skip steps: 85
+2025-07-04T05:51:06 | INFO | dataset.dataloader : MetaLoader has 1 dataloaders, 12320 batches in total
+dataloader index=0 name=video, batch-size=8 length(#batches)=12320
+2025-07-04T05:51:06 | INFO | __main__ : Training loader set up, 12320 batches.
+2025-07-04T05:51:20 | WARNING | py.warnings : /home/zli/miniconda3/lib/python3.10/site-packages/typing_extensions.py:2949: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
   warnings.warn(msg, category=category, stacklevel=stacklevel + 1)
 
-2025-07-04T04:14:32 | WARNING | py.warnings : /home/zli/miniconda3/lib/python3.10/site-packages/typing_extensions.py:2949: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+2025-07-04T05:51:20 | WARNING | py.warnings : /home/zli/miniconda3/lib/python3.10/site-packages/typing_extensions.py:2949: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
   warnings.warn(msg, category=category, stacklevel=stacklevel + 1)
 
-2025-07-04T04:14:32 | INFO | __main__ : Saving debug data at (batch-wise) global step 85, frame index 7
-2025-07-04T04:14:32 | INFO | __main__ : Saving to scripts/pretraining/clip/B14/B14
-2025-07-04T04:15:02 | INFO | __main__ : Training: [Epoch 0] [Step 0] lr: 0.000001  temperature: 0.0126  video-stream-nce-loss: 0.0000  eval_avg_sim: No data  video-stream-target-loss: 0.1895 (0.1895)  video-stream-target-sim: 0.8105 (0.8105)
-2025-07-04T04:15:31 | INFO | __main__ : Training: [Epoch 0] [Step 1] lr: 0.000001  temperature: 0.0126  video-stream-nce-loss: 0.0000  eval_avg_sim: No data  video-stream-target-loss: 0.1766 (0.1831)  video-stream-target-sim: 0.8105 (0.8169)
-2025-07-04T04:15:59 | INFO | __main__ : Training: [Epoch 0] [Step 2] lr: 0.000001  temperature: 0.0126  video-stream-nce-loss: 0.0000  eval_avg_sim: No data  video-stream-target-loss: 0.1886 (0.1849)  video-stream-target-sim: 0.8114 (0.8151)
+2025-07-04T05:51:50 | INFO | __main__ : Training: [Epoch 0] [Step 0] lr: 0.000001  temperature: 0.0126  video-stream-nce-loss: 0.0000  eval_avg_sim: No data  video-stream-target-loss: 0.1895 (0.1895)  video-stream-target-sim: 0.8105 (0.8105)
+2025-07-04T05:52:19 | INFO | __main__ : Training: [Epoch 0] [Step 1] lr: 0.000001  temperature: 0.0126  video-stream-nce-loss: 0.0000  eval_avg_sim: No data  video-stream-target-loss: 0.1766 (0.1831)  video-stream-target-sim: 0.8105 (0.8169)
+2025-07-04T05:52:47 | INFO | __main__ : Training: [Epoch 0] [Step 2] lr: 0.000001  temperature: 0.0126  video-stream-nce-loss: 0.0000  eval_avg_sim: No data  video-stream-target-loss: 0.1886 (0.1849)  video-stream-target-sim: 0.8114 (0.8151)
+2025-07-04T05:53:15 | INFO | __main__ : Training: [Epoch 0] [Step 3] lr: 0.000001  temperature: 0.0126  video-stream-nce-loss: 0.0000  eval_avg_sim: No data  video-stream-target-loss: 0.1821 (0.1842)  video-stream-target-sim: 0.8114 (0.8158)
