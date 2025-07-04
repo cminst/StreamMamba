@@ -302,6 +302,7 @@ def train(
     samplers,
     skip_num=0,
     log_debug=False,
+    num_steps_per_epoch=None,
 ):
     """
     Performs one epoch of training with periodic evaluation.
@@ -345,20 +346,18 @@ def train(
 
     media_types = get_media_types(train_loaders) # Defined here for use in MetaLoader_rs
 
+    current_epoch_for_shuffling = global_step // num_steps_per_epoch
+
     if config.distributed:
-        for loader in train_loaders: loader.sampler.set_epoch(epoch)
+        for loader in train_loaders: loader.sampler.set_epoch(current_epoch_for_shuffling)
 
     # Aggregate loaders
-    seed = config.seed + epoch
-    logger.info(f"DEBUG: In train - MetaLoader_rs seed: {seed}")
+    seed = config.seed + current_epoch_for_shuffling
     train_loader_agg = MetaLoader_rs(
         name2loader=dict(list(zip(media_types, train_loaders))),
         skip_num=skip_num,
         seed=seed,
     )
-    logger.info(f"DEBUG: In train - skip_num: {skip_num}")
-    for i, sampler in enumerate(samplers):
-        logger.info(f"DEBUG: Sampler {i} start_iter: {sampler.start_iter}")
 
     num_batches_train = len(train_loader_agg)
 
@@ -718,7 +717,6 @@ def main(config):
     logger.info(f"Epoch: {start_epoch}")
     start_time = time.time()
     start_step = start_epoch * num_steps_per_epoch
-    logger.info(f"DEBUG: In main - start_epoch: {start_epoch}, global_step: {global_step}, num_steps_per_epoch: {num_steps_per_epoch}")
 
     for epoch in range(start_epoch, config.scheduler.epochs):
         if not config.evaluate:
@@ -736,7 +734,8 @@ def main(config):
                 data_type,
                 samplers,
                 skip_num = global_step - start_step,
-                log_debug = True
+                log_debug = True,
+                num_steps_per_epoch=num_steps_per_epoch
             )
 
         # Save checkpoint before next epoch
