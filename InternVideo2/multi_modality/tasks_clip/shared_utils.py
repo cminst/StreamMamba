@@ -83,6 +83,8 @@ def setup_model(
             lr_scheduler=lambda opt: create_scheduler(config.scheduler, opt),
         )
 
+        logger.info(f"DEBUG: Initial LR (before resume attempt): {optimizer.param_groups[0]['lr']}")
+
         # Resume deepspeed training
         if config.resume and config.pretrained_path:
             logger.info(f"Attempting to resume DeepSpeed training from: {config.pretrained_path}")
@@ -92,11 +94,18 @@ def setup_model(
             load_path, client_state = model.load_checkpoint(config.pretrained_path)
 
             if load_path is not None:
+                logger.info(f"DEBUG: DeepSpeed load_path: {load_path}")
                 if client_state:
+                    logger.info(f"DEBUG: DeepSpeed client_state: {client_state}")
                     # We saved epoch and global_step, so we load them back.
                     start_epoch = client_state.get('epoch', 0)
                     global_step = client_state.get('global_step', 0)
                     samplers_state = client_state.get('data_sampler', None)
+                    rng_state = client_state.get('rng_state', None)
+                    if rng_state:
+                        logger.info(f"DEBUG: DeepSpeed found RNG state in client_state.")
+                        # The actual setting of RNG state happens in pretrain.py's main function
+                        # after setup_model returns.
                     logger.info(
                         f"Successfully resumed from checkpoint. "
                         f"Loaded client state: epoch={start_epoch}, global_step={global_step}"
@@ -106,6 +115,7 @@ def setup_model(
                         "Resumed checkpoint but no client_state found. "
                         "Starting from epoch 0, global_step 0."
                     )
+                logger.info(f"DEBUG: LR after DeepSpeed resume attempt: {optimizer.param_groups[0]['lr']}")
             else:
                 logger.warning(
                     f"Could not find a valid checkpoint to resume from in {config.pretrained_path}. "

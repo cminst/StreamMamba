@@ -637,8 +637,9 @@ def setup_dataloaders(config, mode="pt", samplers_state=None):
     samplers = create_stateful_sampler(train_datasets, batch_size)
 
     if samplers_state:
-        for sampler, state in zip(samplers, samplers_state):
-            sampler.set_start_iter(state["start_iter"])
+        for i, sampler in enumerate(samplers):
+            sampler.set_start_iter(samplers_state[i]["start_iter"])
+            logger.info(f"DEBUG: Sampler {i} start_iter after setting: {sampler.start_iter}")
 
     train_loaders = create_loader(
         train_datasets,
@@ -734,7 +735,7 @@ def main(config):
                 data_type,
                 samplers,
                 skip_num = global_step - start_step,
-                log_debug = True,
+                log_debug = False,
                 num_steps_per_epoch=num_steps_per_epoch
             )
 
