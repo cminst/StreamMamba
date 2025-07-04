@@ -587,7 +587,7 @@ def train(
             else:
                 logger.info(f"Saving checkpoint at global step {global_step}")
                 tag = f"ckpt_iter{global_step:07d}"
-                client_state = {"epoch": epoch, "global_step": global_step, "data_sampler": [s.state_dict() for s in samplers]}
+                client_state = {"epoch": epoch, "global_step": global_step, "data_sampler": [{"start_iter": s.start_iter} for s in samplers]}
 
                 model.save_checkpoint(config.output_dir, tag=tag, client_state=client_state)
 
