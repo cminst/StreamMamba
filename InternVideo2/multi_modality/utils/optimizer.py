@@ -86,13 +86,13 @@ def create_optimizer_params_group(named_param_tuples_with_lr):
     """named_param_tuples_with_lr: List([name, param, weight_decay, lr])"""
     group = {}
     for name, p, wd, lr in named_param_tuples_with_lr:
-        group[id(p)] = name
         if wd not in group:
             group[wd] = {}
         if lr not in group[wd]:
             group[wd][lr] = []
         group[wd][lr].append(p)
-
+        group[id(p)] = name
+    logger.info(f"Param group items: {group.items()}")
     optimizer_params_group = []
     for wd, lr_groups in group.items():
         for lr, p in lr_groups.items():
