@@ -444,26 +444,27 @@ def create_stateful_sampler(datasets, batch_size):
         samplers.append(sampler)
     return samplers
 
-def create_loader(datasets, samplers, batch_size, num_workers, is_trains, collate_fns):
+def create_loader(datasets, samplers, batch_size, num_workers, is_trains, collate_fns, pin_memory=None):
     loaders = []
-    for dataset, sampler, bs, n_worker, is_train, collate_fn in zip(
+    for i, (dataset, sampler, bs, n_worker, is_train, collate_fn) in enumerate(zip(
         datasets, samplers, batch_size, num_workers, is_trains, collate_fns
-    ):
+    )):
         if is_train:
             shuffle = sampler is None
             drop_last = True
-            pin_memory = True
+            # Use provided pin_memory value if available, otherwise default based on is_train
+            use_pin_memory = pin_memory[i] if pin_memory is not None else True
             persistent_workers = True if n_worker > 0 else False
         else:
             shuffle = False
             drop_last = False
-            pin_memory = False
+            use_pin_memory = pin_memory[i] if pin_memory is not None else False
             persistent_workers = False
         loader = DataLoader(
             dataset,
             batch_size=bs,
             num_workers=n_worker,
-            pin_memory=pin_memory,
+            pin_memory=use_pin_memory,
             sampler=sampler,
             shuffle=shuffle,
             collate_fn=collate_fn,

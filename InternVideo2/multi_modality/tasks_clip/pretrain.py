@@ -306,6 +306,7 @@ def train(
     Performs one epoch of training with periodic evaluation.
     """
     model_without_ddp = model.module if config.distributed else model
+
     model.train()
 
     try:
@@ -335,6 +336,7 @@ def train(
 
     metric_logger = MetricLogger(delimiter="  ")
     metric_logger.add_meter("lr", SmoothedValue(window=1, fmt="{value:.6f}"))
+    metric_logger.add_meter("different_lr", SmoothedValue(window=1, fmt="{value:.6f}"))
     metric_logger.add_meter("temperature", SmoothedValue(window=1, fmt="{value:.4f}"))
     metric_logger.add_meter("video-stream-nce-loss", SmoothedValue(window=1, fmt="{value:.4f}"))
     metric_logger.add_meter("eval_avg_sim", SmoothedValue(window=1, fmt="{value:.4f}")) # For periodic eval
@@ -356,7 +358,6 @@ def train(
     )
 
     num_batches_train = len(train_loader_agg)
-
     logger.info(f"Training loader set up, {num_batches_train} batches.")
 
     progress_bar = tqdm(
@@ -365,6 +366,7 @@ def train(
         desc=header,
         disable=not is_main_process()
     )
+
 
     MODEL_MAX_FRAMES = config.num_frames
     cosine_loss_base_fn = CosineEmbeddingLoss()
@@ -527,6 +529,7 @@ def train(
         metric_logger.update(**{'video-stream-nce-loss': final_batch_nce_loss_for_logging})
         metric_logger.update(**{'video-stream-target-sim': average_cosine_sim_for_logging})
         metric_logger.update(lr=optimizer.param_groups[0]["lr"]) # LR after the last window's update in this batch
+        metric_logger.update(different_lr=optimizer.param_groups[0]["different_lr"])
         if hasattr(model_without_ddp, 'temp'):
             metric_logger.update(temperature=model_without_ddp.temp.item())
 
@@ -547,6 +550,7 @@ def train(
         if i % log_freq == 0:
             log_payload = {
                 "lr": optimizer.param_groups[0]["lr"],
+                "different_lr": optimizer.param_groups[0]["different_lr"],
                 "video-stream-target-loss": final_batch_cosine_loss_for_logging,
                 "video-stream-nce-loss": final_batch_nce_loss_for_logging,
                 "video-stream-target-sim": average_cosine_sim_for_logging
@@ -556,7 +560,7 @@ def train(
                 if 'eval_avg_sim' in metric_logger.meters and hasattr(metric_logger.meters['eval_avg_sim'], 'value'): # Check if eval was run
                     log_payload["eval_sim"] = metric_logger.meters['eval_avg_sim'].value
 
-            progress_bar.set_postfix(log_payload)
+            progress_bar.set_postfix(**log_payload)
 
             if is_main_process():
                 logger.info(f"{header} [Step {i}] {metric_logger}")
@@ -677,7 +681,7 @@ def main(config):
     cudnn.benchmark = len(train_media_types) == 1
 
     model_cls = eval(config.model.get('model_cls', 'InternVideo2_CLIP'))
-    ( 
+    (
         model,
         model_without_ddp,
         optimizer,

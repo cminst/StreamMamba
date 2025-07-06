@@ -52,8 +52,23 @@ class MetaLoader(object):
         """ this iterator will run indefinitely """
         for name in self.iter_order:
             _iter = self.name2iter[name]
-            batch = next(_iter)
-            yield name, batch
+            try:
+                batch = next(_iter)
+                yield name, batch
+            except RuntimeError as e:
+                # Handle CUDA errors more gracefully
+                if "CUDA error" in str(e):
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.error(f"CUDA error in dataloader for {name}: {e}")
+                    logger.info("Trying to recover by recreating the iterator")
+                    # Try to recover by recreating the iterator
+                    self.name2iter[name] = iter(self.name2loader[name])
+                    batch = next(self.name2iter[name])
+                    yield name, batch
+                else:
+                    # Re-raise other errors
+                    raise
 
 
 class MetaLoader_rs(object):
@@ -121,5 +136,18 @@ class MetaLoader_rs(object):
         """ this iterator will run indefinitely """
         for name in self.iter_order:
             _iter = self.name2iter[name]
-            batch = next(_iter)
-            yield name, batch
+            try:
+                batch = next(_iter)
+                yield name, batch
+            except RuntimeError as e:
+                # Handle CUDA errors more gracefully
+                if "CUDA error" in str(e):
+                    logger.error(f"CUDA error in dataloader for {name}: {e}")
+                    logger.info("Trying to recover by recreating the iterator")
+                    # Try to recover by recreating the iterator
+                    self.name2iter[name] = iter(self.name2loader[name])
+                    batch = next(self.name2iter[name])
+                    yield name, batch
+                else:
+                    # Re-raise other errors
+                    raise

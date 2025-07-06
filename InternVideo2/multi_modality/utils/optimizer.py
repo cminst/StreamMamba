@@ -51,8 +51,9 @@ def add_different_lr(named_param_tuples_or_model, diff_lr_names, diff_lr, defaul
                 use_diff_lr = True
                 break
 
+        lr_to_use = diff_lr if use_diff_lr else default_lr
         named_param_tuples_with_lr.append(
-            [name, p, wd, diff_lr if use_diff_lr else default_lr]
+            [name, p, wd, lr_to_use]
         )
 
     if is_main_process():
@@ -64,23 +65,27 @@ def add_different_lr(named_param_tuples_or_model, diff_lr_names, diff_lr, defaul
 
 def create_optimizer_params_group(named_param_tuples_with_lr):
     """named_param_tuples_with_lr: List([name, param, weight_decay, lr])"""
-    group = {}
-    for name, p, wd, lr in named_param_tuples_with_lr:
-        if wd not in group:
-            group[wd] = {}
-        if lr not in group[wd]:
-            group[wd][lr] = []
-        group[wd][lr].append(p)
+    # Group parameters by name
+    param_groups = {}
 
-    optimizer_params_group = []
-    for wd, lr_groups in group.items():
-        for lr, p in lr_groups.items():
-            optimizer_params_group.append(dict(
-                params=p,
-                weight_decay=wd,
-                lr=lr
-            ))
-            logger.info(f"optimizer -- lr={lr} wd={wd} len(p)={len(p)}")
+    for name, param, wd, lr in named_param_tuples_with_lr:
+        key = f"{name}_{wd}_{lr}"
+        if key not in param_groups:
+            param_groups[key] = {
+                "params": [],
+                "weight_decay": wd,
+                "lr": lr,
+                "name": name
+            }
+        param_groups[key]["params"].append(param)
+
+    # Convert to list of dictionaries for optimizer
+    optimizer_params_group = list(param_groups.values())
+
+    # Log the parameter groups
+    for group in optimizer_params_group:
+        logger.info(f"optimizer -- name={group['name']} lr={group['lr']} wd={group['weight_decay']} params_count={len(group['params'])}")
+
     return optimizer_params_group
 
 
