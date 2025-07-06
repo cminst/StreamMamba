@@ -43,7 +43,7 @@ def add_different_lr(named_param_tuples_or_model, diff_lr_names, diff_lr, defaul
     named_param_tuples_with_lr = []
     logger.info(f"APPLYING DIFFERENT LR - diff_names: {diff_lr_names}, diff_lr: {diff_lr}, default_lr: {default_lr}")
     logger.info(f"Total parameters: {len(named_param_tuples_or_model)}")
-    
+
     found_match = False
     for name, p, wd in named_param_tuples_or_model:
         use_diff_lr = False
@@ -52,7 +52,7 @@ def add_different_lr(named_param_tuples_or_model, diff_lr_names, diff_lr, defaul
             is_regex_match = re.search(diff_name, name) is not None
             is_exact_match = diff_name == name
             is_contains_match = diff_name in name
-            
+
             if is_regex_match or is_exact_match or is_contains_match:
                 logger.info(f"MATCH FOUND! param {name} will use different_lr: {diff_lr}")
                 logger.info(f"  - Matched by: regex={is_regex_match}, exact={is_exact_match}, contains={is_contains_match}")
@@ -74,7 +74,7 @@ def add_different_lr(named_param_tuples_or_model, diff_lr_names, diff_lr, defaul
         for name, _, wd, lr in named_param_tuples_with_lr:
             is_diff_lr = lr == diff_lr
             logger.info(f"param {name}: wd: {wd}, lr: {lr} {'[DIFFERENT LR]' if is_diff_lr else ''}")
-        
+
         if not found_match:
             logger.warning("!!!!! NO PARAMETERS MATCHED FOR DIFFERENT LEARNING RATE !!!!!")
             logger.warning(f"Check your module_names: {diff_lr_names}")
@@ -86,6 +86,7 @@ def create_optimizer_params_group(named_param_tuples_with_lr):
     """named_param_tuples_with_lr: List([name, param, weight_decay, lr])"""
     group = {}
     for name, p, wd, lr in named_param_tuples_with_lr:
+        group[id(p)] = name
         if wd not in group:
             group[wd] = {}
         if lr not in group[wd]:
