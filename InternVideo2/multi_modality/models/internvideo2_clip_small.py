@@ -77,8 +77,6 @@ class InternVideo2_CLIP_small(nn.Module):
         self.temp_min = config.model.temp_min
         self.cache_txt = {}
 
-        self.dummy = nn.Linear(2, 1)
-
         # Freeze model parameters if specified in the config
         if self.config.model.freeze_vision:
             for name, p in self.vision_encoder.named_parameters():
