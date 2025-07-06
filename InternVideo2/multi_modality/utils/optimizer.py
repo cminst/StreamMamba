@@ -1,3 +1,6 @@
+""" Optimizer Factory w/ Custom Weight Decay
+Hacked together by / Copyright 2020 Ross Wightman
+"""
 import re
 import torch
 from torch import optim as optim
