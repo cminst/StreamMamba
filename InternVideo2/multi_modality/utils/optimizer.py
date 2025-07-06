@@ -91,8 +91,8 @@ def create_optimizer_params_group(named_param_tuples_with_lr):
         if lr not in group[wd]:
             group[wd][lr] = []
         group[wd][lr].append(p)
-        group[id(p)] = name
-    logger.info(f"Param group items: {group.items()}")
+        group[p] = name
+    logger.info(f"Param group items: {group}")
     optimizer_params_group = []
     for wd, lr_groups in group.items():
         for lr, p in lr_groups.items():
