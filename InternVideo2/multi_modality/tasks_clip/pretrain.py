@@ -316,6 +316,34 @@ def train(
             param.requires_grad = True
             logger.info(f"Training parameter: {name}")
 
+    # Print all parameter names for debugging
+    logger.info("All parameter names in the model:")
+    for name, _ in model.named_parameters():
+        logger.info(f"Parameter: {name}")
+
+    # Verify that the optimizer is using the correct learning rate for dummy parameters
+    logger.info("=== CHECKING OPTIMIZER PARAMETER GROUPS ===")
+    for i, param_group in enumerate(optimizer.param_groups):
+        for j, param in enumerate(param_group['params']):
+            # Find the name of this parameter
+            param_name = None
+            for name, model_param in model.named_parameters():
+                if id(model_param) == id(param):
+                    param_name = name
+                    break
+            
+            if param_name and 'dummy' in param_name:
+                logger.info(f"DUMMY PARAM GROUP {i}, param {j}: {param_name}, lr={param_group['lr']}")
+                # Verify if correct learning rate is applied
+                is_correct_lr = abs(param_group['lr'] - config.optimizer.different_lr.lr) < 1e-5
+                logger.info(f"  Expected lr: {config.optimizer.different_lr.lr}, Actual lr: {param_group['lr']}, Correct: {is_correct_lr}")
+                if not is_correct_lr:
+                    logger.warning(f"INCORRECT LEARNING RATE FOR {param_name}! Expected {config.optimizer.different_lr.lr}, got {param_group['lr']}")
+                    
+                    # Fix the learning rate directly for this group
+                    logger.info(f"FIXING learning rate for group {i} from {param_group['lr']} to {config.optimizer.different_lr.lr}")
+                    param_group['lr'] = config.optimizer.different_lr.lr
+
     # Only put dummy layer in training mode, the rest in eval mode
     model.eval()
     model.dummy.train()
