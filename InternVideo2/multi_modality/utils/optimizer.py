@@ -1,6 +1,3 @@
-""" Optimizer Factory w/ Custom Weight Decay
-Hacked together by / Copyright 2020 Ross Wightman
-"""
 import re
 import torch
 from torch import optim as optim
@@ -84,26 +81,28 @@ def add_different_lr(named_param_tuples_or_model, diff_lr_names, diff_lr, defaul
 
 def create_optimizer_params_group(named_param_tuples_with_lr):
     """named_param_tuples_with_lr: List([name, param, weight_decay, lr])"""
-    group = {}
-    for name, p, wd, lr in named_param_tuples_with_lr:
-        if name not in group:
-            group[name] = {}
-        if wd not in group:
-            group[name][wd] = {}
-        if lr not in group[name][wd]:
-            group[name][wd][lr] = []
-        group[name][wd][lr].append(p)
-    logger.info(f"Param group items: {group}")
-    optimizer_params_group = []
-    for name, wd_groups in group.items():
-        for wd, lr_groups in wd_groups.items():
-            for lr, p in lr_groups.items():
-                optimizer_params_group.append(dict(
-                    params=p,
-                    weight_decay=wd,
-                    lr=lr
-                ))
-                logger.info(f"optimizer -- lr={lr} wd={wd} len(p)={len(p)}")
+    # Group parameters by name
+    param_groups = {}
+
+    for name, param, wd, lr in named_param_tuples_with_lr:
+        key = f"{name}_{wd}_{lr}"
+        if key not in param_groups:
+            param_groups[key] = {
+                "params": [],
+                "weight_decay": wd,
+                "lr": lr,
+                "name": name
+            }
+        param_groups[key]["params"].append(param)
+
+    # Convert to list of dictionaries for optimizer
+    optimizer_params_group = list(param_groups.values())
+
+    # Log the parameter groups
+    logger.info(f"Created {len(optimizer_params_group)} parameter groups")
+    for group in optimizer_params_group:
+        logger.info(f"optimizer -- name={group['name']} lr={group['lr']} wd={group['weight_decay']} params_count={len(group['params'])}")
+
     return optimizer_params_group
 
 

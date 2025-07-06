@@ -415,7 +415,7 @@ def train(
         # Update metrics
         metric_logger.update(dummy_loss=loss.item())
         metric_logger.update(dummy_prediction=pred.item())
-        metric_logger.update(lr=optimizer.param_groups[0]["different_lr"])
+        metric_logger.update(lr=optimizer.param_groups[0]["lr"])
 
 
         log_payload = {
