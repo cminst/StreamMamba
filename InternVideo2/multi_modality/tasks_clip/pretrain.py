@@ -417,6 +417,18 @@ def train(
 
         # Autocast context covers the per-window forward and backward passes
         with torch.cuda.amp.autocast(enabled=config.use_half_precision, dtype=data_type):
+            gamma = beta = None
+            if getattr(model.streaming_vision_encoder, "rnn_type", "") == "cross_mamba_film":
+                text_input = tokenizer(
+                    text,
+                    padding="max_length",
+                    truncation=True,
+                    max_length=config.max_txt_l,
+                    return_tensors="pt",
+                ).to(device)
+                with torch.no_grad():
+                    prompt_vec = model_without_ddp.encode_text(text_input)
+                gamma, beta = model.streaming_vision_encoder.rnn.prepare_prompt(prompt_vec)
             image = image.permute(0, 2, 1, 3, 4)
             B, C, T, H, W = image.shape
 
@@ -428,7 +440,7 @@ def train(
             with torch.no_grad(): # Warm-up phase does not require gradients
                 for frame_idx in range(MODEL_MAX_FRAMES - 1):
                     initial_frame_mc = mc_image[:, :, frame_idx, :, :].unsqueeze(2)
-                    _, curr_hidden_state = model.streaming_vision_encoder(initial_frame_mc, curr_hidden_state)
+                    _, curr_hidden_state = model.streaming_vision_encoder(initial_frame_mc, curr_hidden_state, gamma, beta)
 
             num_sliding_windows = T - (MODEL_MAX_FRAMES - 1)
 
@@ -447,7 +459,7 @@ def train(
                 # --- Stream Embedding Calculation (using mc_image and streaming encoder) ---
                 current_streaming_frame_mc = mc_image[:, :, current_frame_in_video_idx, :, :].unsqueeze(2)
                 raw_stream_emb_mc, new_hidden_state_mc_updated = model.streaming_vision_encoder(
-                    current_streaming_frame_mc, hidden_state_fed_to_encoder_this_step
+                    current_streaming_frame_mc, hidden_state_fed_to_encoder_this_step, gamma, beta
                 )
                 if config.model.use_streaming_vision_align:
                     aligned_stream_emb_mc = model_without_ddp.streaming_vision_align(raw_stream_emb_mc)

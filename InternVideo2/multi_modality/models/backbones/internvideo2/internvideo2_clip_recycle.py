@@ -1,7 +1,7 @@
 from .internvideo2_clip_vision import CrossAttention, AttentiveBlock, AttentionPoolingBlock, RMSNorm, LayerScale, Attention, Mlp, Block, PatchEmbed
 
 from .mobileclip import TextTransformer, ClipTokenizer, VisionTransformer, vit_b16
-from .video_mamba_block import VideoMambaBlock
+from .video_mamba_block import VideoMambaBlock, CrossMambaFiLM
 
 import logging
 import numpy as np
@@ -68,9 +68,15 @@ class StreamingInternVideo2Student(nn.Module):
                 hidden_dim=rnn_hidden_size,
                 clip_dim=teacher_clip_embed_dim,
             )
+        elif self.rnn_type == 'cross_mamba_film':
+            self.rnn = CrossMambaFiLM(
+                in_dim=vit_lite_embed_dim,
+                hidden_dim=rnn_hidden_size,
+                clip_dim=teacher_clip_embed_dim,
+            )
         else:
             raise NotImplementedError(
-                f"Unsupported RNN type: {rnn_type}. Choose 'lstm', 'gru' or 'mamba'."
+                f"Unsupported RNN type: {rnn_type}. Choose 'lstm', 'gru', 'mamba' or 'cross_mamba_film'."
             )
 
         # Fully Connected layers to project RNN output to teacher's embedding dimension
@@ -88,7 +94,7 @@ class StreamingInternVideo2Student(nn.Module):
             self.output_fc = nn.Identity()
 
     def init_hidden(self, batch_size, device):
-        if self.rnn_type == 'mamba':
+        if self.rnn_type in ['mamba', 'cross_mamba_film']:
             return self.rnn.init_state(batch_size, device)
         h0 = torch.zeros(self.rnn_num_layers, batch_size, self.rnn_hidden_size).to(device)
         if self.rnn_type == 'lstm':
@@ -96,7 +102,7 @@ class StreamingInternVideo2Student(nn.Module):
             return (h0, c0)
         return h0
 
-    def forward(self, single_frame_input, prev_hidden_state):
+    def forward(self, single_frame_input, prev_hidden_state, gamma=None, beta=None):
         """
         Processes a single frame (or a small chunk of frames) and updates the hidden state.
 
@@ -124,6 +130,9 @@ class StreamingInternVideo2Student(nn.Module):
 
         if self.rnn_type == 'mamba':
             student_embedding, current_hidden_state = self.rnn(frame_feature, prev_hidden_state)
+            return student_embedding, current_hidden_state
+        elif self.rnn_type == 'cross_mamba_film':
+            student_embedding, current_hidden_state = self.rnn(frame_feature, prev_hidden_state, gamma, beta)
             return student_embedding, current_hidden_state
 
         rnn_input = frame_feature.unsqueeze(1)
@@ -161,6 +170,10 @@ if __name__ == '__main__':
     # Simulate streaming a few frames
     num_stream_steps = 5
     current_hidden = student_model.init_hidden(batch_size, device)
+    gamma = beta = None
+    if student_config["rnn_type"] == 'cross_mamba_film':
+        dummy_prompt = torch.randn(1, teacher_output_dim).to(device)
+        gamma, beta = student_model.rnn.prepare_prompt(dummy_prompt)
 
     for i in range(num_stream_steps):
         # Dummy single frame input for each step
@@ -168,7 +181,7 @@ if __name__ == '__main__':
         dummy_frame = torch.randn(batch_size, 3, img_size, img_size).to(device)
 
         with torch.no_grad():
-            output_embedding, current_hidden = student_model(dummy_frame, current_hidden)
+            output_embedding, current_hidden = student_model(dummy_frame, current_hidden, gamma, beta)
 
         print(f"Step {i+1}: Output embedding shape: {output_embedding.shape}")
         if student_config["rnn_type"] == 'lstm':
