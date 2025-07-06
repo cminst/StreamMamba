@@ -324,23 +324,23 @@ def train(
     # Verify that the optimizer is using the correct learning rate for dummy parameters
     logger.info("=== CHECKING OPTIMIZER PARAMETER GROUPS ===")
     logger.info(f"Param groups: {optimizer.param_groups}")
-    
+
     # Find the dummy parameter group for tracking correct learning rate
     dummy_param_group_idx = None
     dummy_param_initial_lr = None
-    
+
     for i, param_group in enumerate(optimizer.param_groups):
         # Check if the group name contains 'dummy'
         if 'name' in param_group and 'dummy' in param_group['name']:
             dummy_param_group_idx = i
             logger.info(f"DUMMY PARAM GROUP {i}: {param_group['name']}, current_lr={param_group['lr']}, params count={len(param_group['params'])}")
-            
+
             # Verify if correct initial learning rate is applied
             initial_lr = param_group.get('initial_lr', param_group['lr'])
             dummy_param_initial_lr = initial_lr
             is_correct_lr = abs(initial_lr - config.optimizer.different_lr.lr) < 1e-5
             logger.info(f"  Expected initial_lr: {config.optimizer.different_lr.lr}, Actual initial_lr: {initial_lr}, Correct: {is_correct_lr}")
-            
+
             if not is_correct_lr:
                 logger.warning(f"INCORRECT INITIAL LEARNING RATE FOR {param_group['name']}! Expected {config.optimizer.different_lr.lr}, got {initial_lr}")
 
@@ -349,7 +349,7 @@ def train(
                 param_group['initial_lr'] = config.optimizer.different_lr.lr
                 dummy_param_initial_lr = config.optimizer.different_lr.lr
                 # Note: The current lr might be different due to scheduler, but that's expected
-    
+
     logger.info(f"Found dummy parameter group at index {dummy_param_group_idx if dummy_param_group_idx is not None else 'Not Found'}")
     if dummy_param_initial_lr:
         logger.info(f"Dummy parameter initial learning rate: {dummy_param_initial_lr}")
@@ -433,10 +433,12 @@ def train(
         # Update metrics
         metric_logger.update(dummy_loss=loss.item())
         metric_logger.update(dummy_prediction=pred.item())
-        metric_logger.update(lr=dummy_lr)
+        metric_logger.update(lr=optimizer.param_groups[0]["lr"])
+        metric_logger.update(different_lr=dummy_lr)
 
         log_payload = {
-            "lr": dummy_lr,
+            "lr": optimizer.param_groups[0]["lr"],
+            "different_lr": dummy_lr,
             "dummy_loss": loss.item(),
             "dummy_prediction": pred.item()
         }
