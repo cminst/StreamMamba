@@ -447,7 +447,8 @@ def clone_collate_fn(batch):
     # Recursively clone every Tensor in the sample so its storage is fresh
     def clone_item(x):
         if isinstance(x, torch.Tensor):
-            return x.clone()
+            # Create a contiguous copy to avoid memory issues
+            return x.clone().detach().contiguous()
         elif isinstance(x, (list, tuple)):
             return type(x)(clone_item(y) for y in x)
         elif isinstance(x, dict):
@@ -455,8 +456,13 @@ def clone_collate_fn(batch):
         else:
             return x
 
-    batch = [clone_item(sample) for sample in batch]
-    return default_collate(batch)
+    try:
+        batch = [clone_item(sample) for sample in batch]
+        return default_collate(batch)
+    except RuntimeError as e:
+        # Fallback without cloning if there's an error
+        logger.warning(f"Error in clone_collate_fn: {e}. Using default_collate without cloning.")
+        return default_collate(batch)
 
 def setup_dataloaders(config, mode="pt"):
     logger.info(f"Creating dataset for {mode}")
@@ -477,6 +483,7 @@ def setup_dataloaders(config, mode="pt"):
         num_workers  = [config.num_workers] * len(media_types),
         is_trains    = [True] * len(media_types),
         collate_fns  = [clone_collate_fn] * len(media_types),
+        pin_memory   = [False] * len(media_types),  # Disable pin_memory to avoid CUDA errors
     )
 
     # =============================================================
@@ -490,6 +497,7 @@ def setup_dataloaders(config, mode="pt"):
         num_workers  = [config.num_workers] * len(test_datasets),
         is_trains    = [False] * len(test_datasets),
         collate_fns  = [None]   * len(test_datasets),
+        pin_memory   = [False] * len(test_datasets),  # Disable pin_memory to avoid CUDA errors
     )
 
     test_name2loaders = dict(zip(test_dataset_names, test_loaders))
