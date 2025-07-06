@@ -324,19 +324,35 @@ def train(
     # Verify that the optimizer is using the correct learning rate for dummy parameters
     logger.info("=== CHECKING OPTIMIZER PARAMETER GROUPS ===")
     logger.info(f"Param groups: {optimizer.param_groups}")
+    
+    # Find the dummy parameter group for tracking correct learning rate
+    dummy_param_group_idx = None
+    dummy_param_initial_lr = None
+    
     for i, param_group in enumerate(optimizer.param_groups):
         # Check if the group name contains 'dummy'
         if 'name' in param_group and 'dummy' in param_group['name']:
-            logger.info(f"DUMMY PARAM GROUP {i}: {param_group['name']}, lr={param_group['lr']}, params count={len(param_group['params'])}")
-            # Verify if correct learning rate is applied
-            is_correct_lr = abs(param_group['lr'] - config.optimizer.different_lr.lr) < 1e-5
-            logger.info(f"  Expected lr: {config.optimizer.different_lr.lr}, Actual lr: {param_group['lr']}, Correct: {is_correct_lr}")
+            dummy_param_group_idx = i
+            logger.info(f"DUMMY PARAM GROUP {i}: {param_group['name']}, current_lr={param_group['lr']}, params count={len(param_group['params'])}")
+            
+            # Verify if correct initial learning rate is applied
+            initial_lr = param_group.get('initial_lr', param_group['lr'])
+            dummy_param_initial_lr = initial_lr
+            is_correct_lr = abs(initial_lr - config.optimizer.different_lr.lr) < 1e-5
+            logger.info(f"  Expected initial_lr: {config.optimizer.different_lr.lr}, Actual initial_lr: {initial_lr}, Correct: {is_correct_lr}")
+            
             if not is_correct_lr:
-                logger.warning(f"INCORRECT LEARNING RATE FOR {param_group['name']}! Expected {config.optimizer.different_lr.lr}, got {param_group['lr']}")
+                logger.warning(f"INCORRECT INITIAL LEARNING RATE FOR {param_group['name']}! Expected {config.optimizer.different_lr.lr}, got {initial_lr}")
 
                 # Fix the learning rate directly for this group
-                logger.info(f"FIXING learning rate for group {i} from {param_group['lr']} to {config.optimizer.different_lr.lr}")
-                param_group['lr'] = config.optimizer.different_lr.lr
+                logger.info(f"FIXING initial learning rate for group {i} from {initial_lr} to {config.optimizer.different_lr.lr}")
+                param_group['initial_lr'] = config.optimizer.different_lr.lr
+                dummy_param_initial_lr = config.optimizer.different_lr.lr
+                # Note: The current lr might be different due to scheduler, but that's expected
+    
+    logger.info(f"Found dummy parameter group at index {dummy_param_group_idx if dummy_param_group_idx is not None else 'Not Found'}")
+    if dummy_param_initial_lr:
+        logger.info(f"Dummy parameter initial learning rate: {dummy_param_initial_lr}")
 
     # Only put dummy layer in training mode, the rest in eval mode
     model.eval()
@@ -405,18 +421,26 @@ def train(
 
             scheduler.step()
 
+        # Find and use the learning rate from the dummy parameter group
+        if dummy_param_group_idx is not None:
+            dummy_lr = optimizer.param_groups[dummy_param_group_idx]['lr']
+            # Display the initial LR for reference
+            if i % 5 == 0:  # Only log occasionally to avoid clutter
+                logger.info(f"Dummy param current LR: {dummy_lr}, initial LR: {dummy_param_initial_lr}")
+        else:
+            dummy_lr = optimizer.param_groups[0]["lr"]  # Default fallback
+
         # Update metrics
         metric_logger.update(dummy_loss=loss.item())
         metric_logger.update(dummy_prediction=pred.item())
-        metric_logger.update(lr=optimizer.param_groups[0]["lr"])
-
+        metric_logger.update(lr=dummy_lr)
 
         log_payload = {
-            "lr": optimizer.param_groups[0]["lr"],
+            "lr": dummy_lr,
             "dummy_loss": loss.item(),
             "dummy_prediction": pred.item()
         }
-        progress_bar.set_postfix(log_payload)
+        progress_bar.set_postfix(**log_payload)
 
         if is_main_process():
             logger.info(f"{header} [Step {i}] {metric_logger}")
