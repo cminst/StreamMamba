@@ -5,7 +5,7 @@ export PYTHONPATH=${PYTHONPATH}:${which_python}
 export PYTHONPATH=${PYTHONPATH}:.
 echo "PYTHONPATH: ${PYTHONPATH}"
 
-JOB_NAME='dummy'
+JOB_NAME='B14'
 OUTPUT_DIR="$(dirname $0)/$JOB_NAME"
 LOG_DIR="./logs/${JOB_NAME}"
 PARTITION='video'
