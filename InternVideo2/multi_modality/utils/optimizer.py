@@ -95,14 +95,15 @@ def create_optimizer_params_group(named_param_tuples_with_lr):
         group[name][wd][lr].append(p)
     logger.info(f"Param group items: {group}")
     optimizer_params_group = []
-    for name, lr_groups in group.items():
-        for wd, lr, p in lr_groups.items():
-            optimizer_params_group.append(dict(
-                params=p,
-                weight_decay=wd,
-                lr=lr
-            ))
-            logger.info(f"optimizer -- lr={lr} wd={wd} len(p)={len(p)}")
+    for name, wd_groups in group.items():
+        for wd, lr_groups in wd_groups.items():
+            for lr, p in lr_groups.items():
+                optimizer_params_group.append(dict(
+                    params=p,
+                    weight_decay=wd,
+                    lr=lr
+                ))
+                logger.info(f"optimizer -- lr={lr} wd={wd} len(p)={len(p)}")
     return optimizer_params_group
 
 
