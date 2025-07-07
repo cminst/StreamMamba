@@ -751,6 +751,7 @@ def setup_dataloaders(config, mode="pt"):
         num_workers  = [config.num_workers] * len(media_types),
         is_trains    = [True] * len(media_types),
         collate_fns  = [clone_collate_fn] * len(media_types),
+        pin_memory   = [False] * len(media_types),
     )
 
     # =============================================================
@@ -764,6 +765,7 @@ def setup_dataloaders(config, mode="pt"):
         num_workers  = [config.num_workers] * len(test_datasets),
         is_trains    = [False] * len(test_datasets),
         collate_fns  = [None]   * len(test_datasets),
+        pin_memory   = [False] * len(test_datasets),
     )
 
     test_name2loaders = dict(zip(test_dataset_names, test_loaders))
