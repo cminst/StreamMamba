@@ -397,7 +397,7 @@ def train(
 
     num_batches_train = len(train_loader_agg)
     logger.info(f"Training loader set up, {num_batches_train} batches.")
-    unfreeze_ratio = getattr(config.model, "unfreeze_mobileclip_ratio", None)
+    unfreeze_ratio = getattr(config.model, "unfreeze_mobileclip_pct", None)
     if unfreeze_ratio is not None:
         unfreeze_step = int(num_batches_train * unfreeze_ratio)
     else:
