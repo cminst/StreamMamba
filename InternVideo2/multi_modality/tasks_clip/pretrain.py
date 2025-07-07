@@ -397,11 +397,12 @@ def train(
 
     num_batches_train = len(train_loader_agg)
     logger.info(f"Training loader set up, {num_batches_train} batches.")
-    unfreeze_ratio = getattr(config.model, "unfreeze_mobileclip_pct", None)
-    if unfreeze_ratio is not None:
-        unfreeze_step = int(num_batches_train * unfreeze_ratio)
-    else:
-        unfreeze_step = None
+    enable_mobileclip_ft = getattr(config, "enable_mobileclip_ft", False)
+    unfreeze_step = None
+    if enable_mobileclip_ft:
+        unfreeze_ratio = getattr(config, "unfreeze_mobileclip_pct", None)
+        if unfreeze_ratio is not None:
+            unfreeze_step = int(num_batches_train * unfreeze_ratio)
 
     progress_bar = tqdm(
         train_loader_agg,
@@ -442,7 +443,7 @@ def train(
 
     for i, data_pair in enumerate(progress_bar):
         if (
-            unfreeze_step is not None
+            enable_mobileclip_ft
             and epoch == 0
             and i >= unfreeze_step
             and config.model.freeze_mobileclip_vision
