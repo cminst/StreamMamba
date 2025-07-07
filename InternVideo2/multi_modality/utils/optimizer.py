@@ -161,7 +161,7 @@ def extend_optimizer_with_param_groups(optimizer, scheduler, param_groups):
 
     for group in param_groups:
         add_group = {k: group[k] for k in ["params", "lr", "weight_decay"]}
-        optimizer.add_param_group(add_group)
+        optimizer.param_groups.append(add_group)
         # attach custom info for logging
         optimizer.param_groups[-1]["name"] = group.get("name")
         optimizer.param_groups[-1]["different_lr"] = group.get("different_lr", False)
@@ -170,4 +170,3 @@ def extend_optimizer_with_param_groups(optimizer, scheduler, param_groups):
             scheduler.base_lrs.append(group["lr"])
             if hasattr(scheduler, "_last_lr"):
                 scheduler._last_lr.append(group["lr"])
-
