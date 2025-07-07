@@ -84,6 +84,7 @@ model = dict(
     use_streaming_vision_align = False,
     freeze_vision=True,
     freeze_mobileclip_vision=True, # Freeze the MobileCLIP vision encoder
+    unfreeze_mobileclip_ratio=0.5,
     open_vision_clip_projector=False,
     freeze_mobileclip_text=True,
     open_text_projection=False,
@@ -107,7 +108,7 @@ optimizer = dict(
     weight_decay=0.01,
     max_grad_norm=0.7,  # requires a positive float, use -1 to disable
     # use a different lr for some modules, e.g., larger lr for new modules
-    different_lr=dict(enable=True, module_names=["streaming_vision_encoder.vit_lite"], lr=1e-5),
+    different_lr=dict(enable=True, module_names=["streaming_vision_encoder.vit_lite"], lr=2e-6),
 )
 
 scheduler = dict(sched="cosine", epochs=2, min_lr_multi=0.01, warmup_epochs=0.1)
