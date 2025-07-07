@@ -195,23 +195,33 @@ class InternVideo2_CLIP_small(nn.Module):
 
         return vfeat
 
-    def encode_streaming_vision(self, image, prev_hidden_state):
-        """encode image / videos as features using the streaming ViT.
+    def encode_streaming_vision(self, image, prev_hidden_state, gamma=None, beta=None):
+        """Encode image/video frames using the streaming ViT.
 
         Args:
             image (torch.Tensor): The input images.
             prev_hidden_state (tuple or torch.Tensor): Previous hidden state from the RNN.
                 For LSTM: (h_prev, c_prev)
                 For GRU: h_prev
+            gamma (torch.Tensor, optional): FiLM scale parameters for conditioning the
+                streaming encoder. ``None`` if FiLM is not used.
+            beta (torch.Tensor, optional): FiLM shift parameters for conditioning the
+                streaming encoder. ``None`` if FiLM is not used.
 
-        Returns: tuple.
-            - vision_embeds (torch.Tensor): The features of all patches. Shape: [B,C].
-            - new_hidden_state (tuple or torch.Tensor): The updated RNN hidden state.
+        Returns:
+            tuple: ``(vision_embeds, new_hidden_state)`` where ``vision_embeds`` is
+            the encoded features for the current frame(s) and ``new_hidden_state`` is
+            the updated hidden state.
         """
 
         assert len(image.shape) in [4, 5], f"Invalid dimension: {image.shape}"
 
-        vision_embeds, new_hidden_state = self.streaming_vision_encoder(image, prev_hidden_state=prev_hidden_state)
+        vision_embeds, new_hidden_state = self.streaming_vision_encoder(
+            image,
+            prev_hidden_state=prev_hidden_state,
+            gamma=gamma,
+            beta=beta,
+        )
 
         if self.config.model.use_streaming_vision_align:
             vision_embeds_aligned = self.streaming_vision_align(vision_embeds)
@@ -220,24 +230,31 @@ class InternVideo2_CLIP_small(nn.Module):
 
         return vision_embeds_aligned, new_hidden_state
 
-    def get_streaming_vid_feat(self, frames: torch.Tensor, prev_hidden_state):
-        """
-        Processes a single frame (or a small chunk of frames) with the streaming ViT and updates the hidden state.
+    def get_streaming_vid_feat(self, frames: torch.Tensor, prev_hidden_state, gamma=None, beta=None):
+        """Return features for a single frame using the streaming ViT.
 
         Args:
             frames (torch.Tensor): Input frame(s) for the ViT-Lite.
-                Shape: (B, C, H, W) if student_num_frames_processed_by_vit=1
-                Shape: (B, C, T_chunk, H, W) if student_num_frames_processed_by_vit > 1
+                Shape ``(B, C, H, W)`` for single-frame input or
+                ``(B, C, T_chunk, H, W)`` when processing multiple frames at once.
             prev_hidden_state (tuple or torch.Tensor): Previous hidden state from the RNN.
-                For LSTM: (h_prev, c_prev)
-                For GRU: h_prev
+                For LSTM: ``(h_prev, c_prev)``; for GRU: ``h_prev``.
+            gamma (torch.Tensor, optional): FiLM scale parameters for conditioning the
+                streaming encoder. ``None`` if FiLM is not used.
+            beta (torch.Tensor, optional): FiLM shift parameters for conditioning the
+                streaming encoder. ``None`` if FiLM is not used.
 
-        Returns: tuple.
-            - vfeat (torch.Tensor): The video features.
-            - new_hidden_state (tuple or torch.Tensor): The updated RNN hidden state.
+        Returns:
+            tuple: ``(vfeat, new_hidden_state)`` where ``vfeat`` is the normalised
+            video feature embedding and ``new_hidden_state`` is the updated RNN state.
         """
         with torch.no_grad():
-            vfeat, new_hidden_state = self.encode_streaming_vision(frames, prev_hidden_state = prev_hidden_state)
+            vfeat, new_hidden_state = self.encode_streaming_vision(
+                frames,
+                prev_hidden_state=prev_hidden_state,
+                gamma=gamma,
+                beta=beta,
+            )
 
             # vfeat = self.vision_proj(vfeat)
             vfeat /= vfeat.norm(dim=-1, keepdim=True)
