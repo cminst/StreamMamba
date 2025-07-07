@@ -171,3 +171,4 @@ contrastive_ramp_iters = 500
 # ====================== unfreeze mobileclip =====================
 enable_mobileclip_ft = True
 unfreeze_mobileclip_pct = 0.5
+unfreeze_mc_ramp_iters = 500
