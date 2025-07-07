@@ -101,10 +101,41 @@ def unfreeze_mobileclip_vision(model, optimizer, scheduler, config):
 
     named_param_tuples = add_different_lr(named_param_tuples, diff_names, diff_lr, config.optimizer.lr)
     param_groups = create_optimizer_params_group(named_param_tuples, config.optimizer.lr)
+
+    # Track indices of new parameter groups
+    start_idx = len(optimizer.param_groups)
     extend_optimizer_with_param_groups(optimizer, scheduler, param_groups)
+    end_idx = len(optimizer.param_groups)
+    new_indices = list(range(start_idx, end_idx))
+
+    # Initialize lr for newly unfrozen params to 0 for ramp-up
+    for idx in new_indices:
+        optimizer.param_groups[idx]["lr"] = 0.0
+        if hasattr(scheduler, "_last_lr"):
+            scheduler._last_lr[idx] = 0.0
+
+    # Store state for lr ramp updates
+    config.mobileclip_pg_indices = new_indices
+    config.unfreeze_mobileclip_step = scheduler.last_epoch
 
     # Mark as unfrozen so we don't unfreeze again
     config.model.freeze_mobileclip_vision = False
+
+def update_mobileclip_lr(optimizer, scheduler, config, i):
+    unfreeze_iter = getattr(config, "unfreeze_mobileclip_step", None)
+    ramp_iters = getattr(config, "unfreeze_mc_ramp_iters", 0)
+    if unfreeze_iter is not None and ramp_iters > 0:
+        if i >= unfreeze_iter:
+            ramp = min((i - unfreeze_iter) / float(ramp_iters), 1.0)
+        else:
+            ramp = 0.0
+
+        for idx in getattr(config, "mobileclip_pg_indices", []):
+            sched_lr = scheduler._last_lr[idx] if hasattr(scheduler, "_last_lr") else optimizer.param_groups[idx]["lr"]
+            new_lr = sched_lr * ramp
+            optimizer.param_groups[idx]["lr"] = new_lr
+            if hasattr(scheduler, "_last_lr"):
+                scheduler._last_lr[idx] = new_lr
 
 def save_debug_step_data(output_dir, global_step, frame_idx,
                          new_frame_input, # Input to streaming_vision_encoder
@@ -566,6 +597,7 @@ def train(
                         optimizer.step()
 
                     scheduler.step() # Step scheduler after each optimizer.step()
+                    update_mobileclip_lr(optimizer, scheduler, config, i)
 
                 curr_hidden_state = tuple(h.detach().clone() for h in new_hidden_state_mc_updated)
                 if log_debug and i == 0 and frame_window_step_idx == 0 :
