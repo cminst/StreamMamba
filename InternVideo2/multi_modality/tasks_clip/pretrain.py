@@ -133,6 +133,7 @@ def update_mobileclip_lr(optimizer, scheduler, config):
         return
 
     current_step = scheduler.last_epoch
+    logger.info(f"Update_mobileclip_lr: current_step is {current_step}")
     step_since_unfreeze = current_step - unfreeze_iter
     if step_since_unfreeze < 0:
         return
@@ -154,6 +155,11 @@ def update_mobileclip_lr(optimizer, scheduler, config):
         optimizer.param_groups[idx]["lr"] = new_lr
         if hasattr(scheduler, "_last_lr"):
             scheduler._last_lr[idx] = new_lr
+        logger.info(
+            f"MobileCLIP LR update: pg_idx={idx}, current_step={current_step}, "
+            f"step_since_unfreeze={step_since_unfreeze}, base_lr={base_lr:.6f}, "
+            f"lr_mult={lr_mult:.4f}, new_lr={new_lr:.6f}"
+        )
 
 def save_debug_step_data(output_dir, global_step, frame_idx,
                          new_frame_input, # Input to streaming_vision_encoder
@@ -859,8 +865,7 @@ def main(config):
                 scaler,
                 config,
                 data_type,
-                skip_num = global_step - start_step,
-                log_debug = True
+                skip_num = global_step - start_step
             )
 
         # Save checkpoint before next epoch
