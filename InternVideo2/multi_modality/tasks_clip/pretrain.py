@@ -398,7 +398,7 @@ def train(
     num_batches_train = len(train_loader_agg)
     logger.info(f"Training loader set up, {num_batches_train} batches.")
     enable_mobileclip_ft = getattr(config, "enable_mobileclip_ft", False)
-    unfreeze_step = None
+    unfreeze_step = 0
     if enable_mobileclip_ft:
         unfreeze_ratio = getattr(config, "unfreeze_mobileclip_pct", None)
         if unfreeze_ratio is not None:
