@@ -121,7 +121,7 @@ def unfreeze_mobileclip_vision(model, optimizer, scheduler, config, global_step=
         step = scheduler.last_epoch
     else:
         step = 0 if global_step is None else global_step
-        config.mobileclip_pg_base_lrs = {idx: g["lr"] for idx, g in zip(new_indices, param_groups)}
+        config.mobileclip_pg_base_lrs = {str(idx): g["lr"] for idx, g in zip(new_indices, param_groups)}
     config.unfreeze_mobileclip_step = step
     config.mobileclip_total_steps = config.scheduler.num_training_steps - step
     config.mobileclip_warmup_steps = int(
@@ -153,7 +153,7 @@ def update_mobileclip_lr(optimizer, scheduler, config, global_step=None):
         if scheduler is not None and hasattr(scheduler, "base_lrs"):
             base_lr = scheduler.base_lrs[idx]
         else:
-            base_lr = config.mobileclip_pg_base_lrs.get(idx, optimizer.param_groups[idx]["lr"])
+            base_lr = config.mobileclip_pg_base_lrs.get(str(idx), optimizer.param_groups[idx]["lr"])
 
         if step_since_unfreeze < warmup_steps:
             lr_mult = max(min_lr_multi, float(step_since_unfreeze) / float(max(1, warmup_steps)))
