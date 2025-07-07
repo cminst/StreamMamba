@@ -121,12 +121,13 @@ def unfreeze_mobileclip_vision(model, optimizer, scheduler, config):
     # Mark as unfrozen so we don't unfreeze again
     config.model.freeze_mobileclip_vision = False
 
-def update_mobileclip_lr(optimizer, scheduler, config, i):
+def update_mobileclip_lr(optimizer, scheduler, config):
     unfreeze_iter = getattr(config, "unfreeze_mobileclip_step", None)
     ramp_iters = getattr(config, "unfreeze_mc_ramp_iters", 0)
     if unfreeze_iter is not None and ramp_iters > 0:
-        if i >= unfreeze_iter:
-            ramp = min((i - unfreeze_iter) / float(ramp_iters), 1.0)
+        current_step = scheduler.last_epoch
+        if current_step >= unfreeze_iter:
+            ramp = min((current_step - unfreeze_iter) / float(ramp_iters), 1.0)
         else:
             ramp = 0.0
 
@@ -597,7 +598,7 @@ def train(
                         optimizer.step()
 
                     scheduler.step() # Step scheduler after each optimizer.step()
-                    update_mobileclip_lr(optimizer, scheduler, config, i)
+                    update_mobileclip_lr(optimizer, scheduler, config)
 
                 curr_hidden_state = tuple(h.detach().clone() for h in new_hidden_state_mc_updated)
                 if log_debug and i == 0 and frame_window_step_idx == 0 :
