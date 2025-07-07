@@ -75,7 +75,7 @@ def set_rng_state(state):
         logger.warning(f"Failed to restore RNG state: {e}")
 
 
-def unfreeze_mobileclip_vision(model, optimizer, scheduler, config):
+def unfreeze_mobileclip_vision(model, optimizer, scheduler, config, global_step=None):
     """Unfreeze MobileCLIP vision encoder and add its params to the optimizer."""
     logger.info("Unfreezing MobileCLIP vision encoder parameters")
 
@@ -117,8 +117,13 @@ def unfreeze_mobileclip_vision(model, optimizer, scheduler, config):
 
     # Store indices and scheduling info
     config.mobileclip_pg_indices = new_indices
-    config.unfreeze_mobileclip_step = scheduler.last_epoch
-    config.mobileclip_total_steps = config.scheduler.num_training_steps - scheduler.last_epoch
+    if scheduler is not None:
+        step = scheduler.last_epoch
+    else:
+        step = 0 if global_step is None else global_step
+        config.mobileclip_pg_base_lrs = {idx: g["lr"] for idx, g in zip(new_indices, param_groups)}
+    config.unfreeze_mobileclip_step = step
+    config.mobileclip_total_steps = config.scheduler.num_training_steps - step
     config.mobileclip_warmup_steps = int(
         getattr(config, "num_steps_per_epoch", 0)
         * getattr(config, "mobileclip_warmup_pct", config.scheduler.warmup_epochs)
@@ -127,13 +132,15 @@ def unfreeze_mobileclip_vision(model, optimizer, scheduler, config):
     # Mark as unfrozen so we don't unfreeze again
     config.model.freeze_mobileclip_vision = False
 
-def update_mobileclip_lr(optimizer, scheduler, config):
+def update_mobileclip_lr(optimizer, scheduler, config, global_step=None):
     unfreeze_iter = getattr(config, "unfreeze_mobileclip_step", None)
     if unfreeze_iter is None:
         return
 
-    current_step = scheduler.last_epoch
+    current_step = scheduler.last_epoch if scheduler is not None else global_step
     logger.info(f"Update_mobileclip_lr: current_step is {current_step}")
+    if current_step is None:
+        return
     step_since_unfreeze = current_step - unfreeze_iter
     if step_since_unfreeze < 0:
         return
@@ -143,7 +150,10 @@ def update_mobileclip_lr(optimizer, scheduler, config):
     min_lr_multi = getattr(config.scheduler, "min_lr_multi", 0.0)
 
     for idx in getattr(config, "mobileclip_pg_indices", []):
-        base_lr = scheduler.base_lrs[idx] if hasattr(scheduler, "base_lrs") else optimizer.param_groups[idx]["lr"]
+        if scheduler is not None and hasattr(scheduler, "base_lrs"):
+            base_lr = scheduler.base_lrs[idx]
+        else:
+            base_lr = config.mobileclip_pg_base_lrs.get(idx, optimizer.param_groups[idx]["lr"])
 
         if step_since_unfreeze < warmup_steps:
             lr_mult = max(min_lr_multi, float(step_since_unfreeze) / float(max(1, warmup_steps)))
@@ -512,7 +522,7 @@ def train(
             and config.model.freeze_mobileclip_vision
         ):
             unfreeze_mobileclip_vision(
-                model_without_ddp, optimizer, scheduler, config
+                model_without_ddp, optimizer, scheduler, config, global_step
             )
 
         media_type_orig_data, (image, text, idx) = data_pair # Renamed for clarity
@@ -605,6 +615,7 @@ def train(
                 if hasattr(config, "deepspeed") and config.deepspeed.enable:
                     model.backward(loss)
                     model.step()
+                    update_mobileclip_lr(optimizer, None, config, model.global_steps)
                 else:
                     optimizer.zero_grad()
                     if config.use_half_precision:
@@ -621,7 +632,7 @@ def train(
                         optimizer.step()
 
                     scheduler.step() # Step scheduler after each optimizer.step()
-                    update_mobileclip_lr(optimizer, scheduler, config)
+                    update_mobileclip_lr(optimizer, scheduler, config, global_step)
 
                 curr_hidden_state = tuple(h.detach().clone() for h in new_hidden_state_mc_updated)
                 if log_debug and i == 0 and frame_window_step_idx == 0 :
