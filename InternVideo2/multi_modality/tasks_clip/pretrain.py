@@ -529,7 +529,21 @@ def train(
         metric_logger.update(**{'video-stream-nce-loss': final_batch_nce_loss_for_logging})
         metric_logger.update(**{'video-stream-target-sim': average_cosine_sim_for_logging})
         metric_logger.update(lr=optimizer.param_groups[0]["lr"]) # LR after the last window's update in this batch
-        metric_logger.update(different_lr=optimizer.param_groups[0]["different_lr"])
+
+        # Find parameter group with different_lr flag and log it
+        different_lr_value = None
+        for pg in optimizer.param_groups:
+            if pg.get("different_lr", False):
+                different_lr_value = pg["lr"]
+                break
+
+        # If found a different learning rate, log it, otherwise use default
+        if different_lr_value is not None:
+            metric_logger.update(different_lr=different_lr_value)
+        else:
+            # No different learning rate found, log the default one
+            metric_logger.update(different_lr=optimizer.param_groups[0]["lr"])
+
         if hasattr(model_without_ddp, 'temp'):
             metric_logger.update(temperature=model_without_ddp.temp.item())
 
@@ -550,7 +564,7 @@ def train(
         if i % log_freq == 0:
             log_payload = {
                 "lr": optimizer.param_groups[0]["lr"],
-                "different_lr": optimizer.param_groups[0]["lr"],
+                "different_lr": different_lr_value,
                 "video-stream-target-loss": final_batch_cosine_loss_for_logging,
                 "video-stream-nce-loss": final_batch_nce_loss_for_logging,
                 "video-stream-target-sim": average_cosine_sim_for_logging
