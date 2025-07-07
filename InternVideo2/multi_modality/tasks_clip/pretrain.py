@@ -6,6 +6,7 @@ import pickle
 import time
 import random
 import numpy as np
+import math
 
 from os.path import join
 
@@ -108,35 +109,51 @@ def unfreeze_mobileclip_vision(model, optimizer, scheduler, config):
     end_idx = len(optimizer.param_groups)
     new_indices = list(range(start_idx, end_idx))
 
-    # Initialize lr for newly unfrozen params to 0 for ramp-up
+    # Initialize lr for newly unfrozen params to 0 for warmup
     for idx in new_indices:
         optimizer.param_groups[idx]["lr"] = 0.0
         if hasattr(scheduler, "_last_lr"):
             scheduler._last_lr[idx] = 0.0
 
-    # Store state for lr ramp updates
+    # Store indices and scheduling info
     config.mobileclip_pg_indices = new_indices
     config.unfreeze_mobileclip_step = scheduler.last_epoch
+    config.mobileclip_total_steps = config.scheduler.num_training_steps - scheduler.last_epoch
+    config.mobileclip_warmup_steps = int(
+        getattr(config, "num_steps_per_epoch", 0)
+        * getattr(config, "mobileclip_warmup_pct", config.scheduler.warmup_epochs)
+    )
 
     # Mark as unfrozen so we don't unfreeze again
     config.model.freeze_mobileclip_vision = False
 
 def update_mobileclip_lr(optimizer, scheduler, config):
     unfreeze_iter = getattr(config, "unfreeze_mobileclip_step", None)
-    ramp_iters = getattr(config, "unfreeze_mc_ramp_iters", 0)
-    if unfreeze_iter is not None and ramp_iters > 0:
-        current_step = scheduler.last_epoch
-        if current_step >= unfreeze_iter:
-            ramp = min((current_step - unfreeze_iter) / float(ramp_iters), 1.0)
-        else:
-            ramp = 0.0
+    if unfreeze_iter is None:
+        return
 
-        for idx in getattr(config, "mobileclip_pg_indices", []):
-            sched_lr = scheduler._last_lr[idx] if hasattr(scheduler, "_last_lr") else optimizer.param_groups[idx]["lr"]
-            new_lr = sched_lr * ramp
-            optimizer.param_groups[idx]["lr"] = new_lr
-            if hasattr(scheduler, "_last_lr"):
-                scheduler._last_lr[idx] = new_lr
+    current_step = scheduler.last_epoch
+    step_since_unfreeze = current_step - unfreeze_iter
+    if step_since_unfreeze < 0:
+        return
+
+    warmup_steps = getattr(config, "mobileclip_warmup_steps", 0)
+    total_steps = getattr(config, "mobileclip_total_steps", 1)
+    min_lr_multi = getattr(config.scheduler, "min_lr_multi", 0.0)
+
+    for idx in getattr(config, "mobileclip_pg_indices", []):
+        base_lr = scheduler.base_lrs[idx] if hasattr(scheduler, "base_lrs") else optimizer.param_groups[idx]["lr"]
+
+        if step_since_unfreeze < warmup_steps:
+            lr_mult = max(min_lr_multi, float(step_since_unfreeze) / float(max(1, warmup_steps)))
+        else:
+            progress = float(step_since_unfreeze - warmup_steps) / float(max(1, total_steps - warmup_steps))
+            lr_mult = max(min_lr_multi, 0.5 * (1.0 + math.cos(math.pi * progress)))
+
+        new_lr = base_lr * lr_mult
+        optimizer.param_groups[idx]["lr"] = new_lr
+        if hasattr(scheduler, "_last_lr"):
+            scheduler._last_lr[idx] = new_lr
 
 def save_debug_step_data(output_dir, global_step, frame_idx,
                          new_frame_input, # Input to streaming_vision_encoder
@@ -785,6 +802,7 @@ def main(config):
     )
     num_steps_per_epoch = sum(len(d) for d in train_loaders) * 247 # Using each individual frame for training
 
+    config.num_steps_per_epoch = num_steps_per_epoch
     config.scheduler.num_training_steps = num_steps_per_epoch * config.scheduler.epochs
     config.scheduler.num_warmup_steps = num_steps_per_epoch * config.scheduler.warmup_epochs
     cudnn.benchmark = len(train_media_types) == 1
