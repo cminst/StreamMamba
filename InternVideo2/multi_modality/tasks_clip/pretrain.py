@@ -550,7 +550,7 @@ def train(
         if i % log_freq == 0:
             log_payload = {
                 "lr": optimizer.param_groups[0]["lr"],
-                "different_lr": optimizer.param_groups[0]["different_lr"],
+                "different_lr": optimizer.param_groups[0]["lr"],
                 "video-stream-target-loss": final_batch_cosine_loss_for_logging,
                 "video-stream-nce-loss": final_batch_nce_loss_for_logging,
                 "video-stream-target-sim": average_cosine_sim_for_logging

@@ -107,7 +107,7 @@ optimizer = dict(
     weight_decay=0.01,
     max_grad_norm=0.7,  # requires a positive float, use -1 to disable
     # use a different lr for some modules, e.g., larger lr for new modules
-    different_lr=dict(enable=True, module_names=[], lr=1e-5),
+    different_lr=dict(enable=True, module_names=["streaming_vision_encoder.vit_lite"], lr=1e-5),
 )
 
 scheduler = dict(sched="cosine", epochs=2, min_lr_multi=0.01, warmup_epochs=0.1)

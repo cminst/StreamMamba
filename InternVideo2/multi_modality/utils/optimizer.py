@@ -63,7 +63,7 @@ def add_different_lr(named_param_tuples_or_model, diff_lr_names, diff_lr, defaul
     return named_param_tuples_with_lr
 
 
-def create_optimizer_params_group(named_param_tuples_with_lr):
+def create_optimizer_params_group(named_param_tuples_with_lr, default_lr):
     """named_param_tuples_with_lr: List([name, param, weight_decay, lr])"""
     # Group parameters by name
     param_groups = {}
@@ -75,7 +75,8 @@ def create_optimizer_params_group(named_param_tuples_with_lr):
                 "params": [],
                 "weight_decay": wd,
                 "lr": lr,
-                "name": name
+                "name": name,
+                "different_lr": (lr != default_lr)  # Flag if this is a different lr
             }
         param_groups[key]["params"].append(param)
 
@@ -113,7 +114,7 @@ def create_optimizer(args, model, filter_bias_and_bn=True, return_group=False):
         model, weight_decay, no_decay, filter_bias_and_bn)
     named_param_tuples = add_different_lr(
         named_param_tuples, diff_lr_module_names, diff_lr, args.lr)
-    parameters = create_optimizer_params_group(named_param_tuples)
+    parameters = create_optimizer_params_group(named_param_tuples, args.lr)
 
     if return_group:
         return parameters
