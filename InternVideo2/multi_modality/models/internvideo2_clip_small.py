@@ -341,6 +341,7 @@ class InternVideo2_CLIP_small(nn.Module):
             rnn_dropout = config.rnn_dropout,
             fc_hidden_layers = config.fc_hidden_layers,
             teacher_clip_embed_dim = config.teacher_clip_embed_dim,
+            text_embed_dim = self.mobileclip_cfg["embed_dim"],
         )
 
         return streaming_vision_encoder

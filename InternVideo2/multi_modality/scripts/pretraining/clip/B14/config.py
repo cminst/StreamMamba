@@ -74,7 +74,8 @@ model = dict(
         rnn_num_layers = 3,
         rnn_dropout = 0.0,
         fc_hidden_layers = [768],
-        teacher_clip_embed_dim = 768
+        teacher_clip_embed_dim = 768,
+        text_embed_dim = 512,
     ),
     mobileclip_type=dict(
         name="mobileclip_b"

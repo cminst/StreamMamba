@@ -63,9 +63,11 @@ class VideoMambaBlock(nn.Module):
 class CrossMambaFiLM(VideoMambaBlock):
     """VideoMambaBlock with FiLM-style text conditioning."""
 
-    def __init__(self, in_dim, hidden_dim, clip_dim, num_heads=4, d_state=64, d_conv=4):
+    def __init__(self, in_dim, hidden_dim, clip_dim, num_heads=4, d_state=64, d_conv=4, text_dim=None):
         super().__init__(in_dim, hidden_dim, clip_dim, num_heads, d_state, d_conv)
-        self.film = nn.Linear(clip_dim, 2 * in_dim, bias=True)
+        if text_dim is None:
+            text_dim = clip_dim
+        self.film = nn.Linear(text_dim, 2 * in_dim, bias=True)
 
     @torch.no_grad()
     def prepare_prompt(self, prompt_vec):

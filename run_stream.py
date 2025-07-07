@@ -23,6 +23,7 @@ def main():
         "rnn_dropout": 0.0,
         "fc_hidden_layers": [256],
         "teacher_clip_embed_dim": 768,
+        "text_embed_dim": 768,
     }
 
     model = StreamingInternVideo2Student(**student_config).to(device)

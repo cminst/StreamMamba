@@ -31,6 +31,7 @@ class StreamingInternVideo2Student(nn.Module):
             # Output FC layers parameters
             fc_hidden_layers=[512], # List of hidden layer sizes for FC part, empty for direct projection
             teacher_clip_embed_dim=768, # Dimension of the teacher's output
+            text_embed_dim=None,
         ):
         super().__init__()
 
@@ -43,6 +44,7 @@ class StreamingInternVideo2Student(nn.Module):
         self.rnn_hidden_size = rnn_hidden_size
         self.rnn_num_layers = rnn_num_layers
         self.rnn_type = rnn_type.lower()
+        self.text_embed_dim = text_embed_dim if text_embed_dim is not None else teacher_clip_embed_dim
 
         # Note: The RNN input_size should match the output dimension of the MobileCLIP ViT
         # when it is eventually plugged in. Using student_embed_dim as assumed here.
@@ -69,10 +71,12 @@ class StreamingInternVideo2Student(nn.Module):
                 clip_dim=teacher_clip_embed_dim,
             )
         elif self.rnn_type == 'cross_mamba_film':
+            text_dim = text_embed_dim if text_embed_dim is not None else teacher_clip_embed_dim
             self.rnn = CrossMambaFiLM(
                 in_dim=vit_lite_embed_dim,
                 hidden_dim=rnn_hidden_size,
                 clip_dim=teacher_clip_embed_dim,
+                text_dim=text_dim,
             )
         else:
             raise NotImplementedError(
