@@ -109,7 +109,7 @@ def retrieve_text_streaming(
     Includes added logging.
     """
     if log:
-        print("\n--- retrieve_text_streaming START ---")
+        print("Start of retrieve_text_streaming function\n")
         print(f"Input new_frame type: {type(new_frame)}")
         if hasattr(new_frame, 'shape'):
             print(f"Input new_frame shape: {new_frame.shape}")
@@ -148,13 +148,6 @@ def retrieve_text_streaming(
          return [], np.array([]), prev_hidden_state # Or None for hidden state? Depends on model
 
 
-    # frames2tensor with fnum=1 returns shape [1, 1, C, H, W].
-    # Squeeze out the batch (1) and time (1) dimensions resulting in [C, H, W]
-    # or potentially [1, C, H, W] if the model expects a batch dimension for streaming.
-    # Let's assume the model expects [1, C, H, W] for get_streaming_vid_feat input tensor.
-    # So, squeeze(0) twice would result in [C, H, W], squeeze(1) once results in [1, C, H, W].
-    # The original code had frames_tensor.squeeze(0) which is ambiguous if shape is [1, 1, C, H, W].
-    # Let's explicitly squeeze dimension 1 to get [1, C, H, W]
     if frames_tensor.ndim == 5: # Ensure it's the expected B, T, C, H, W
          frames_tensor_input = frames_tensor.squeeze(1) # Result: [1, C, H, W]
     elif frames_tensor.ndim == 4: # Might already be [1, C, H, W] if B=1, T=1 handled internally by frames2tensor
@@ -166,7 +159,7 @@ def retrieve_text_streaming(
     if log: print(f"frames_tensor shape after squeeze for streaming input: {frames_tensor_input.shape}")
 
 
-    # Get video features for the current frame, utilizing the previous hidden state
+    # Get video features for the current frame, with previous hidden state
     if log: print("Getting streaming video features...")
     vid_feat, new_hidden_state = vlm.get_streaming_vid_feat(frames_tensor_input, prev_hidden_state = prev_hidden_state)
     if log:
@@ -234,7 +227,7 @@ def retrieve_text_streaming(
              print(f"Returning new_hidden_state shape: {new_hidden_state.shape}")
         elif isinstance(new_hidden_state, (list, tuple)) and len(new_hidden_state) > 0 and isinstance(new_hidden_state[0], torch.Tensor):
              print(f"Returning new_hidden_state (first element) shape: {new_hidden_state[0].shape}")
-        print("--- retrieve_text_streaming END ---")
+        print("\nEnd of retrieve_text_streaming function")
 
 
     # Return top texts, their probabilities, and the updated hidden state

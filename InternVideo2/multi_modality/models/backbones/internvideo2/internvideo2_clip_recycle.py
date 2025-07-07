@@ -14,8 +14,7 @@ from torch import nn
 
 from .pos_embed import get_3d_sincos_pos_embed, get_2d_sincos_pos_embed, get_1d_sincos_pos_embed
 
-# --- Start of Streaming Student Model ---
-
+# Streaming Student Model
 class StreamingInternVideo2Student(nn.Module):
     def __init__(
             self,
@@ -115,7 +114,6 @@ class StreamingInternVideo2Student(nn.Module):
         """
         # single_frame_input shape: (B, C, T_chunk, H, W) or (B, C, H, W)
         # ViT-Lite expects (B, C, H, W)
-        # Ensure T_chunk_for_vit matches what ViT-Lite's PatchEmbed is configured for
 
         if len(single_frame_input.shape) == 5:
             single_frame_input = single_frame_input.squeeze(2) # Remove the T_chunk dimension
@@ -154,7 +152,7 @@ if __name__ == '__main__':
     }
 
     student_model = StreamingInternVideo2Student(**student_config).to(device)
-    student_model.eval() # Or train()
+    student_model.eval()
 
     print(f"Student model created with {sum(p.numel() for p in student_model.parameters())/1e6:.2f}M parameters.")
 
@@ -163,7 +161,7 @@ if __name__ == '__main__':
     current_hidden = student_model.init_hidden(batch_size, device)
 
     for i in range(num_stream_steps):
-        # Dummy single frame input for each step
+        # Create a dummy single frame input for each step
         # For ViT-Lite processing 1 frame: (B, C, H, W)
         dummy_frame = torch.randn(batch_size, 3, img_size, img_size).to(device)
 
