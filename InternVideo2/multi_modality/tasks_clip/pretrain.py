@@ -6,7 +6,15 @@ import pickle
 import time
 import random
 import numpy as np
+
 from os.path import join
+
+# Early check for dataset path
+if not os.environ.get("DATASET_ROOT"):
+    raise RuntimeError(
+        "DATASET_ROOT environment variable is not set. "
+        "Please export DATASET_ROOT to point to your dataset root before running this script."
+    )
 
 # Third-party imports
 import cv2
