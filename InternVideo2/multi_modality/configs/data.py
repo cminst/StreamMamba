@@ -1,7 +1,8 @@
 import os as __os  # add "__" if not want to be exported
 from copy import deepcopy as __deepcopy
 
-root_path = "/home/zli"
+# Get root path from environment variable or use default
+root_path = __os.environ.get("DATASET_ROOT", "/root/")
 
 # ============== pretraining datasets=================
 available_corpus = dict(

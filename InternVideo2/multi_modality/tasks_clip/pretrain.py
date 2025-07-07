@@ -32,6 +32,11 @@ from utils.basic_utils import MetricLogger, SmoothedValue, setup_seed
 from utils.config_utils import setup_main
 from utils.distributed import get_rank, is_main_process
 from utils.logger import log_dict_to_wandb, setup_wandb
+from utils.optimizer import (
+    add_different_lr,
+    create_optimizer_params_group,
+    extend_optimizer_with_param_groups,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +64,39 @@ def set_rng_state(state):
             torch.cuda.set_rng_state_all(state["cuda_state"])
     except Exception as e:
         logger.warning(f"Failed to restore RNG state: {e}")
+
+
+def unfreeze_mobileclip_vision(model, optimizer, scheduler, config):
+    """Unfreeze MobileCLIP vision encoder and add its params to the optimizer."""
+    logger.info("Unfreezing MobileCLIP vision encoder parameters")
+
+    submodule = model.streaming_vision_encoder.vit_lite
+    for p in submodule.parameters():
+        p.requires_grad = True
+
+    weight_decay = config.optimizer.weight_decay
+    named_param_tuples = []
+    for name, param in submodule.named_parameters():
+        full_name = f"streaming_vision_encoder.vit_lite.{name}"
+        if len(param.shape) == 1 or full_name.endswith(".bias"):
+            wd = 0
+        else:
+            wd = weight_decay
+        named_param_tuples.append([full_name, param, wd])
+
+    if hasattr(config.optimizer, "different_lr") and config.optimizer.different_lr.enable:
+        diff_names = config.optimizer.different_lr.module_names
+        diff_lr = config.optimizer.different_lr.lr
+    else:
+        diff_names = []
+        diff_lr = None
+
+    named_param_tuples = add_different_lr(named_param_tuples, diff_names, diff_lr, config.optimizer.lr)
+    param_groups = create_optimizer_params_group(named_param_tuples, config.optimizer.lr)
+    extend_optimizer_with_param_groups(optimizer, scheduler, param_groups)
+
+    # Mark as unfrozen so we don't unfreeze again
+    config.model.freeze_mobileclip_vision = False
 
 def save_debug_step_data(output_dir, global_step, frame_idx,
                          new_frame_input, # Input to streaming_vision_encoder
@@ -359,6 +397,12 @@ def train(
 
     num_batches_train = len(train_loader_agg)
     logger.info(f"Training loader set up, {num_batches_train} batches.")
+    enable_mobileclip_ft = getattr(config, "enable_mobileclip_ft", False)
+    unfreeze_step = None
+    if enable_mobileclip_ft:
+        unfreeze_ratio = getattr(config, "unfreeze_mobileclip_pct", None)
+        if unfreeze_ratio is not None:
+            unfreeze_step = int(num_batches_train * unfreeze_ratio)
 
     progress_bar = tqdm(
         train_loader_agg,
@@ -398,6 +442,16 @@ def train(
         return torch.nn.functional.cross_entropy(logits, targets)
 
     for i, data_pair in enumerate(progress_bar):
+        if (
+            enable_mobileclip_ft
+            and epoch == 0
+            and i >= unfreeze_step
+            and config.model.freeze_mobileclip_vision
+        ):
+            unfreeze_mobileclip_vision(
+                model_without_ddp, optimizer, scheduler, config
+            )
+
         media_type_orig_data, (image, text, idx) = data_pair # Renamed for clarity
 
         image = image.to(device, non_blocking=True)
@@ -541,7 +595,21 @@ def train(
         metric_logger.update(**{'video-stream-nce-loss': final_batch_nce_loss_for_logging})
         metric_logger.update(**{'video-stream-target-sim': average_cosine_sim_for_logging})
         metric_logger.update(lr=optimizer.param_groups[0]["lr"]) # LR after the last window's update in this batch
-        metric_logger.update(different_lr=optimizer.param_groups[0]["different_lr"])
+
+        # Find parameter group with different_lr flag and log it
+        different_lr_value = None
+        for pg in optimizer.param_groups:
+            if pg.get("different_lr", False):
+                different_lr_value = pg["lr"]
+                break
+
+        # If found a different learning rate, log it, otherwise use default
+        if different_lr_value is not None:
+            metric_logger.update(different_lr=different_lr_value)
+        else:
+            # No different learning rate found, log the default one
+            metric_logger.update(different_lr=optimizer.param_groups[0]["lr"])
+
         if hasattr(model_without_ddp, 'temp'):
             metric_logger.update(temperature=model_without_ddp.temp.item())
 
@@ -562,7 +630,7 @@ def train(
         if i % log_freq == 0:
             log_payload = {
                 "lr": optimizer.param_groups[0]["lr"],
-                "different_lr": optimizer.param_groups[0]["different_lr"],
+                "different_lr": different_lr_value,
                 "video-stream-target-loss": final_batch_cosine_loss_for_logging,
                 "video-stream-nce-loss": final_batch_nce_loss_for_logging,
                 "video-stream-target-sim": average_cosine_sim_for_logging

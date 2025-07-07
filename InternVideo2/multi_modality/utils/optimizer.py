@@ -63,7 +63,7 @@ def add_different_lr(named_param_tuples_or_model, diff_lr_names, diff_lr, defaul
     return named_param_tuples_with_lr
 
 
-def create_optimizer_params_group(named_param_tuples_with_lr):
+def create_optimizer_params_group(named_param_tuples_with_lr, default_lr):
     """named_param_tuples_with_lr: List([name, param, weight_decay, lr])"""
     # Group parameters by name
     param_groups = {}
@@ -75,7 +75,8 @@ def create_optimizer_params_group(named_param_tuples_with_lr):
                 "params": [],
                 "weight_decay": wd,
                 "lr": lr,
-                "name": name
+                "name": name,
+                "different_lr": (lr != default_lr)  # Flag if this is a different lr
             }
         param_groups[key]["params"].append(param)
 
@@ -113,7 +114,7 @@ def create_optimizer(args, model, filter_bias_and_bn=True, return_group=False):
         model, weight_decay, no_decay, filter_bias_and_bn)
     named_param_tuples = add_different_lr(
         named_param_tuples, diff_lr_module_names, diff_lr, args.lr)
-    parameters = create_optimizer_params_group(named_param_tuples)
+    parameters = create_optimizer_params_group(named_param_tuples, args.lr)
 
     if return_group:
         return parameters
@@ -145,3 +146,28 @@ def create_optimizer(args, model, filter_bias_and_bn=True, return_group=False):
         assert False and "Invalid optimizer"
         raise ValueError
     return optimizer
+
+
+def extend_optimizer_with_param_groups(optimizer, scheduler, param_groups):
+    """Add parameter groups to an existing optimizer and update scheduler.
+
+    Args:
+        optimizer (Optimizer): The optimizer to extend.
+        scheduler (torch.optim.lr_scheduler._LRScheduler or None): Scheduler tied
+            to the optimizer. ``base_lrs`` will be extended if provided.
+        param_groups (List[dict]): Parameter groups returned by
+            :func:`create_optimizer_params_group`.
+    """
+
+    for group in param_groups:
+        add_group = {k: group[k] for k in ["params", "lr", "weight_decay"]}
+        optimizer.add_param_group(add_group)
+        # attach custom info for logging
+        optimizer.param_groups[-1]["name"] = group.get("name")
+        optimizer.param_groups[-1]["different_lr"] = group.get("different_lr", False)
+
+        if scheduler is not None and hasattr(scheduler, "base_lrs"):
+            scheduler.base_lrs.append(group["lr"])
+            if hasattr(scheduler, "_last_lr"):
+                scheduler._last_lr.append(group["lr"])
+
