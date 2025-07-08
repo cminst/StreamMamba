@@ -4,7 +4,6 @@ import os
 import subprocess
 import sys
 import time
-import json
 
 import matplotlib
 matplotlib.use("Agg")
@@ -33,17 +32,6 @@ def ensure_dependencies():
     print("Installed packages")
 
 
-branch_switch = {
-    "patch_cache": "benchmark-cache2",
-    "main": "benchmark-main",
-    "adapter": "adapter",
-    "window_v3": "window_v3",
-    "recycle": "recycle",
-    "delta": "delta",
-    "delta_mamba": "delta_mamba",
-}
-
-
 def parse_args():
     parser = argparse.ArgumentParser(description="Measure streaming inference FPS")
     parser.add_argument(
@@ -53,13 +41,21 @@ def parse_args():
     parser.add_argument(
         "--config-name",
         default="delta",
-        choices=list(branch_switch.keys()),
         help="Configuration name",
     )
     parser.add_argument(
+        "--branch",
+        default=None,
+        help="Git branch to checkout before evaluation",
+    )
+    parser.add_argument(
         "--checkpoint-dir",
-        required=True,
         help="Directory that contains the checkpoint file",
+    )
+    parser.add_argument(
+        "--no-stream",
+        action="store_true",
+        help="Run in no-stream mode without loading checkpoint",
     )
     parser.add_argument(
         "--output-json",
@@ -74,11 +70,6 @@ def parse_args():
     return parser.parse_args()
 
 
-def checkout_branch(name: str):
-    branch = branch_switch[name]
-    subprocess.check_call(["git", "checkout", branch])
-
-
 def find_checkpoint(ckpt_dir: str) -> str:
     pattern = os.path.join(ckpt_dir, "**", "mp_rank_00_model_states.pt")
     matches = sorted(glob.glob(pattern, recursive=True))
@@ -91,10 +82,11 @@ def main():
     ensure_dependencies()
     args = parse_args()
 
-    if args.config_name not in branch_switch:
-        raise ValueError(f"Invalid config name: {args.config_name}")
+    if not args.no_stream and not args.checkpoint_dir:
+        parser.error("--checkpoint-dir is required when not in no-stream mode")
 
-    checkout_branch(args.config_name)
+    if args.branch:
+        subprocess.check_call(["git", "checkout", args.branch])
 
     sys.path.append(os.getcwd())
 
@@ -112,8 +104,6 @@ def main():
 
     config = Config.from_file(os.path.join(args.config_dir, "config.py"))
     config = eval_dict_leaf(config)
-
-    ckpt_path = find_checkpoint(args.checkpoint_dir)
 
     file_path = config.model.vision_ckpt_path
     clip_path = config.model.extra_ckpt_path
@@ -134,32 +124,36 @@ def main():
     intern_model = InternVideo2_CLIP_small(config)
     intern_model.to(device)
 
-    checkpoint = torch.load(ckpt_path, map_location=device)
+    if not args.no_stream:
+        ckpt_path = find_checkpoint(args.checkpoint_dir)
+        checkpoint = torch.load(ckpt_path, map_location=device)
 
-    if "module" in checkpoint:
-        state_dict = checkpoint["module"]
-    elif "model" in checkpoint:
-        state_dict = checkpoint["model"]
-    elif "state_dict" in checkpoint:
-        state_dict = checkpoint["state_dict"]
-    else:
-        if all(isinstance(v, torch.Tensor) for v in checkpoint.values()):
-            state_dict = checkpoint
+        if "module" in checkpoint:
+            state_dict = checkpoint["module"]
+        elif "model" in checkpoint:
+            state_dict = checkpoint["model"]
+        elif "state_dict" in checkpoint:
+            state_dict = checkpoint["state_dict"]
         else:
-            raise KeyError(f"Could not find model state_dict in checkpoint. Keys: {checkpoint.keys()}")
+            if all(isinstance(v, torch.Tensor) for v in checkpoint.values()):
+                state_dict = checkpoint
+            else:
+                raise KeyError(f"Could not find model state_dict in checkpoint. Keys: {checkpoint.keys()}")
 
-    new_state_dict = {}
-    for k, v in state_dict.items():
-        name = k[7:] if k.startswith("module.") else k
-        new_state_dict[name] = v
+        new_state_dict = {}
+        for k, v in state_dict.items():
+            name = k[7:] if k.startswith("module.") else k
+            new_state_dict[name] = v
 
-    intern_model.load_state_dict(new_state_dict, strict=False)
+        intern_model.load_state_dict(new_state_dict, strict=False)
+
     intern_model.eval()
 
     act75_data = json_read('photography-model/data/ACT75.json')
 
     results = []
-    size_t = 224
+    size_t = config.get('size_t', 224)
+
     for video_path, _, _ in act75_data:
         cap = cv2.VideoCapture('photography-model/' + video_path)
         frames = [x for x in _frame_from_video(cap)]
@@ -167,14 +161,38 @@ def main():
             continue
         h, w = frames[0].shape[:2]
         pixels = w * h
-        hidden = intern_model.streaming_vision_encoder.init_hidden(batch_size=1, device=device)
-        start = time.time()
-        for f in frames:
-            tensor = frames2tensor([f], fnum=1, target_size=(size_t, size_t), device=device).squeeze(0)
-            _, hidden = intern_model.streaming_vision_encoder(tensor, hidden)
-        torch.cuda.synchronize() if device.type == 'cuda' else None
-        elapsed = time.time() - start
-        fps = len(frames) / elapsed if elapsed > 0 else 0.0
+        total_time = 0.0
+
+        if not args.no_stream:
+            hidden = intern_model.streaming_vision_encoder.init_hidden(batch_size=1, device=device)
+            for f in frames:
+                tensor = frames2tensor([f], fnum=1, target_size=(size_t, size_t), device=device).squeeze(0)
+                if device.type == 'cuda':
+                    torch.cuda.synchronize()
+                start = time.time()
+                _, hidden = intern_model.streaming_vision_encoder(tensor, hidden)
+                if device.type == 'cuda':
+                    torch.cuda.synchronize()
+                end = time.time()
+                total_time += end - start
+            fps = len(frames) / total_time if total_time > 0 else 0.0
+        else:
+            num_frames = config.get('num_frames', 8)
+            num_chunks = len(frames) // num_frames
+            for i in range(num_chunks):
+                chunk = frames[i * num_frames:(i + 1) * num_frames]
+                tensor = frames2tensor(chunk, fnum=num_frames, target_size=(size_t, size_t), device=device)
+                if device.type == 'cuda':
+                    torch.cuda.synchronize()
+                start = time.time()
+                intern_model.encode_vision(tensor)
+                if device.type == 'cuda':
+                    torch.cuda.synchronize()
+                end = time.time()
+                total_time += end - start
+            processed_frames = num_chunks * num_frames
+            fps = processed_frames / total_time if total_time > 0 and processed_frames > 0 else 0.0
+
         results.append({"video": video_path, "resolution": f"{w}x{h}", "pixels": pixels, "fps": fps})
 
     json_write(results, args.output_json)
