@@ -82,9 +82,6 @@ def main():
     ensure_dependencies()
     args = parse_args()
 
-    if not args.no_stream and not args.checkpoint_dir:
-        parser.error("--checkpoint-dir is required when not in no-stream mode")
-
     if args.branch:
         subprocess.check_call(["git", "checkout", args.branch])
 
@@ -123,29 +120,6 @@ def main():
 
     intern_model = InternVideo2_CLIP_small(config)
     intern_model.to(device)
-
-    if not args.no_stream:
-        ckpt_path = find_checkpoint(args.checkpoint_dir)
-        checkpoint = torch.load(ckpt_path, map_location=device)
-
-        if "module" in checkpoint:
-            state_dict = checkpoint["module"]
-        elif "model" in checkpoint:
-            state_dict = checkpoint["model"]
-        elif "state_dict" in checkpoint:
-            state_dict = checkpoint["state_dict"]
-        else:
-            if all(isinstance(v, torch.Tensor) for v in checkpoint.values()):
-                state_dict = checkpoint
-            else:
-                raise KeyError(f"Could not find model state_dict in checkpoint. Keys: {checkpoint.keys()}")
-
-        new_state_dict = {}
-        for k, v in state_dict.items():
-            name = k[7:] if k.startswith("module.") else k
-            new_state_dict[name] = v
-
-        intern_model.load_state_dict(new_state_dict, strict=False)
 
     intern_model.eval()
 
@@ -190,6 +164,7 @@ def main():
                     torch.cuda.synchronize()
                 end = time.time()
                 total_time += end - start
+                
             fps = num_chunks / total_time if total_time > 0 and num_chunks > 0 else 0.0
 
         results.append({"video": video_path, "resolution": f"{w}x{h}", "pixels": pixels, "fps": fps})

@@ -34,8 +34,6 @@ def ensure_dependencies():
     print("Installed packages")
 
 
-
-
 def parse_args():
     parser = argparse.ArgumentParser(description="Run streaming benchmarks")
     parser.add_argument(
