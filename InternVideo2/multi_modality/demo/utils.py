@@ -95,14 +95,16 @@ def retrieve_text(
     return ret_texts, probs.float().numpy()[0]
 
 def retrieve_text_streaming(
-    new_frame, # Expected: a single numpy array (HxWx3)
+    new_frame,  # Expected: a single numpy array (HxWx3)
     texts,
     model,
-    prev_hidden_state, # Expected: model-specific hidden state object (tensor or tuple)
-    topk:int=5,
-    config: dict={},
+    prev_hidden_state,  # Expected: model-specific hidden state object (tensor or tuple)
+    topk: int = 5,
+    config: dict = {},
     device=torch.device('cuda'),
-    log:bool = False
+    log: bool = False,
+    gamma=None,
+    beta=None,
 ):
     """
     Performs text retrieval for a single new video frame in a streaming fashion.
@@ -161,7 +163,12 @@ def retrieve_text_streaming(
 
     # Get video features for the current frame, with previous hidden state
     if log: print("Getting streaming video features...")
-    vid_feat, new_hidden_state = vlm.get_streaming_vid_feat(frames_tensor_input, prev_hidden_state = prev_hidden_state)
+    vid_feat, new_hidden_state = vlm.get_streaming_vid_feat(
+        frames_tensor_input,
+        prev_hidden_state=prev_hidden_state,
+        gamma=gamma,
+        beta=beta,
+    )
     if log:
         print(f"vid_feat shape: {vid_feat.shape}")
         print(f"new_hidden_state type: {type(new_hidden_state)}")
