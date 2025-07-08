@@ -102,21 +102,8 @@ def main():
     config = Config.from_file(os.path.join(args.config_dir, "config.py"))
     config = eval_dict_leaf(config)
 
-    file_path = config.model.vision_ckpt_path
-    clip_path = config.model.extra_ckpt_path
-
-    subprocess.call([
-        "wget",
-        "-q",
-        "https://docs-assets.developer.apple.com/ml-research/datasets/mobileclip/mobileclip_blt.pt",
-    ])
-
-    config.model.vision_ckpt_path = file_path
-    if "delta" in args.config_name:
-        config.model.mobileclip_ckpt_path = "mobileclip_blt.pt"
-    else:
-        config.model.text_ckpt_path = "mobileclip_blt.pt"
-    config.model.extra_ckpt_path = clip_path
+    if "delta" not in args.config_name:
+        config.model.text_ckpt_path = config.model.mobileclip_ckpt_path
 
     intern_model = InternVideo2_CLIP_small(config)
     intern_model.to(device)
