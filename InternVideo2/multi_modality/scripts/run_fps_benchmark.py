@@ -190,8 +190,7 @@ def main():
                     torch.cuda.synchronize()
                 end = time.time()
                 total_time += end - start
-            processed_frames = num_chunks * num_frames
-            fps = processed_frames / total_time if total_time > 0 and processed_frames > 0 else 0.0
+            fps = num_chunks / total_time if total_time > 0 and num_chunks > 0 else 0.0
 
         results.append({"video": video_path, "resolution": f"{w}x{h}", "pixels": pixels, "fps": fps})
 
