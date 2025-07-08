@@ -1,5 +1,6 @@
 from configs.data import *
 from configs.model import *
+import os as __os
 
 # ========================= data ==========================
 train_corpus = "slim_kinetics"
@@ -10,7 +11,7 @@ num_workers = 2
 
 stop_key = None
 
-root_path = "/home/zli"
+root_path = __os.environ.get("DATASET_ROOT", "/root/")
 
 # ========================= input ==========================
 num_frames = 8
@@ -69,12 +70,13 @@ model = dict(
     ),
     streaming_vision_encoder = dict(
         vit_lite_embed_dim = 768,
-        rnn_type = 'mamba',
+        rnn_type = 'cross_mamba_film',
         rnn_hidden_size = 1024,
         rnn_num_layers = 3,
         rnn_dropout = 0.0,
         fc_hidden_layers = [768],
-        teacher_clip_embed_dim = 768
+        teacher_clip_embed_dim = 768,
+        text_embed_dim = 512,
     ),
     mobileclip_type=dict(
         name="mobileclip_b"
@@ -90,8 +92,8 @@ model = dict(
     open_text_lora=False,
     vision_ckpt_path=f"{root_path}/IV2/models/stage1/B14/B14_dist_1B_stage2/pytorch_model.bin",
     load_vision_ckpt_from_internvideo2_stage2=False,
-    mobileclip_ckpt_path=f"{root_path}/IV2/models/mobileclip_blt.pt",
-    extra_ckpt_path=f"{root_path}/IV2/models/clip/B14/pytorch_model.bin"
+    mobileclip_ckpt_path=__os.path.join(root_path, "IV2/models/mobileclip_blt.pt"),
+    extra_ckpt_path=__os.path.join(root_path, "IV2/models/clip/B14/pytorch_model.bin")
 )
 
 criterion = dict(
@@ -107,10 +109,10 @@ optimizer = dict(
     weight_decay=0.01,
     max_grad_norm=0.7,  # requires a positive float, use -1 to disable
     # use a different lr for some modules, e.g., larger lr for new modules
-    different_lr=dict(enable=True, module_names=[], lr=1e-5),
+    different_lr=dict(enable=True, module_names=["streaming_vision_encoder.vit_lite"], lr=2e-6),
 )
 
-scheduler = dict(sched="cosine", epochs=2, min_lr_multi=0.01, warmup_epochs=0.1)
+scheduler = dict(sched="cosine", epochs=1, min_lr_multi=0.01, warmup_epochs=0.1)
 
 evaluate = False
 deep_fusion = False
@@ -161,10 +163,12 @@ deepspeed = dict(
 )
 
 # ====================== contrastive distillation =====================
-enable_contrastive_distillation = True
+enable_contrastive_distillation = False
 contrastive_temperature = 0.07
 contrastive_lambda = 0.4
 contrastive_warmup_pct = 0.3
 contrastive_ramp_iters = 500
 
-# hf_hub_download(repo_id="google/fleurs", filename="fleurs.py", repo_type="dataset")
+# ====================== unfreeze mobileclip =====================
+enable_mobileclip_ft = False
+unfreeze_mobileclip_pct = 0.5

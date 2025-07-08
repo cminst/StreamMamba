@@ -34,15 +34,6 @@ def ensure_dependencies():
     print("Installed packages")
 
 
-branch_switch = {
-    "patch_cache": "benchmark-cache2",
-    "main": "benchmark-main",
-    "adapter": "adapter",
-    "window_v3": "window_v3",
-    "recycle": "recycle",
-    "delta": "delta",
-    "delta_mamba": "delta_mamba",
-}
 
 
 def parse_args():
@@ -54,8 +45,17 @@ def parse_args():
     parser.add_argument(
         "--config-name",
         default="delta",
-        choices=list(branch_switch.keys()),
         help="Configuration name",
+    )
+    parser.add_argument(
+        "--branch",
+        default=None,
+        help="Git branch to checkout before evaluation",
+    )
+    parser.add_argument(
+        "--use-film",
+        action="store_true",
+        help="Indicate that the model uses FiLM conditioning",
     )
     parser.add_argument(
         "--output-graph",
@@ -70,9 +70,9 @@ def parse_args():
     return parser.parse_args()
 
 
-def checkout_branch(name: str):
-    branch = branch_switch[name]
-    subprocess.check_call(["git", "checkout", branch])
+def checkout_branch(name: str | None):
+    if name:
+        subprocess.check_call(["git", "checkout", name])
 
 
 def find_streaming_checkpoints(base_dir: str, model_name: str) -> list[str]:
@@ -156,10 +156,7 @@ def main():
     ensure_dependencies()
     args = parse_args()
 
-    if args.config_name not in branch_switch:
-        raise ValueError(f"Invalid config name: {args.config_name}")
-
-    checkout_branch(args.config_name)
+    checkout_branch(args.branch)
 
     sys.path.append(os.getcwd())
 
@@ -304,6 +301,19 @@ def main():
             logit_curr = []
             pbar = tqdm(range(len(frames) - 8))
 
+            gamma = beta = None
+            if args.use_film and getattr(intern_model.streaming_vision_encoder, "rnn_type", "") == "cross_mamba_film":
+                text_input = intern_model.tokenizer(
+                    phrase,
+                    padding="max_length",
+                    truncation=True,
+                    max_length=config.max_txt_l,
+                    return_tensors="pt",
+                ).to(device)
+                with torch.no_grad():
+                    prompt_vec = intern_model.encode_text(text_input)
+                gamma, beta = intern_model.streaming_vision_encoder.rnn.prepare_prompt(prompt_vec)
+
             curr_hidden_state = intern_model.streaming_vision_encoder.init_hidden(batch_size=1, device=device)
 
             for frame_idx in range(7):
@@ -314,7 +324,12 @@ def main():
                     device=device
                 ).squeeze(0).to(device)
 
-                _, curr_hidden_state = intern_model.streaming_vision_encoder(initial_frame_mc, curr_hidden_state)
+                _, curr_hidden_state = intern_model.streaming_vision_encoder(
+                    initial_frame_mc,
+                    curr_hidden_state,
+                    gamma,
+                    beta,
+                )
 
             for j in pbar:
                 texts, probs, curr_hidden_state = retrieve_text_streaming(
@@ -323,7 +338,9 @@ def main():
                     intern_model,
                     curr_hidden_state,
                     topk=1,
-                    config=config
+                    config=config,
+                    gamma=gamma,
+                    beta=beta,
                 )
                 logit_curr.append(probs.item())
                 if len(logit_curr) > 0:

@@ -1,7 +1,7 @@
 from .internvideo2_clip_vision import CrossAttention, AttentiveBlock, AttentionPoolingBlock, RMSNorm, LayerScale, Attention, Mlp, Block, PatchEmbed
 
 from .mobileclip import TextTransformer, ClipTokenizer, VisionTransformer, vit_b16
-from .video_mamba_block import VideoMambaBlock
+from .video_mamba_block import VideoMambaBlock, CrossMambaFiLM
 
 import logging
 import numpy as np
@@ -14,8 +14,7 @@ from torch import nn
 
 from .pos_embed import get_3d_sincos_pos_embed, get_2d_sincos_pos_embed, get_1d_sincos_pos_embed
 
-# --- Start of Streaming Student Model ---
-
+# Streaming Student Model
 class StreamingInternVideo2Student(nn.Module):
     def __init__(
             self,
@@ -31,6 +30,7 @@ class StreamingInternVideo2Student(nn.Module):
             # Output FC layers parameters
             fc_hidden_layers=[512], # List of hidden layer sizes for FC part, empty for direct projection
             teacher_clip_embed_dim=768, # Dimension of the teacher's output
+            text_embed_dim=None,
         ):
         super().__init__()
 
@@ -43,6 +43,7 @@ class StreamingInternVideo2Student(nn.Module):
         self.rnn_hidden_size = rnn_hidden_size
         self.rnn_num_layers = rnn_num_layers
         self.rnn_type = rnn_type.lower()
+        self.text_embed_dim = text_embed_dim if text_embed_dim is not None else teacher_clip_embed_dim
 
         # Note: The RNN input_size should match the output dimension of the MobileCLIP ViT
         # when it is eventually plugged in. Using student_embed_dim as assumed here.
@@ -68,9 +69,17 @@ class StreamingInternVideo2Student(nn.Module):
                 hidden_dim=rnn_hidden_size,
                 clip_dim=teacher_clip_embed_dim,
             )
+        elif self.rnn_type == 'cross_mamba_film':
+            text_dim = text_embed_dim if text_embed_dim is not None else teacher_clip_embed_dim
+            self.rnn = CrossMambaFiLM(
+                in_dim=vit_lite_embed_dim,
+                hidden_dim=rnn_hidden_size,
+                clip_dim=teacher_clip_embed_dim,
+                text_dim=text_dim,
+            )
         else:
             raise NotImplementedError(
-                f"Unsupported RNN type: {rnn_type}. Choose 'lstm', 'gru' or 'mamba'."
+                f"Unsupported RNN type: {rnn_type}. Choose 'lstm', 'gru', 'mamba' or 'cross_mamba_film'."
             )
 
         # Fully Connected layers to project RNN output to teacher's embedding dimension
@@ -88,7 +97,7 @@ class StreamingInternVideo2Student(nn.Module):
             self.output_fc = nn.Identity()
 
     def init_hidden(self, batch_size, device):
-        if self.rnn_type == 'mamba':
+        if self.rnn_type in ['mamba', 'cross_mamba_film']:
             return self.rnn.init_state(batch_size, device)
         h0 = torch.zeros(self.rnn_num_layers, batch_size, self.rnn_hidden_size).to(device)
         if self.rnn_type == 'lstm':
@@ -96,7 +105,7 @@ class StreamingInternVideo2Student(nn.Module):
             return (h0, c0)
         return h0
 
-    def forward(self, single_frame_input, prev_hidden_state):
+    def forward(self, single_frame_input, prev_hidden_state, gamma=None, beta=None):
         """
         Processes a single frame (or a small chunk of frames) and updates the hidden state.
 
@@ -115,7 +124,6 @@ class StreamingInternVideo2Student(nn.Module):
         """
         # single_frame_input shape: (B, C, T_chunk, H, W) or (B, C, H, W)
         # ViT-Lite expects (B, C, H, W)
-        # Ensure T_chunk_for_vit matches what ViT-Lite's PatchEmbed is configured for
 
         if len(single_frame_input.shape) == 5:
             single_frame_input = single_frame_input.squeeze(2) # Remove the T_chunk dimension
@@ -124,6 +132,9 @@ class StreamingInternVideo2Student(nn.Module):
 
         if self.rnn_type == 'mamba':
             student_embedding, current_hidden_state = self.rnn(frame_feature, prev_hidden_state)
+            return student_embedding, current_hidden_state
+        elif self.rnn_type == 'cross_mamba_film':
+            student_embedding, current_hidden_state = self.rnn(frame_feature, prev_hidden_state, gamma, beta)
             return student_embedding, current_hidden_state
 
         rnn_input = frame_feature.unsqueeze(1)
@@ -154,21 +165,25 @@ if __name__ == '__main__':
     }
 
     student_model = StreamingInternVideo2Student(**student_config).to(device)
-    student_model.eval() # Or train()
+    student_model.eval()
 
     print(f"Student model created with {sum(p.numel() for p in student_model.parameters())/1e6:.2f}M parameters.")
 
     # Simulate streaming a few frames
     num_stream_steps = 5
     current_hidden = student_model.init_hidden(batch_size, device)
+    gamma = beta = None
+    if student_config["rnn_type"] == 'cross_mamba_film':
+        dummy_prompt = torch.randn(1, teacher_output_dim).to(device)
+        gamma, beta = student_model.rnn.prepare_prompt(dummy_prompt)
 
     for i in range(num_stream_steps):
-        # Dummy single frame input for each step
+        # Create a dummy single frame input for each step
         # For ViT-Lite processing 1 frame: (B, C, H, W)
         dummy_frame = torch.randn(batch_size, 3, img_size, img_size).to(device)
 
         with torch.no_grad():
-            output_embedding, current_hidden = student_model(dummy_frame, current_hidden)
+            output_embedding, current_hidden = student_model(dummy_frame, current_hidden, gamma, beta)
 
         print(f"Step {i+1}: Output embedding shape: {output_embedding.shape}")
         if student_config["rnn_type"] == 'lstm':

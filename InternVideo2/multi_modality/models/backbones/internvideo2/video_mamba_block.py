@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 from mamba_ssm.modules.mamba2 import Mamba2
+import torch.nn.functional as F
 
 class VideoMambaBlock(nn.Module):
     """State-space block for streaming video features using Mamba.
@@ -57,3 +58,24 @@ class VideoMambaBlock(nn.Module):
         out = out * torch.sigmoid(self.out_gate(out))
         clip_emb = self.proj(out)
         return clip_emb, (conv_state, ssm_state)
+
+
+class CrossMambaFiLM(VideoMambaBlock):
+    """VideoMambaBlock with FiLM-style text conditioning."""
+
+    def __init__(self, in_dim, hidden_dim, clip_dim, num_heads=4, d_state=64, d_conv=4, text_dim=None):
+        super().__init__(in_dim, hidden_dim, clip_dim, num_heads, d_state, d_conv)
+        if text_dim is None:
+            text_dim = clip_dim
+        self.film = nn.Linear(text_dim, 2 * in_dim, bias=True)
+
+    @torch.no_grad()
+    def prepare_prompt(self, prompt_vec):
+        """Prepare FiLM parameters from text embedding."""
+        gamma, beta = self.film(prompt_vec).chunk(2, dim=-1)
+        return gamma.sigmoid(), beta
+
+    def forward(self, frame_feat, state, gamma=None, beta=None):
+        if gamma is not None and beta is not None:
+            frame_feat = gamma * frame_feat + beta
+        return super().forward(frame_feat, state)
