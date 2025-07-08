@@ -168,26 +168,10 @@ def main():
     config = Config.from_file(os.path.join(args.config_dir, "config.py"))
     config = eval_dict_leaf(config)
 
-    file_path = config.model.vision_ckpt_path
-    clip_path = config.model.extra_ckpt_path
+    if "delta" not in args.config_name:
+        config.model.text_ckpt_path = config.model.mobileclip_ckpt_path
+        
     streaming_vit_paths = find_streaming_checkpoints(args.config_dir, model_name)
-
-    subprocess.call([
-        "wget",
-        "-q",
-        "https://docs-assets.developer.apple.com/ml-research/datasets/mobileclip/mobileclip_blt.pt",
-    ])
-
-    print(f"{model_name} downloaded to: {file_path}")
-    print(f"CLIP downloaded to: {clip_path}")
-    print("Downloaded MobileCLIP to mobileclip_blt.pt")
-
-    config.model.vision_ckpt_path = file_path
-    if "delta" in args.config_name:
-        config.model.mobileclip_ckpt_path = "mobileclip_blt.pt"
-    else:
-        config.model.text_ckpt_path = "mobileclip_blt.pt"
-    config.model.extra_ckpt_path = clip_path
 
     from models.internvideo2_clip_small import InternVideo2_CLIP_small
     from collections import OrderedDict
