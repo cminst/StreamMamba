@@ -16,8 +16,11 @@ from dataset.ret_dataset import (ImgTxtRetTrainDataset,
                                  VidTxtRetMCNewEvalDataset)
 
 from dataset.qa_dataset import ImageQADataset, VideoQADataset
-from dataset.pt_dataset import (ImgTxtPtTrainDataset,
-                                VidTxtPtTrainDataset,)
+from dataset.pt_dataset import (
+    ImgTxtPtTrainDataset,
+    VidTxtPtTrainDataset,
+)
+from dataset.localization_dataset import LocalizationDataset
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +54,11 @@ def get_dataset_cls(dataset_type, media_type, data_cfg):
             dataset_cls = ImageQADataset
         elif media_type == "video":
             dataset_cls = VideoQADataset
+        else:
+            raise NotImplementedError(f"dataset_type={dataset_type}, media_type={media_type}")
+    elif dataset_type == "loc_train":
+        if media_type == "video":
+            dataset_cls = LocalizationDataset
         else:
             raise NotImplementedError(f"dataset_type={dataset_type}, media_type={media_type}")
     else:
@@ -293,6 +301,21 @@ def create_dataset(dataset_type, config, use_mobileclip_transform = False):
         else:
             raise NotImplementedError(config.train_file.media_type)
 
+        logger.info(f"dataset_type={dataset_type}, train_file={config.train_file}")
+        logger.info(dataset_kwargs)
+        logger.info('train_transform:')
+        logger.info(str(train_transform))
+
+        return [dataset_cls(**dataset_kwargs)]
+
+    elif dataset_type == "loc_train":
+        assert isinstance(config.train_file, dict), config.train_file
+        train_transform = get_train_transform(config, config.train_file, use_mobileclip_transform=use_mobileclip_transform)
+        dataset_cls = get_dataset_cls(dataset_type=dataset_type, media_type=config.train_file.media_type, data_cfg=config.train_file)
+        dataset_kwargs = dict(
+            ann_file=config.train_file,
+            transform=train_transform,
+        )
         logger.info(f"dataset_type={dataset_type}, train_file={config.train_file}")
         logger.info(dataset_kwargs)
         logger.info('train_transform:')
