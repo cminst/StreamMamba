@@ -3,8 +3,6 @@ from configs.model import *
 import os as __os
 from huggingface_hub import hf_hub_download
 
-HF_REPO = "qingy2024/InternVideo2-B14"
-
 # ========================= data ==========================
 train_corpus = "slim_kinetics"
 train_file = "${available_corpus[${train_corpus}]}"  # for lazy evaluation
@@ -13,8 +11,6 @@ test_types = ["act_val"]
 num_workers = 2
 
 stop_key = None
-
-root_path = __os.environ.get("DATASET_ROOT", "/root/")
 
 # ========================= input ==========================
 num_frames = 8
@@ -40,6 +36,8 @@ inputs = dict(
 )
 
 # ========================= model ==========================
+HF_REPO = "qingy2024/InternVideo2-B14"
+
 model = dict(
     model_cls="InternVideo2_CLIP_small",
     vision_encoder=dict(
@@ -102,15 +100,15 @@ model = dict(
 criterion = dict(
     loss_weight=dict(
         vtc=1.0,
-    ),  # 0: disabled.
+    )
 )
 
 optimizer = dict(
     opt="adamW",
     lr=1e-5,
-    opt_betas=[0.9, 0.98],  # default
+    opt_betas=[0.9, 0.98],
     weight_decay=0.01,
-    max_grad_norm=0.7,  # requires a positive float, use -1 to disable
+    max_grad_norm=0.7,
     # use a different lr for some modules, e.g., larger lr for new modules
     different_lr=dict(enable=True, module_names=["streaming_vision_encoder.vit_lite"], lr=2e-6),
 )
