@@ -6,19 +6,19 @@ from huggingface_hub import hf_hub_download
 
 MODEL_FILES = [
     {
-        "repo_id": "OpenGVLab/InternVideo2_distillation_models",
-        "path_in_repo": "stage1/B14/B14_dist_1B_stage2/pytorch_model.bin",
-        "local_path": "./models/",
+        "repo_id": "qingy2024/InternVideo2-B14",
+        "path_in_repo": "internvideo2_vision.pt",
+        "local_path": "./models/internvideo2_vision.pt",
     },
     {
-        "repo_id": "OpenGVLab/InternVideo2_distillation_models",
-        "path_in_repo": "clip/B14/pytorch_model.bin",
-        "local_path": "./models/",
+        "repo_id": "qingy2024/InternVideo2-B14",
+        "path_in_repo": "internvideo2_clip.pt",
+        "local_path": "./models/internvideo2_clip.pt",
     },
     {
-        "repo_id": "apple/MobileCLIP-B-LT",
+        "repo_id": "qingy2024/InternVideo2-B14",
         "path_in_repo": "mobileclip_blt.pt",
-        "local_path": "./models/",
+        "local_path": "./models/mobileclip_blt.pt",
     }
 ]
 
@@ -65,7 +65,7 @@ def download_models_curses(stdscr):
     downloaded = 0
     for i, item in enumerate(MODEL_FILES):
         stdscr.erase()
-        msg = f"Downloading {i+1}/{total_files}: {os.path.basename(item['local_path'])}"
+        msg = f"Downloading {i+1}/{total_files}: {os.path.basename(item['path_in_repo'])}"
         stdscr.addstr(h//2-2, (w-len(msg))//2, msg, curses.A_BOLD)
         stdscr.refresh()
         # Ensure parent folder exists

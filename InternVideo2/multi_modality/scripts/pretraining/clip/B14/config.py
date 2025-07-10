@@ -1,6 +1,9 @@
 from configs.data import *
 from configs.model import *
 import os as __os
+from huggingface_hub import hf_hub_download
+
+HF_REPO = "qingy2024/InternVideo2-B14"
 
 # ========================= data ==========================
 train_corpus = "slim_kinetics"
@@ -90,10 +93,10 @@ model = dict(
     freeze_mobileclip_text=True,
     open_text_projection=False,
     open_text_lora=False,
-    vision_ckpt_path=__os.path.join(root_path,"IV2/models/stage1/B14/B14_dist_1B_stage2/pytorch_model.bin"),
+    vision_ckpt_path=hf_hub_download(repo_id=HF_REPO, filename="internvideo2_vision.pt"),
     load_vision_ckpt_from_internvideo2_stage2=False,
-    mobileclip_ckpt_path=__os.path.join(root_path, "IV2/models/mobileclip_blt.pt"),
-    extra_ckpt_path=__os.path.join(root_path, "IV2/models/clip/B14/pytorch_model.bin")
+    mobileclip_ckpt_path=hf_hub_download(repo_id=HF_REPO, filename="mobileclip_blt.pt"),
+    extra_ckpt_path=hf_hub_download(repo_id=HF_REPO, filename="internvideo2_clip.pt")
 )
 
 criterion = dict(
