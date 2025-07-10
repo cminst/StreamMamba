@@ -1,6 +1,6 @@
 from configs.data import *
 from configs.model import *
-import os as __os
+from huggingface_hub import hf_hub_download as __hf_hub_download
 
 # ========================= data ==========================
 train_corpus = "slim_kinetics"
@@ -11,13 +11,11 @@ num_workers = 2
 
 stop_key = None
 
-root_path = __os.environ.get("DATASET_ROOT", "/root/")
-
 # ========================= input ==========================
 num_frames = 8
 num_frames_test = 8
-batch_size = 8      # Use 16 for 5090
-batch_size_test = 8 # Use 16 for 5090
+batch_size = 8
+batch_size_test = 8
 max_txt_l = 32
 
 size_t = 224
@@ -37,6 +35,9 @@ inputs = dict(
 )
 
 # ========================= model ==========================
+__HF_REPO = "qingy2024/InternVideo2-B14"
+
+
 model = dict(
     model_cls="InternVideo2_CLIP_small",
     vision_encoder=dict(
@@ -90,25 +91,24 @@ model = dict(
     freeze_mobileclip_text=True,
     open_text_projection=False,
     open_text_lora=False,
-    vision_ckpt_path=__os.path.join(root_path,"IV2/models/stage1/B14/B14_dist_1B_stage2/pytorch_model.bin"),
+    vision_ckpt_path=__hf_hub_download(repo_id=__HF_REPO, filename="internvideo2_vision.pt"),
     load_vision_ckpt_from_internvideo2_stage2=False,
-    mobileclip_ckpt_path=__os.path.join(root_path, "IV2/models/mobileclip_blt.pt"),
-    extra_ckpt_path=__os.path.join(root_path, "IV2/models/clip/B14/pytorch_model.bin")
+    mobileclip_ckpt_path=__hf_hub_download(repo_id=__HF_REPO, filename="mobileclip_blt.pt"),
+    extra_ckpt_path=__hf_hub_download(repo_id=__HF_REPO, filename="internvideo2_clip.pt")
 )
 
 criterion = dict(
     loss_weight=dict(
         vtc=1.0,
-    ),  # 0: disabled.
+    ),
 )
 
 optimizer = dict(
     opt="adamW",
     lr=1e-5,
-    opt_betas=[0.9, 0.98],  # default
+    opt_betas=[0.9, 0.98],
     weight_decay=0.01,
-    max_grad_norm=0.7,  # requires a positive float, use -1 to disable
-    # use a different lr for some modules, e.g., larger lr for new modules
+    max_grad_norm=0.7,
     different_lr=dict(enable=True, module_names=["streaming_vision_encoder.vit_lite"], lr=2e-6),
 )
 
@@ -120,7 +120,7 @@ evaluation = dict(
     eval_frame_ensemble="concat",  # [concat, max, mean, lse]
     eval_x_only=False,
     k_test=128,
-    eval_offload=True,  # offload gpu tensors to cpu to save memory.
+    eval_offload=True,
 )
 
 use_half_precision = True
@@ -130,8 +130,8 @@ gradient_checkpointing = True
 # ========================= wandb ==========================
 wandb = dict(
     enable=True,
-    entity="qingy2019-conker-mobile-inc-",  # username or team name to store the runs, see https://docs.wandb.ai/ref/python/init
-    project="window_iv2",  # setup in your command line
+    entity="qingy2019-conker-mobile-inc-",
+    project="window_iv2",
 )
 dist_url = "env://"
 device = "cuda"
@@ -155,7 +155,7 @@ eval_video_filename = "1.mp4"
 eval_plot_output_dir = 'scripts/pretraining/clip/B14/cosine_sim_graphs'
 
 auto_resume = True
-pretrained_path = ""  # path to pretrained model weights, for resume only?
+pretrained_path = ""
 
 deepspeed = dict(
     enable=True,

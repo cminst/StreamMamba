@@ -1,6 +1,6 @@
 from configs.data import *
 from configs.model import *
-from huggingface_hub import hf_hub_download
+from huggingface_hub import hf_hub_download as __hf_hub_download
 
 # ========================= data ==========================
 train_corpus = "slim_kinetics"
@@ -14,8 +14,8 @@ stop_key = None
 # ========================= input ==========================
 num_frames = 8
 num_frames_test = 8
-batch_size = 8      # Use 16 for 5090
-batch_size_test = 8 # Use 16 for 5090
+batch_size = 8
+batch_size_test = 8
 max_txt_l = 32
 
 size_t = 224
@@ -35,7 +35,7 @@ inputs = dict(
 )
 
 # ========================= model ==========================
-HF_REPO = "qingy2024/InternVideo2-B14"
+__HF_REPO = "qingy2024/InternVideo2-B14"
 
 model = dict(
     model_cls="InternVideo2_CLIP_small",
@@ -90,10 +90,10 @@ model = dict(
     freeze_mobileclip_text=True,
     open_text_projection=False,
     open_text_lora=False,
-    vision_ckpt_path=hf_hub_download(repo_id=HF_REPO, filename="internvideo2_vision.pt"),
+    vision_ckpt_path=__hf_hub_download(repo_id=__HF_REPO, filename="internvideo2_vision.pt"),
     load_vision_ckpt_from_internvideo2_stage2=False,
-    mobileclip_ckpt_path=hf_hub_download(repo_id=HF_REPO, filename="mobileclip_blt.pt"),
-    extra_ckpt_path=hf_hub_download(repo_id=HF_REPO, filename="internvideo2_clip.pt")
+    mobileclip_ckpt_path=__hf_hub_download(repo_id=__HF_REPO, filename="mobileclip_blt.pt"),
+    extra_ckpt_path=__hf_hub_download(repo_id=__HF_REPO, filename="internvideo2_clip.pt")
 )
 
 criterion = dict(
