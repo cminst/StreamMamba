@@ -35,7 +35,7 @@ inputs = dict(
 )
 
 # ========================= model ==========================
-__HF_REPO = "qingy2024/InternVideo2-B14"
+model_repo = "qingy2024/InternVideo2-B14"
 
 model = dict(
     model_cls="InternVideo2_CLIP_small",
@@ -90,10 +90,10 @@ model = dict(
     freeze_mobileclip_text=True,
     open_text_projection=False,
     open_text_lora=False,
-    vision_ckpt_path=__hf_hub_download(repo_id=__HF_REPO, filename="internvideo2_vision.pt"),
+    vision_ckpt_path=__hf_hub_download(repo_id=model_repo, filename="internvideo2_vision.pt"),
     load_vision_ckpt_from_internvideo2_stage2=False,
-    mobileclip_ckpt_path=__hf_hub_download(repo_id=__HF_REPO, filename="mobileclip_blt.pt"),
-    extra_ckpt_path=__hf_hub_download(repo_id=__HF_REPO, filename="internvideo2_clip.pt")
+    mobileclip_ckpt_path=__hf_hub_download(repo_id=model_repo, filename="mobileclip_blt.pt"),
+    extra_ckpt_path=__hf_hub_download(repo_id=model_repo, filename="internvideo2_clip.pt")
 )
 
 criterion = dict(
