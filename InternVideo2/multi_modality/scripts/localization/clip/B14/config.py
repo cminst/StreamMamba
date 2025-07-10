@@ -70,7 +70,7 @@ model = dict(
     ),
     streaming_vision_encoder = dict(
         vit_lite_embed_dim = 768,
-        rnn_type = 'cross_mamba_film',
+        rnn_type = 'tau_mamba_film',
         rnn_hidden_size = 1024,
         rnn_num_layers = 3,
         rnn_dropout = 0.0,
@@ -172,3 +172,10 @@ contrastive_ramp_iters = 500
 # ====================== unfreeze mobileclip =====================
 enable_mobileclip_ft = False
 unfreeze_mobileclip_pct = 0.5
+
+# ====================== tau training =====================
+tau_freeze_pct = 0.5
+tau_reg_pct = 0.25
+tau_ramp_iters = 500
+tau_loss_weight = 0.1
+cross_mamba_film_ckpt = ""

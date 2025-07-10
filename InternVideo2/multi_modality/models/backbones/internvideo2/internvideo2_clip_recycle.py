@@ -77,9 +77,18 @@ class StreamingInternVideo2Student(nn.Module):
                 clip_dim=teacher_clip_embed_dim,
                 text_dim=text_dim,
             )
+        elif self.rnn_type == 'tau_mamba_film':
+            text_dim = text_embed_dim if text_embed_dim is not None else teacher_clip_embed_dim
+            from .video_mamba_block import TauMambaFiLM
+            self.rnn = TauMambaFiLM(
+                in_dim=vit_lite_embed_dim,
+                hidden_dim=rnn_hidden_size,
+                clip_dim=teacher_clip_embed_dim,
+                text_dim=text_dim,
+            )
         else:
             raise NotImplementedError(
-                f"Unsupported RNN type: {rnn_type}. Choose 'lstm', 'gru', 'mamba' or 'cross_mamba_film'."
+                f"Unsupported RNN type: {rnn_type}. Choose 'lstm', 'gru', 'mamba', 'cross_mamba_film' or 'tau_mamba_film'."
             )
 
         # Fully Connected layers to project RNN output to teacher's embedding dimension
@@ -97,7 +106,7 @@ class StreamingInternVideo2Student(nn.Module):
             self.output_fc = nn.Identity()
 
     def init_hidden(self, batch_size, device):
-        if self.rnn_type in ['mamba', 'cross_mamba_film']:
+        if self.rnn_type in ['mamba', 'cross_mamba_film', 'tau_mamba_film']:
             return self.rnn.init_state(batch_size, device)
         h0 = torch.zeros(self.rnn_num_layers, batch_size, self.rnn_hidden_size).to(device)
         if self.rnn_type == 'lstm':
@@ -105,7 +114,7 @@ class StreamingInternVideo2Student(nn.Module):
             return (h0, c0)
         return h0
 
-    def forward(self, single_frame_input, prev_hidden_state, gamma=None, beta=None):
+    def forward(self, single_frame_input, prev_hidden_state, gamma=None, beta=None, tau=None):
         """
         Processes a single frame (or a small chunk of frames) and updates the hidden state.
 
@@ -135,6 +144,9 @@ class StreamingInternVideo2Student(nn.Module):
             return student_embedding, current_hidden_state
         elif self.rnn_type == 'cross_mamba_film':
             student_embedding, current_hidden_state = self.rnn(frame_feature, prev_hidden_state, gamma, beta)
+            return student_embedding, current_hidden_state
+        elif self.rnn_type == 'tau_mamba_film':
+            student_embedding, current_hidden_state = self.rnn(frame_feature, prev_hidden_state, gamma, beta, tau)
             return student_embedding, current_hidden_state
 
         rnn_input = frame_feature.unsqueeze(1)
