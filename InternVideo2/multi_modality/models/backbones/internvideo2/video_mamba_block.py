@@ -121,24 +121,44 @@ class TauMamba(VideoMambaBlock):
 class TauMambaFiLM(CrossMambaFiLM):
     """CrossMambaFiLM with additional tau scaling."""
 
-    def __init__(self, in_dim, hidden_dim, clip_dim, num_heads=4, d_state=64, d_conv=4, text_dim=None):
+    def __init__(
+        self,
+        in_dim,
+        hidden_dim,
+        clip_dim,
+        num_heads=4,
+        d_state=64,
+        d_conv=4,
+        text_dim=None,
+        tau_min = 0.05,
+        tau_max = 0.995
+    ):
         super().__init__(in_dim, hidden_dim, clip_dim, num_heads, d_state, d_conv, text_dim)
         if text_dim is None:
             text_dim = clip_dim
+
+        self.tau_min = tau_min
+        self.tau_max = tau_max
+
         self.tau_mlp = nn.Sequential(
+            nn.LayerNorm(text_dim), # stabilise text scale
             nn.Linear(text_dim, hidden_dim // 4),
             nn.SiLU(),
             nn.Linear(hidden_dim // 4, 1),
         )
+
         with torch.no_grad():
             self.register_buffer("A_base", (-torch.exp(self.ssm.A_log)).clone())
 
         # initialize to output constant 0.9
         for m in self.tau_mlp.modules():
             if isinstance(m, nn.Linear):
-                nn.init.zeros_(m.weight)
+                nn.init.kaiming_uniform_(m.weight, a=math.sqrt(5))
                 nn.init.zeros_(m.bias)
-        nn.init.constant_(self.tau_mlp[-1].bias, math.log(0.9 / 0.1))
+
+        tau0 = 0.9
+        logit0 = math.log((tau0 - tau_min) / (tau_max - tau0))
+        self.tau_mlp[-1].bias.data.fill_(logit0)
 
     @torch.no_grad()
     def prepare_prompt(self, prompt_vec):
