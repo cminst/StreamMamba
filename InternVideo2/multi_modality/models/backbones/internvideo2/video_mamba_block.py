@@ -106,8 +106,10 @@ class TauMamba(VideoMambaBlock):
     def forward(self, frame_feat, state, tau=None):
         conv_state, ssm_state = state
         if tau is not None:
-            # Scale the SSM state to mimic time-constant scaling
-            ssm_state = ssm_state * tau.view(-1, 1, 1, 1)
+            # Apply tau by scaling the transition matrix A once per step
+            self.ssm.A_scale = tau.squeeze()
+        else:
+            self.ssm.A_scale = None
         x = self.pre_norm(frame_feat)
         gated = self.input_proj(x) * torch.sigmoid(self.in_gate(x))
         out, conv_state, ssm_state = self.ssm.step(gated.unsqueeze(1), conv_state, ssm_state)
@@ -171,7 +173,9 @@ class TauMambaFiLM(CrossMambaFiLM):
             frame_feat = gamma * frame_feat + beta
         conv_state, ssm_state = state
         if tau is not None:
-            ssm_state = ssm_state * tau.view(-1, 1, 1, 1)
+            self.ssm.A_scale = tau.squeeze()
+        else:
+            self.ssm.A_scale = None
         x = self.pre_norm(frame_feat)
         gated = self.input_proj(x) * torch.sigmoid(self.in_gate(x))
         out, conv_state, ssm_state = self.ssm.step(gated.unsqueeze(1), conv_state, ssm_state)

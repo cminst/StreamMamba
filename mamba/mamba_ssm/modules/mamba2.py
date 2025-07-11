@@ -305,6 +305,8 @@ class Mamba2(nn.Module, PyTorchModelHubMixin):
 
         x, B, C = torch.split(xBC, [self.d_ssm, self.ngroups * self.d_state, self.ngroups * self.d_state], dim=-1)
         A = -torch.exp(self.A_log.float())  # (nheads,)
+        if hasattr(self, "A_scale") and self.A_scale is not None:
+            A = A * self.A_scale.to(A.dtype)
 
         # SSM step
         if selective_state_update is None:
