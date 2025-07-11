@@ -172,7 +172,7 @@ class Mamba2(nn.Module, PyTorchModelHubMixin):
             conv_state, ssm_state = self._get_states_from_cache(inference_params, inference_batch)
             if inference_params.seqlen_offset > 0:
                 # The states are updated inplace
-                out, _, _ = self.step(u, conv_state, ssm_state)
+                out, _, _ = self.step(u, conv_state, ssm_state, A_scale=getattr(self, "A_scale", None))
                 return out
 
         zxbcdt = self.in_proj(u)  # (B, L, d_in_proj) or (B * L, d_in_proj)
@@ -275,7 +275,13 @@ class Mamba2(nn.Module, PyTorchModelHubMixin):
             out = self.out_proj(y)
         return out
 
-    def step(self, hidden_states, conv_state, ssm_state):
+    def step(self, hidden_states, conv_state, ssm_state, A_scale=None):
+        """
+        hidden_states: Input tensor for step
+        conv_state: Convolution state
+        ssm_state: SSM state
+        A_scale: Optional scale factor (tau) for the A matrix
+        """
         dtype = hidden_states.dtype
         assert hidden_states.shape[1] == 1, "Only support decoding with 1 token at a time for now"
         zxbcdt = self.in_proj(hidden_states.squeeze(1))  # (B 2D)
@@ -305,6 +311,10 @@ class Mamba2(nn.Module, PyTorchModelHubMixin):
 
         x, B, C = torch.split(xBC, [self.d_ssm, self.ngroups * self.d_state, self.ngroups * self.d_state], dim=-1)
         A = -torch.exp(self.A_log.float())  # (nheads,)
+        if A_scale is not None:
+            A = A * A_scale.to(A.dtype)
+        elif hasattr(self, "A_scale") and self.A_scale is not None:
+            A = A * self.A_scale.to(A.dtype)
 
         # SSM step
         if selective_state_update is None:

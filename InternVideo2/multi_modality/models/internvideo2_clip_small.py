@@ -195,7 +195,7 @@ class InternVideo2_CLIP_small(nn.Module):
 
         return vfeat
 
-    def encode_streaming_vision(self, image, prev_hidden_state, gamma=None, beta=None):
+    def encode_streaming_vision(self, image, prev_hidden_state, gamma=None, beta=None, tau=None):
         """Encode image/video frames using the streaming ViT.
 
         Args:
@@ -221,6 +221,7 @@ class InternVideo2_CLIP_small(nn.Module):
             prev_hidden_state=prev_hidden_state,
             gamma=gamma,
             beta=beta,
+            tau=tau,
         )
 
         if self.config.model.use_streaming_vision_align:
@@ -230,7 +231,7 @@ class InternVideo2_CLIP_small(nn.Module):
 
         return vision_embeds_aligned, new_hidden_state
 
-    def get_streaming_vid_feat(self, frames: torch.Tensor, prev_hidden_state, gamma=None, beta=None):
+    def get_streaming_vid_feat(self, frames: torch.Tensor, prev_hidden_state, gamma=None, beta=None, tau=None):
         """Return features for a single frame using the streaming ViT.
 
         Args:
@@ -254,6 +255,7 @@ class InternVideo2_CLIP_small(nn.Module):
                 prev_hidden_state=prev_hidden_state,
                 gamma=gamma,
                 beta=beta,
+                tau=tau,
             )
 
             # vfeat = self.vision_proj(vfeat)

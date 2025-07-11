@@ -59,4 +59,4 @@ class LocalizationDataset(BaseDataset):
         frames, fps = _read_video_full(video_path)
         frames = self.transform(frames)
 
-        return frames, caption, start_time, end_time
+        return frames, caption, start_time, end_time, fps
