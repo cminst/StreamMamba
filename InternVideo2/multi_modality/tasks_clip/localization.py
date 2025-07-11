@@ -21,22 +21,24 @@ logger = logging.getLogger(__name__)
 
 def localization_collate_fn(batch):
     """Pad variable length videos and return tensors."""
-    vids, caps, starts, ends, lens = [], [], [], [], []
-    max_len = max(v.shape[0] for v, _, _, _ in batch)
-    for video, cap, s, e in batch:
+    vids, caps, starts, ends, lens, fpss = [], [], [], [], [], []
+    max_len = max(v.shape[0] for v, _, _, _, _ in batch)
+    for video, cap, s, e, fps in batch:
         pad = torch.zeros(max_len, *video.shape[1:], dtype=video.dtype)
         pad[: video.shape[0]] = video
         vids.append(pad)
         caps.append(cap)
-        starts.append(int(s))
-        ends.append(int(e))
+        starts.append(int(s * fps))
+        ends.append(int(e * fps))
         lens.append(video.shape[0])
+        fpss.append(fps)
     return (
         torch.stack(vids),
         caps,
         torch.tensor(starts, dtype=torch.long),
         torch.tensor(ends, dtype=torch.long),
         torch.tensor(lens, dtype=torch.long),
+        torch.tensor(fpss, dtype=torch.float),
     )
 
 
@@ -109,40 +111,53 @@ def train(model, train_loaders, optimizer, tokenizer, epoch, global_step, device
     reg_end = unfreeze_step + int(num_batches * getattr(config, 'tau_reg_pct', 0.25))
     ramp_iters = getattr(config, 'tau_ramp_iters', 1)
     tau_loss_weight = getattr(config, 'tau_loss_weight', 0.1)
-    for i, (videos, text, start_times, end_times, lengths) in enumerate(iterator):
+    for i, (videos, text, start_times, end_times, lengths, fpss) in enumerate(iterator):
         videos = videos.to(device, non_blocking=True)
         text_input = tokenizer(text, padding=True, return_tensors="pt").to(device)
 
         with torch.cuda.amp.autocast(enabled=config.use_half_precision, dtype=data_type):
             text_feat = model_without_ddp.encode_text(text_input)
             gamma, beta, tau_pred = model_without_ddp.streaming_vision_encoder.rnn.prepare_prompt(text_feat)
+
             if config.model.freeze_tau_mlp or i < unfreeze_step:
                 tau = tau_pred.detach() * 0 + 0.9
             else:
                 tau = tau_pred
+
             if i == unfreeze_step and config.model.freeze_tau_mlp:
                 unfreeze_tau_mlp(model_without_ddp, optimizer, scheduler, config)
+
             state = model_without_ddp.streaming_vision_encoder.init_hidden(videos.size(0), device)
             all_scores = []
+
             for t in range(videos.shape[1]):
                 frame = videos[:, t]
                 vfeat, state = model_without_ddp.get_streaming_vid_feat(frame, state, gamma=gamma, beta=beta, tau=tau)
                 score = torch.nn.functional.cosine_similarity(vfeat, text_feat, dim=-1)
                 all_scores.append(score)
+
             scores = torch.stack(all_scores, dim=1)
 
-            labels = torch.zeros_like(scores)
-            for b in range(videos.size(0)):
-                labels[b, start_times[b]: end_times[b]] = 1.0
+            # Create labels in a vectorized manner for efficiency.
+            # A time vector is broadcasted against start and end times.
+            time_vector = torch.arange(scores.shape[1], device=device)[None, :]
+            start_frames = start_times.to(device)[:, None]
+            # Clamp end times to the actual video length to avoid applying labels to padding.
+            end_frames = torch.min(end_times.to(device), lengths.to(device))[:, None]
+            labels = ((time_vector >= start_frames) & (time_vector < end_frames)).float()
+
             bce = torch.nn.functional.binary_cross_entropy_with_logits(scores, labels)
             peak = ((start_times + end_times) // 2).to(device)
             ce = torch.nn.functional.cross_entropy(scores, peak)
-            tau_target = torch.exp(-1.0 / ((end_times - start_times).float() / 2))
+
+            tau_target = torch.exp(-1.0 / (((end_times - start_times).float() / fpss.to(device)) / 2))
+
             if i >= unfreeze_step and i < reg_end:
                 ramp = min((i - unfreeze_step) / float(ramp_iters), 1.0)
                 tau_lambda = tau_loss_weight * ramp
             else:
                 tau_lambda = 0.0
+
             tau_loss = torch.abs(tau.squeeze(-1) - tau_target.to(device)).mean()
             loss = bce + ce + tau_lambda * tau_loss
 
