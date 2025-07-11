@@ -81,7 +81,7 @@ class CrossMambaFiLM(VideoMambaBlock):
             frame_feat = gamma * frame_feat + beta
         return super().forward(frame_feat, state)
 
-class TauMambaFiLM(CrossMambaFiLM):
+class StreamMamba(CrossMambaFiLM):
     """CrossMambaFiLM with additional tau scaling."""
 
     def __init__(

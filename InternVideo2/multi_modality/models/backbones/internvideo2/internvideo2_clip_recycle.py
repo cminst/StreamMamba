@@ -79,8 +79,8 @@ class StreamingInternVideo2Student(nn.Module):
             )
         elif self.rnn_type == 'tau_mamba_film':
             text_dim = text_embed_dim if text_embed_dim is not None else teacher_clip_embed_dim
-            from .video_mamba_block import TauMambaFiLM
-            self.rnn = TauMambaFiLM(
+            from .video_mamba_block import StreamMamba
+            self.rnn = StreamMamba(
                 in_dim=vit_lite_embed_dim,
                 hidden_dim=rnn_hidden_size,
                 clip_dim=teacher_clip_embed_dim,
