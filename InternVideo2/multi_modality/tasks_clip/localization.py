@@ -97,20 +97,25 @@ def train(model, train_loaders, optimizer, tokenizer, epoch, global_step, device
     header = f"Train Epoch: [{epoch}]"
     log_freq = config.log_freq
 
+
     if config.distributed:
         for d in train_loaders:
             d.sampler.set_epoch(epoch)
+
     train_loader = train_loaders[0] if len(train_loaders) == 1 else None
     if train_loader is None:
         train_loader = train_loaders[0]
 
+
     model_without_ddp = model.module if config.distributed else model
     iterator = metric_logger.log_every(train_loader, log_freq, header)
     num_batches = len(train_loader)
+
     unfreeze_step = int(num_batches * getattr(config, 'tau_freeze_pct', 0.5))
     reg_end = unfreeze_step + int(num_batches * getattr(config, 'tau_reg_pct', 0.25))
     ramp_iters = getattr(config, 'tau_ramp_iters', 1)
     tau_loss_weight = getattr(config, 'tau_loss_weight', 0.1)
+
     for i, (videos, text, start_times, end_times, lengths, fpss) in enumerate(iterator):
         videos = videos.to(device, non_blocking=True)
         text_input = tokenizer(text, padding=True, return_tensors="pt").to(device)
@@ -138,16 +143,37 @@ def train(model, train_loaders, optimizer, tokenizer, epoch, global_step, device
 
             scores = torch.stack(all_scores, dim=1)
 
-            # Create labels in a vectorized manner for efficiency.
+            # Create labels from the localization data.
             # A time vector is broadcasted against start and end times.
+            #
+            # The labels represent binary masks, which indicate whether each time step
+            # corresponds to an action occurrence in the video. The mask has shape [B, T],
+            # where:
+            # - B = batch size
+            # - T = number of time steps (video frames)
+            #
+            # For each video in the batch, we create a binary sequence where:
+            # 1.0 = time step is within the ground-truth action interval
+            # 0.0 = time step is outside the action interval
+            #
+            # This is done by broadcasting comparisons between:
+            # - time_vector: [1, T] tensor containing all time indices
+            # - start_frames: [B, 1] tensor of ground-truth start times
+            # - end_frames: [B, 1] tensor of ground-truth end times (clamped to video length)
+            #
+            # The final labels tensor is used for binary cross-entropy loss calculation.
             time_vector = torch.arange(scores.shape[1], device=device)[None, :]
             start_frames = start_times.to(device)[:, None]
+
             # Clamp end times to the actual video length to avoid applying labels to padding.
+            # This is so that we don't create labels for time steps beyond the actual video duration.
             end_frames = torch.min(end_times.to(device), lengths.to(device))[:, None]
             labels = ((time_vector >= start_frames) & (time_vector < end_frames)).float()
 
             bce = torch.nn.functional.binary_cross_entropy_with_logits(scores, labels)
-            peak = ((start_times + end_times) // 2).to(device)
+
+            peak = ((start_times + end_times) // 2)
+            peak = torch.min(peak, lengths.to(device) - 1).to(device, dtype=torch.long)
             ce = torch.nn.functional.cross_entropy(scores, peak)
 
             tau_target = torch.exp(-1.0 / (((end_times - start_times).float() / fpss.to(device)) / 2))
@@ -160,6 +186,7 @@ def train(model, train_loaders, optimizer, tokenizer, epoch, global_step, device
 
             tau_loss = torch.abs(tau.squeeze(-1) - tau_target.to(device)).mean()
             loss = bce + ce + tau_lambda * tau_loss
+
 
         if hasattr(config, "deepspeed") and config.deepspeed.enable:
             model.backward(loss)
@@ -180,11 +207,13 @@ def train(model, train_loaders, optimizer, tokenizer, epoch, global_step, device
                 optimizer.step()
             scheduler.step()
 
+
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         global_step += 1
 
         if config.debug and (i + 1) % 5 == 0:
             break
+
 
     metric_logger.synchronize_between_processes()
     logger.info(f"Averaged stats: {metric_logger.global_avg()}")
