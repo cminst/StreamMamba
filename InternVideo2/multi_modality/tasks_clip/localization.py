@@ -64,7 +64,7 @@ def setup_dataloaders(config):
 
 def unfreeze_tau_mlp(model, optimizer, scheduler, config):
     """Unfreeze tau MLP parameters and add to optimizer."""
-    logger.info("Unfreezing tau MLP parameters")
+    logger.info("--- Unfreezing tau MLP parameters! ---")
     submodule = model.streaming_vision_encoder.rnn.tau_mlp
     for p in submodule.parameters():
         p.requires_grad = True
@@ -96,7 +96,6 @@ def train(model, train_loaders, optimizer, tokenizer, epoch, global_step, device
     metric_logger.add_meter("lr", SmoothedValue(window=1, fmt="{value:.6f}"))
     header = f"Train Epoch: [{epoch}]"
     log_freq = config.log_freq
-
 
     if config.distributed:
         for d in train_loaders:
