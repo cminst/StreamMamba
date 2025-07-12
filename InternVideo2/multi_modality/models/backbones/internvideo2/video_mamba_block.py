@@ -156,3 +156,48 @@ class StreamMamba(CrossMambaFiLM):
         out   = (out + gated) * torch.sigmoid(self.out_gate(out))
         clip_emb = self.proj(out)
         return clip_emb, (conv_state, ssm_state)
+
+
+class SPFSStreamMamba(StreamMamba):
+    """StreamMamba with Self-Predictive Feature Skipping (SPFS)."""
+
+    def __init__(self, *args, pred_rank: int = 32, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        d = self.proj.out_features
+        r = pred_rank
+
+        # Low-rank predictor for the next frame's CLIP embedding
+        self.pred_U = nn.Parameter(torch.randn(d, r))
+        self.pred_V = nn.Linear(self.ssm.d_model, r, bias=False)
+        self.logvar = nn.Linear(self.ssm.d_model, 1)
+
+        self.last_hidden = None
+
+    def predict_next_feat(self, h: torch.Tensor):
+        """Predict next frame's CLIP embedding and uncertainty."""
+        mu = self.pred_V(h) @ self.pred_U.T
+        unc = self.logvar(h).squeeze(-1)
+        return mu, unc
+
+    def forward(self, frame_feat, state, gamma=None, beta=None, tau=None):
+        # Same as StreamMamba.forward but cache the hidden representation
+        if gamma is not None and beta is not None:
+            frame_feat = gamma * frame_feat + beta
+
+        conv_state, ssm_state = state
+        x = self.pre_norm(frame_feat)
+        gated = self.input_proj(x) * torch.sigmoid(self.in_gate(x))
+
+        out, conv_state, ssm_state = self.ssm.step(
+            gated.unsqueeze(1), conv_state, ssm_state, A_scale=tau
+        )
+        out = out.squeeze(1)
+
+        out = (out + gated) * torch.sigmoid(self.out_gate(out))
+
+        # store for next-step prediction
+        self.last_hidden = out.detach()
+
+        clip_emb = self.proj(out)
+        return clip_emb, (conv_state, ssm_state)
