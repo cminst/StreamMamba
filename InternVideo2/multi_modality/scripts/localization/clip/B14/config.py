@@ -70,13 +70,14 @@ model = dict(
     ),
     streaming_vision_encoder = dict(
         vit_lite_embed_dim = 768,
-        rnn_type = 'cross_mamba_film',
+        rnn_type = 'stream_mamba',
         rnn_hidden_size = 1024,
         rnn_num_layers = 3,
         rnn_dropout = 0.0,
         fc_hidden_layers = [768],
         teacher_clip_embed_dim = 768,
         text_embed_dim = 512,
+        pred_rank = 32,
     ),
     mobileclip_type=dict(
         name="mobileclip_b"

@@ -57,6 +57,7 @@ class VideoMambaBlock(nn.Module):
         out = out.squeeze(1)
         out = out + gated
         out = out * torch.sigmoid(self.out_gate(out))
+        self._hidden = out
         clip_emb = self.proj(out)
         return clip_emb, (conv_state, ssm_state)
 
@@ -81,3 +82,31 @@ class CrossMambaFiLM(VideoMambaBlock):
             frame_feat = gamma * frame_feat + beta
         return super().forward(frame_feat, state)
 
+
+
+class StreamMamba(CrossMambaFiLM):
+    """CrossMambaFiLM with a low-rank feature predictor for SPFS."""
+
+    def __init__(self, *args, pred_rank=32, **kw):
+        super().__init__(*args, **kw)
+        d = self.proj.out_features
+        r = pred_rank
+        self.pred_U = nn.Parameter(torch.randn(d, r))
+        self.pred_V = nn.Linear(self.ssm.d_model, r, bias=False)
+        self.logvar = nn.Linear(self.ssm.d_model, 1)
+        self.last_hidden = None
+
+    def forward(self, frame_feat, state, gamma=None, beta=None, tau=None):
+        clip_emb, state = super().forward(frame_feat, state, gamma, beta, tau)
+        # Store hidden representation for next-step prediction
+        self.last_hidden = self._hidden
+        return clip_emb, state
+
+    def predict_next_feat(self, h=None):
+        if h is None:
+            if self.last_hidden is None:
+                raise RuntimeError("No hidden state available for prediction")
+            h = self.last_hidden
+        mu = self.pred_V(h) @ self.pred_U.T
+        unc = self.logvar(h).squeeze(-1)
+        return mu, unc

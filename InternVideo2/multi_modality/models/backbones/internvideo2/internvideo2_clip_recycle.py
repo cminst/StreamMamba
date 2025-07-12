@@ -1,7 +1,7 @@
 from .internvideo2_clip_vision import CrossAttention, AttentiveBlock, AttentionPoolingBlock, RMSNorm, LayerScale, Attention, Mlp, Block, PatchEmbed
 
 from .mobileclip import TextTransformer, ClipTokenizer, VisionTransformer, vit_b16
-from .video_mamba_block import VideoMambaBlock, CrossMambaFiLM
+from .video_mamba_block import VideoMambaBlock, CrossMambaFiLM, StreamMamba
 
 import logging
 import numpy as np
@@ -31,6 +31,7 @@ class StreamingInternVideo2Student(nn.Module):
             fc_hidden_layers=[512], # List of hidden layer sizes for FC part, empty for direct projection
             teacher_clip_embed_dim=768, # Dimension of the teacher's output
             text_embed_dim=None,
+            pred_rank=32,
         ):
         super().__init__()
 
@@ -43,6 +44,7 @@ class StreamingInternVideo2Student(nn.Module):
         self.rnn_hidden_size = rnn_hidden_size
         self.rnn_num_layers = rnn_num_layers
         self.rnn_type = rnn_type.lower()
+        self.pred_rank = pred_rank
         self.text_embed_dim = text_embed_dim if text_embed_dim is not None else teacher_clip_embed_dim
 
         # Note: The RNN input_size should match the output dimension of the MobileCLIP ViT
@@ -77,9 +79,18 @@ class StreamingInternVideo2Student(nn.Module):
                 clip_dim=teacher_clip_embed_dim,
                 text_dim=text_dim,
             )
+        elif self.rnn_type == 'stream_mamba':
+            text_dim = text_embed_dim if text_embed_dim is not None else teacher_clip_embed_dim
+            self.rnn = StreamMamba(
+                in_dim=vit_lite_embed_dim,
+                hidden_dim=rnn_hidden_size,
+                clip_dim=teacher_clip_embed_dim,
+                text_dim=text_dim,
+                pred_rank=pred_rank,
+            )
         else:
             raise NotImplementedError(
-                f"Unsupported RNN type: {rnn_type}. Choose 'lstm', 'gru', 'mamba' or 'cross_mamba_film'."
+                f"Unsupported RNN type: {rnn_type}. Choose 'lstm', 'gru', 'mamba', 'cross_mamba_film' or 'stream_mamba'."
             )
 
         # Fully Connected layers to project RNN output to teacher's embedding dimension
@@ -97,8 +108,11 @@ class StreamingInternVideo2Student(nn.Module):
             self.output_fc = nn.Identity()
 
     def init_hidden(self, batch_size, device):
-        if self.rnn_type in ['mamba', 'cross_mamba_film']:
-            return self.rnn.init_state(batch_size, device)
+        if self.rnn_type in ['mamba', 'cross_mamba_film', 'stream_mamba']:
+            state = self.rnn.init_state(batch_size, device)
+            if self.rnn_type == 'stream_mamba':
+                self.rnn.last_hidden = None
+            return state
         h0 = torch.zeros(self.rnn_num_layers, batch_size, self.rnn_hidden_size).to(device)
         if self.rnn_type == 'lstm':
             c0 = torch.zeros(self.rnn_num_layers, batch_size, self.rnn_hidden_size).to(device)
@@ -126,9 +140,23 @@ class StreamingInternVideo2Student(nn.Module):
         # ViT-Lite expects (B, C, H, W)
 
         if len(single_frame_input.shape) == 5:
-            single_frame_input = single_frame_input.squeeze(2) # Remove the T_chunk dimension
+            single_frame_input = single_frame_input.squeeze(2)  # Remove the T_chunk dimension
 
-        frame_feature, _ = self.vit_lite.extract_features(single_frame_input) # (B, student_embed_dim)
+        if self.rnn_type == 'stream_mamba':
+            threshold = 0.7 if tau is None else tau
+            if self.rnn.last_hidden is not None:
+                mu, logvar = self.rnn.predict_next_feat()
+                conf = torch.exp(-logvar)
+                if torch.all(conf > threshold):
+                    frame_feature = mu
+                else:
+                    frame_feature, _ = self.vit_lite.extract_features(single_frame_input)
+            else:
+                frame_feature, _ = self.vit_lite.extract_features(single_frame_input)
+            student_embedding, current_hidden_state = self.rnn(frame_feature, prev_hidden_state, gamma, beta)
+            return student_embedding, current_hidden_state
+
+        frame_feature, _ = self.vit_lite.extract_features(single_frame_input)  # (B, student_embed_dim)
 
         if self.rnn_type == 'mamba':
             student_embedding, current_hidden_state = self.rnn(frame_feature, prev_hidden_state)
