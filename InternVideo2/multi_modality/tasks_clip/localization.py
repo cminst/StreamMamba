@@ -64,12 +64,20 @@ def setup_dataloaders(config):
     return train_loaders, media_types
 
 
-
-
 def train(model, train_loaders, optimizer_main, optimizer_spfs, tokenizer, epoch, global_step, device, scheduler, scaler, config, data_type):
     model.train()
     metric_logger = MetricLogger(delimiter="  ")
     metric_logger.add_meter("lr", SmoothedValue(window=1, fmt="{value:.6f}"))
+    metric_logger.add_meter("total_loss", SmoothedValue(window=1, fmt="{value:.4f}"))
+    metric_logger.add_meter("pred_loss", SmoothedValue(window=1, fmt="{value:.4f}"))
+    metric_logger.add_meter("skip_loss", SmoothedValue(window=1, fmt="{value:.4f}"))
+    metric_logger.add_meter("current_lambda", SmoothedValue(window=1, fmt="{value:.4f}"))
+    metric_logger.add_meter("alpha_pred_loss", SmoothedValue(window=1, fmt="{value:.4f}"))
+    metric_logger.add_meter("is_phase1", SmoothedValue(window=1, fmt="{value:.0f}"))
+    metric_logger.add_meter("global_step", SmoothedValue(window=1, fmt="{value:.0f}"))
+    metric_logger.add_meter("loc_loss", SmoothedValue(window=1, fmt="{value:.4f}"))
+    metric_logger.add_meter("bce_loss", SmoothedValue(window=1, fmt="{value:.4f}"))
+    metric_logger.add_meter("ce_loss", SmoothedValue(window=1, fmt="{value:.4f}"))
     header = f"Train Epoch: [{epoch}]"
     log_freq = config.log_freq
 
@@ -77,7 +85,10 @@ def train(model, train_loaders, optimizer_main, optimizer_spfs, tokenizer, epoch
         for d in train_loaders:
             d.sampler.set_epoch(epoch)
 
-    train_loader = train_loaders[0] if len(train_loaders) == 1 else train_loaders[0]
+    assert len(train_loaders) > 0, "There must be at least one train DataLoader"
+
+    # Only use the first dataset
+    train_loader = train_loaders[0]
 
     model_without_ddp = model.module if config.distributed else model
     iterator = metric_logger.log_every(train_loader, log_freq, header)
@@ -134,7 +145,7 @@ def train(model, train_loaders, optimizer_main, optimizer_spfs, tokenizer, epoch
                     frame_in = gt_feat
 
                 out, state = rnn(frame_in, state, gamma, beta)
-                if model_without_ddp.config.model.use_streaming_vision_align:
+                if config.model.get('use_streaming_vision_align', False):
                     out = model_without_ddp.streaming_vision_align(out)
                 else:
                     out = model_without_ddp.vision_align(out)
@@ -163,9 +174,12 @@ def train(model, train_loaders, optimizer_main, optimizer_spfs, tokenizer, epoch
 
             if is_phase1 or not spfs_cfg.get("enabled", False):
                 total_loss = pred_loss_all
+                current_lambda = 0.0
+                alpha_pred_loss = 0.0
             else:
                 current_lambda = spfs_cfg.get("lambda_skip_loss", 0.01) * min(1.0, max(0.0, (global_step - phase1_steps) / ramp_up_steps))
-                total_loss = loc_loss + spfs_cfg.get("alpha_pred_loss", 0.2) * pred_loss_all + current_lambda * skip_loss
+                alpha_pred_loss = spfs_cfg.get("alpha_pred_loss", 0.2)
+                total_loss = loc_loss + alpha_pred_loss * pred_loss_all + current_lambda * skip_loss
 
         if hasattr(config, "deepspeed") and config.deepspeed.enable:
             model.backward(total_loss)
@@ -191,6 +205,19 @@ def train(model, train_loaders, optimizer_main, optimizer_spfs, tokenizer, epoch
                 scheduler.step()
 
         metric_logger.update(lr=optimizer_main.param_groups[0]["lr"])
+        metric_logger.update(total_loss=total_loss.item())
+        metric_logger.update(pred_loss=pred_loss_all.item())
+        metric_logger.update(skip_loss=skip_loss.item())
+        metric_logger.update(current_lambda=current_lambda)
+        metric_logger.update(alpha_pred_loss=alpha_pred_loss)
+        metric_logger.update(is_phase1=float(is_phase1))
+        metric_logger.update(global_step=global_step)
+
+        if not is_phase1 and spfs_cfg.get("enabled", False):
+            metric_logger.update(loc_loss=loc_loss.item())
+            metric_logger.update(bce_loss=bce.item())
+            metric_logger.update(ce_loss=ce.item())
+
         global_step += 1
 
         if config.debug and (i + 1) % 5 == 0:
@@ -202,8 +229,6 @@ def train(model, train_loaders, optimizer_main, optimizer_spfs, tokenizer, epoch
         log_dict_to_wandb(metric_logger.get_global_avg_dict(), step=global_step, prefix=f"epoch_{epoch}/")
 
     return global_step
-
-
 
 
 def main(config):
