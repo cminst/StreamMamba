@@ -10,7 +10,7 @@ import torch.distributed as dist
 from dataset import create_dataset, create_loader, create_stateful_sampler
 from dataset.serialize import local_broadcast_process_authkey
 from tasks_clip.shared_utils import setup_model, get_media_types
-from utils.optimizer import add_different_lr, create_optimizer_params_group, extend_optimizer_with_param_groups
+
 from utils.basic_utils import MetricLogger, SmoothedValue, setup_seed
 from utils.config_utils import setup_main
 from utils.distributed import get_rank, is_main_process
@@ -62,32 +62,6 @@ def setup_dataloaders(config):
     return train_loaders, media_types
 
 
-def unfreeze_tau_mlp(model, optimizer, scheduler, config):
-    """Unfreeze tau MLP parameters and add to optimizer."""
-    logger.info("--- Unfreezing tau MLP parameters! ---")
-    submodule = model.streaming_vision_encoder.rnn.tau_mlp
-    for p in submodule.parameters():
-        p.requires_grad = True
-
-    weight_decay = config.optimizer.weight_decay
-    named_param_tuples = []
-    for name, param in submodule.named_parameters():
-        full_name = f"streaming_vision_encoder.rnn.tau_mlp.{name}"
-        wd = 0 if len(param.shape) == 1 or full_name.endswith(".bias") else weight_decay
-        named_param_tuples.append([full_name, param, wd])
-
-    if hasattr(config.optimizer, "different_lr") and config.optimizer.different_lr.enable:
-        diff_names = config.optimizer.different_lr.module_names
-        diff_lr = config.optimizer.different_lr.lr
-    else:
-        diff_names = []
-        diff_lr = None
-
-    named_param_tuples = add_different_lr(named_param_tuples, diff_names, diff_lr, config.optimizer.lr)
-    param_groups = create_optimizer_params_group(named_param_tuples, config.optimizer.lr)
-    extend_optimizer_with_param_groups(optimizer, scheduler, param_groups)
-
-    config.model.freeze_tau_mlp = False
 
 
 def train(model, train_loaders, optimizer, tokenizer, epoch, global_step, device, scheduler, scaler, config, data_type):
@@ -110,10 +84,6 @@ def train(model, train_loaders, optimizer, tokenizer, epoch, global_step, device
     iterator = metric_logger.log_every(train_loader, log_freq, header)
     num_batches = len(train_loader)
 
-    unfreeze_step = int(num_batches * getattr(config, 'tau_freeze_pct', 0.5))
-    reg_end = unfreeze_step + int(num_batches * getattr(config, 'tau_reg_pct', 0.25))
-    ramp_iters = getattr(config, 'tau_ramp_iters', 1)
-    tau_loss_weight = getattr(config, 'tau_loss_weight', 0.1)
 
     for i, (videos, text, start_times, end_times, lengths, fpss) in enumerate(iterator):
         videos = videos.to(device, non_blocking=True)
@@ -121,22 +91,14 @@ def train(model, train_loaders, optimizer, tokenizer, epoch, global_step, device
 
         with torch.cuda.amp.autocast(enabled=config.use_half_precision, dtype=data_type):
             text_feat = model_without_ddp.encode_text(text_input)
-            gamma, beta, tau_pred = model_without_ddp.streaming_vision_encoder.rnn.prepare_prompt(text_feat)
-
-            if config.model.freeze_tau_mlp or i < unfreeze_step:
-                tau = tau_pred.detach() * 0 + 0.9
-            else:
-                tau = tau_pred
-
-            if i == unfreeze_step and config.model.freeze_tau_mlp:
-                unfreeze_tau_mlp(model_without_ddp, optimizer, scheduler, config)
+            gamma, beta = model_without_ddp.streaming_vision_encoder.rnn.prepare_prompt(text_feat)
 
             state = model_without_ddp.streaming_vision_encoder.init_hidden(videos.size(0), device)
             all_scores = []
 
             for t in range(videos.shape[1]):
                 frame = videos[:, t]
-                vfeat, state = model_without_ddp.get_streaming_vid_feat(frame, state, gamma=gamma, beta=beta, tau=tau)
+                vfeat, state = model_without_ddp.get_streaming_vid_feat(frame, state, gamma=gamma, beta=beta)
                 score = torch.nn.functional.cosine_similarity(vfeat, text_feat, dim=-1)
                 all_scores.append(score)
 
@@ -175,16 +137,7 @@ def train(model, train_loaders, optimizer, tokenizer, epoch, global_step, device
             peak = torch.min(peak, lengths.to(device) - 1).to(device, dtype=torch.long)
             ce = torch.nn.functional.cross_entropy(scores, peak)
 
-            tau_target = torch.exp(-1.0 / (((end_times - start_times).float() / fpss.to(device)) / 2))
-
-            if i >= unfreeze_step and i < reg_end:
-                ramp = min((i - unfreeze_step) / float(ramp_iters), 1.0)
-                tau_lambda = tau_loss_weight * ramp
-            else:
-                tau_lambda = 0.0
-
-            tau_loss = torch.abs(tau.squeeze(-1) - tau_target.to(device)).mean()
-            loss = bce + ce + tau_lambda * tau_loss
+            loss = bce + ce
 
 
         if hasattr(config, "deepspeed") and config.deepspeed.enable:
@@ -253,10 +206,6 @@ def main(config):
         find_unused_parameters=True,
         num_steps_per_epoch=num_steps_per_epoch,
     )
-    # freeze tau_mlp initially
-    for p in model_without_ddp.streaming_vision_encoder.rnn.tau_mlp.parameters():
-        p.requires_grad = False
-    config.model.freeze_tau_mlp = True
 
     ckpt = config.model.get('cross_mamba_film_ckpt', '')
     if ckpt:

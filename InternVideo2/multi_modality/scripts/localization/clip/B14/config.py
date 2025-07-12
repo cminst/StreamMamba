@@ -70,7 +70,7 @@ model = dict(
     ),
     streaming_vision_encoder = dict(
         vit_lite_embed_dim = 768,
-        rnn_type = 'stream_mamba',
+        rnn_type = 'cross_mamba_film',
         rnn_hidden_size = 1024,
         rnn_num_layers = 3,
         rnn_dropout = 0.0,
@@ -166,9 +166,5 @@ contrastive_ramp_iters = 500
 enable_mobileclip_ft = False
 unfreeze_mobileclip_pct = 0.5
 
-# ====================== tau training =====================
-tau_freeze_pct = 0.5
-tau_reg_pct = 0.25
-tau_ramp_iters = 500
-tau_loss_weight = 0.1
+# ====================== FiLM fine-tuning =====================
 cross_mamba_film_ckpt = __hf_hub_download(repo_id=model_repo, filename="cross_mamba_film_ckpt.pt")
