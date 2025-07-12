@@ -131,11 +131,26 @@ def train(model, train_loaders, optimizer, tokenizer, epoch, global_step, device
             end_frames = torch.min(end_times.to(device), lengths.to(device))[:, None]
             labels = ((time_vector >= start_frames) & (time_vector < end_frames)).float()
 
-            bce = torch.nn.functional.binary_cross_entropy_with_logits(scores, labels)
+            # Create a mask that is True for valid frames and False for padded positions.
+            valid_mask = time_vector < lengths.to(device)[:, None]
+
+            # Compute BCE loss only over the valid frames to avoid back-propagating
+            # through the padded regions of the videos.
+            bce = torch.nn.functional.binary_cross_entropy_with_logits(
+                scores,
+                labels,
+                reduction="none",
+            )
+            bce = (bce * valid_mask.float()).sum() / valid_mask.sum()
+
+            # For cross entropy we also need to ignore logits corresponding to
+            # padded frames so that the softmax normalisation is computed only
+            # over valid time steps for each video in the batch.
+            scores_masked = scores.masked_fill(~valid_mask, float("-inf"))
 
             peak = ((start_times + end_times) // 2)
             peak = torch.min(peak, lengths.to(device) - 1).to(device, dtype=torch.long)
-            ce = torch.nn.functional.cross_entropy(scores, peak)
+            ce = torch.nn.functional.cross_entropy(scores_masked, peak)
 
             loss = bce + ce
 
