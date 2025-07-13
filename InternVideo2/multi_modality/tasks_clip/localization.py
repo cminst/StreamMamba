@@ -66,7 +66,7 @@ def setup_dataloaders(config):
     return train_loaders, media_types
 
 
-def train(model, train_loaders, optimizer_main, optimizer_spfs, tokenizer, epoch, global_step, device, scheduler, scaler, config, data_type):
+def train(model, train_loaders, optimizer, tokenizer, epoch, global_step, device, scheduler, scaler, config, data_type):
     model.train()
     metric_logger = MetricLogger(delimiter="  ")
     metric_logger.add_meter("lr", SmoothedValue(window=1, fmt="{value:.6f}"))
@@ -100,6 +100,16 @@ def train(model, train_loaders, optimizer_main, optimizer_spfs, tokenizer, epoch
     phase1_epochs = spfs_cfg.get("phase1_epochs", 0)
     phase1_steps = phase1_epochs * num_batches
     ramp_up_steps = max(1, int(0.25 * num_batches))
+
+    # Set phase-based parameter freezing at the start of each epoch
+    current_phase = 1 if epoch < phase1_epochs else 2
+
+    # Only call set_phase_freezing if SPFS is enabled
+    if spfs_cfg.get("enabled", False):
+        model_without_ddp.set_phase_freezing(current_phase, spfs_cfg)
+        logger.info(f"Epoch {epoch}: Training in Phase {current_phase} (Phase 1 epochs: {phase1_epochs})")
+    else:
+        logger.info(f"Epoch {epoch}: SPFS disabled, training normally")
 
     for i, (videos, text, start_times, end_times, lengths, fpss) in enumerate(iterator):
         is_phase1 = epoch < phase1_epochs
@@ -189,26 +199,23 @@ def train(model, train_loaders, optimizer_main, optimizer_spfs, tokenizer, epoch
             model.backward(total_loss)
             model.step()
         else:
-            optimizer_main.zero_grad()
-            optimizer_spfs.zero_grad()
+            optimizer.zero_grad()
             if config.use_half_precision:
                 scaler.scale(total_loss).backward()
                 if config.optimizer.max_grad_norm > 0:
-                    scaler.unscale_(optimizer_main)
+                    scaler.unscale_(optimizer)
                     torch.nn.utils.clip_grad_norm_(model.parameters(), config.optimizer.max_grad_norm)
-                scaler.step(optimizer_main)
-                scaler.step(optimizer_spfs)
+                scaler.step(optimizer)
                 scaler.update()
             else:
                 total_loss.backward()
                 if config.optimizer.max_grad_norm > 0:
                     torch.nn.utils.clip_grad_norm_(model.parameters(), config.optimizer.max_grad_norm)
-                optimizer_main.step()
-                optimizer_spfs.step()
+                optimizer.step()
             if not is_phase1 and spfs_cfg.get("enabled", False):
                 scheduler.step()
 
-        metric_logger.update(lr=optimizer_main.param_groups[0]["lr"])
+        metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         metric_logger.update(total_loss=total_loss.item())
         metric_logger.update(pred_loss=pred_loss_all.item())
         metric_logger.update(skip_loss=skip_loss.item())
@@ -227,7 +234,7 @@ def train(model, train_loaders, optimizer_main, optimizer_spfs, tokenizer, epoch
         if (i + 1) % log_freq == 0:
             if is_main_process():
                 log_payload = {
-                    "lr": optimizer_main.param_groups[0]["lr"],
+                    "lr": optimizer.param_groups[0]["lr"],
                     "total_loss": total_loss.item(),
                     "pred_loss": pred_loss_all.item(),
                     "skip_loss": skip_loss.item(),
@@ -288,11 +295,8 @@ def main(config):
         num_steps_per_epoch=num_steps_per_epoch,
     )
 
-    main_params = [p for n, p in model_without_ddp.named_parameters() if 'pred_' not in n and 'logvar' not in n]
-    spfs_params = [p for n, p in model_without_ddp.named_parameters() if 'pred_' in n or 'logvar' in n]
-    optimizer_main = torch.optim.AdamW(main_params, lr=config.optimizer.lr, betas=tuple(config.optimizer.opt_betas), weight_decay=config.optimizer.weight_decay)
-    optimizer_spfs = torch.optim.Adam(spfs_params, lr=config.optimizer.lr)
-    scheduler = create_scheduler(config.scheduler, optimizer_main)
+    optimizer = torch.optim.AdamW(model_without_ddp.parameters(), lr=config.optimizer.lr, betas=tuple(config.optimizer.opt_betas), weight_decay=config.optimizer.weight_decay)
+    scheduler = create_scheduler(config.scheduler, optimizer)
 
     ckpt = config.model.get('cross_mamba_film_ckpt', '')
     if ckpt:
@@ -311,12 +315,19 @@ def main(config):
     logger.info("Start training")
     start_time = time.time()
 
+    # Set initial phase freezing if SPFS is enabled
+    spfs_cfg = getattr(config, "SPFS_CONFIG", {})
+    if spfs_cfg.get("enabled", False):
+        phase1_epochs = spfs_cfg.get("phase1_epochs", 0)
+        initial_phase = 1 if start_epoch < phase1_epochs else 2
+        model_without_ddp.set_phase_freezing(initial_phase, spfs_cfg)
+        logger.info(f"Initialized training with Phase {initial_phase} parameter freezing")
+
     for epoch in range(start_epoch, config.scheduler.epochs):
         global_step = train(
             model,
             train_loaders,
-            optimizer_main,
-            optimizer_spfs,
+            optimizer,
             tokenizer,
             epoch,
             global_step,
@@ -337,8 +348,7 @@ def main(config):
                     del state_dict[k]
             save_obj = {
                 "model": state_dict,
-                "optimizer_main": optimizer_main.state_dict(),
-                "optimizer_spfs": optimizer_spfs.state_dict(),
+                "optimizer": optimizer.state_dict(),
                 "scheduler": scheduler.state_dict(),
                 "scaler": scaler.state_dict(),
                 "config": config,

@@ -137,6 +137,93 @@ class InternVideo2_CLIP_small(nn.Module):
 
         return ret
 
+    def set_phase_freezing(self, phase, spfs_config):
+        """
+        Set parameter freezing based on training phase for SPFS.
+        
+        Args:
+            phase (int): 1 for phase 1, 2 for phase 2
+            spfs_config (dict): SPFS configuration containing freeze settings
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        if phase == 1:
+            freeze_config = spfs_config.get('freeze_phase1', {})
+        else:
+            freeze_config = spfs_config.get('freeze_phase2', {})
+        
+        logger.info(f"Setting Phase {phase} parameter freezing: {freeze_config}")
+        
+        # Freeze/unfreeze vision encoder
+        if freeze_config.get('freeze_vision_encoder', False):
+            for p in self.vision_encoder.parameters():
+                p.requires_grad = False
+            logger.info("Frozen: vision_encoder")
+        else:
+            for p in self.vision_encoder.parameters():
+                p.requires_grad = True
+            logger.info("Unfrozen: vision_encoder")
+                
+        # Freeze/unfreeze text encoder
+        if freeze_config.get('freeze_text_encoder', False):
+            for p in self.text_encoder.parameters():
+                p.requires_grad = False
+            logger.info("Frozen: text_encoder")
+        else:
+            for p in self.text_encoder.parameters():
+                p.requires_grad = True
+            logger.info("Unfrozen: text_encoder")
+                
+        # Freeze/unfreeze vision alignment layers
+        if freeze_config.get('freeze_vision_align', False):
+            for p in self.vision_align.parameters():
+                p.requires_grad = False
+            logger.info("Frozen: vision_align")
+        else:
+            for p in self.vision_align.parameters():
+                p.requires_grad = True
+            logger.info("Unfrozen: vision_align")
+                
+        # Freeze/unfreeze streaming vision alignment layers
+        if hasattr(self, 'streaming_vision_align') and freeze_config.get('freeze_streaming_vision_align', False):
+            for p in self.streaming_vision_align.parameters():
+                p.requires_grad = False
+            logger.info("Frozen: streaming_vision_align")
+        elif hasattr(self, 'streaming_vision_align'):
+            for p in self.streaming_vision_align.parameters():
+                p.requires_grad = True
+            logger.info("Unfrozen: streaming_vision_align")
+                
+        # Freeze/unfreeze RNN non-predictor parameters
+        if freeze_config.get('freeze_rnn_non_pred', False):
+            for name, p in self.streaming_vision_encoder.rnn.named_parameters():
+                if 'pred_' not in name and 'logvar' not in name:
+                    p.requires_grad = False
+            logger.info("Frozen: RNN non-predictor parameters")
+        else:
+            for name, p in self.streaming_vision_encoder.rnn.named_parameters():
+                if 'pred_' not in name and 'logvar' not in name:
+                    p.requires_grad = True
+            logger.info("Unfrozen: RNN non-predictor parameters")
+                    
+        # Freeze/unfreeze predictor heads
+        if freeze_config.get('freeze_predictor_heads', False):
+            for name, p in self.streaming_vision_encoder.rnn.named_parameters():
+                if 'pred_' in name or 'logvar' in name:
+                    p.requires_grad = False
+            logger.info("Frozen: predictor heads")
+        else:
+            for name, p in self.streaming_vision_encoder.rnn.named_parameters():
+                if 'pred_' in name or 'logvar' in name:
+                    p.requires_grad = True
+            logger.info("Unfrozen: predictor heads")
+            
+        # Log summary of trainable parameters
+        trainable_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
+        total_params = sum(p.numel() for p in self.parameters())
+        logger.info(f"Phase {phase}: {trainable_params:,} / {total_params:,} parameters trainable ({trainable_params/total_params*100:.1f}%)")
+
     @torch.no_grad()
     def clip_contrastive_temperature(self):
         """Seems only used during pre-training"""

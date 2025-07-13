@@ -180,4 +180,21 @@ SPFS_CONFIG = dict(
     skip_decision_k=10.0,
     skip_decision_theta=0.7,
     scheduled_sampling_I0=20000.0,
+    # Phase-based parameter freezing
+    freeze_phase1=dict(
+        freeze_vision_encoder=True,      # Freeze main vision encoder
+        freeze_text_encoder=True,        # Freeze text encoder  
+        freeze_vision_align=True,        # Freeze vision alignment layers
+        freeze_streaming_vision_align=True,  # Freeze streaming vision align
+        freeze_rnn_non_pred=False,       # Don't freeze RNN non-predictor params
+        freeze_predictor_heads=False,    # Don't freeze predictor heads
+    ),
+    freeze_phase2=dict(
+        freeze_vision_encoder=False,     # Unfreeze everything in phase 2
+        freeze_text_encoder=False,
+        freeze_vision_align=False,
+        freeze_streaming_vision_align=False,
+        freeze_rnn_non_pred=False,
+        freeze_predictor_heads=False,
+    ),
 )
