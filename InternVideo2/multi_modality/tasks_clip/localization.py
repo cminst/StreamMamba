@@ -61,6 +61,7 @@ def setup_dataloaders(config):
         num_workers=[config.num_workers] * len(media_types),
         is_trains=[True] * len(media_types),
         collate_fns=[localization_collate_fn] * len(media_types),
+        pin_memory=[False] * len(media_types),
     )
 
     return train_loaders, media_types
