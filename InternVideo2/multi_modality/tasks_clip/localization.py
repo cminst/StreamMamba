@@ -166,7 +166,9 @@ def train(model, train_loaders, optimizer_main, optimizer_spfs, tokenizer, epoch
 
             scores_masked = scores.masked_fill(~valid_mask, float("-inf"))
             peak = ((start_times + end_times) // 2)
-            peak = torch.min(peak, lengths.to(device) - 1).to(device, dtype=torch.long)
+
+            # Perform min on CPU tensors first, then move the result to GPU
+            peak = torch.min(peak, lengths - 1).to(device, dtype=torch.long)
             ce = torch.nn.functional.cross_entropy(scores_masked, peak)
 
             loc_loss = bce + ce
