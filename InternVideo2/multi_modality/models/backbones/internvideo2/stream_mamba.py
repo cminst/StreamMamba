@@ -18,18 +18,17 @@ from .pos_embed import get_3d_sincos_pos_embed, get_2d_sincos_pos_embed, get_1d_
 class StreamMamba(nn.Module):
     def __init__(
             self,
-            # Parameters for the MobileCLIP ViT
             vit_lite_model_name="vit_b16",
-            vit_lite_proj_dim=512, # Projection dimension
-            vit_lite_embed_dim=768, # Output dimension
-            # RNN parameters
-            rnn_type='lstm', # 'lstm', 'gru', or 'mamba'
+            vit_lite_proj_dim=512,
+            vit_lite_embed_dim=768,
+
+            rnn_type='lstm', # 'lstm', 'gru', 'mamba', 'cross_mamba_film', or 'stream_mamba'
             rnn_hidden_size=1024,
             rnn_num_layers=1,
-            rnn_dropout=0.0, # Dropout for RNN layers (if rnn_num_layers > 1)
-            # Output FC layers parameters
-            fc_hidden_layers=[512], # List of hidden layer sizes for FC part, empty for direct projection
-            teacher_clip_embed_dim=768, # Dimension of the teacher's output
+            rnn_dropout=0.0,
+
+            fc_hidden_layers=[512],
+            teacher_clip_embed_dim=768,
             text_embed_dim=None,
             pred_rank=32,
         ):
