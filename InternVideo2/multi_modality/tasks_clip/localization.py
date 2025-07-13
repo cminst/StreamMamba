@@ -3,6 +3,7 @@ import os
 import time
 import datetime
 import math
+from tqdm import tqdm
 
 import torch
 import torch.backends.cudnn as cudnn
@@ -223,11 +224,32 @@ def train(model, train_loaders, optimizer_main, optimizer_spfs, tokenizer, epoch
 
         global_step += 1
 
+        if (i + 1) % log_freq == 0:
+            if is_main_process():
+                log_payload = {
+                    "lr": optimizer_main.param_groups[0]["lr"],
+                    "total_loss": total_loss.item(),
+                    "pred_loss": pred_loss_all.item(),
+                    "skip_loss": skip_loss.item(),
+                }
+                if not is_phase1 and spfs_cfg.get("enabled", False):
+                    log_payload["loc_loss"] = loc_loss.item()
+
+                logger.info(f"{header} [Step {i}] {metric_logger}")
+
+            if is_main_process() and config.wandb.enable:
+                # Log the running averages to wandb at each step
+                log_dict_to_wandb(
+                    metric_logger.get_global_avg_dict(),
+                    step=global_step,
+                    prefix="train/"
+                )
+
         if config.debug and (i + 1) % 5 == 0:
             break
 
     metric_logger.synchronize_between_processes()
-    logger.info(f"Averaged stats: {metric_logger.global_avg()}")
+    logger.info(f"Averaged stats for Epoch [{epoch}]: {metric_logger.global_avg()}")
     if is_main_process() and config.wandb.enable:
         log_dict_to_wandb(metric_logger.get_global_avg_dict(), step=global_step, prefix=f"epoch_{epoch}/")
 
