@@ -3,7 +3,7 @@ from configs.model import *
 from huggingface_hub import hf_hub_download as __hf_hub_download
 
 # ========================= data ==========================
-train_corpus = "slim_kinetics"
+train_corpus = "activitynet_captions"
 train_file = "${available_corpus[${train_corpus}]}"  # for lazy evaluation
 test_file = dict(act_val=available_corpus["slim_kinetics_act_val"])
 test_types = ["act_val"]

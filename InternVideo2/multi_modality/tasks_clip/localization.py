@@ -15,6 +15,7 @@ from utils.scheduler import create_scheduler
 
 from utils.basic_utils import MetricLogger, SmoothedValue, setup_seed
 from utils.config_utils import setup_main
+from models import *
 from utils.distributed import get_rank, is_main_process
 from utils.logger import log_dict_to_wandb, setup_wandb
 
