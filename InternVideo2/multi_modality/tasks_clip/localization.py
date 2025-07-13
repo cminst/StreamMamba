@@ -2,6 +2,7 @@ import logging
 import os
 import time
 import datetime
+import math
 
 import torch
 import torch.backends.cudnn as cudnn
@@ -10,6 +11,7 @@ import torch.distributed as dist
 from dataset import create_dataset, create_loader, create_stateful_sampler
 from dataset.serialize import local_broadcast_process_authkey
 from tasks_clip.shared_utils import setup_model, get_media_types
+from utils.scheduler import create_scheduler
 
 from utils.basic_utils import MetricLogger, SmoothedValue, setup_seed
 from utils.config_utils import setup_main
@@ -62,12 +64,20 @@ def setup_dataloaders(config):
     return train_loaders, media_types
 
 
-
-
-def train(model, train_loaders, optimizer, tokenizer, epoch, global_step, device, scheduler, scaler, config, data_type):
+def train(model, train_loaders, optimizer_main, optimizer_spfs, tokenizer, epoch, global_step, device, scheduler, scaler, config, data_type):
     model.train()
     metric_logger = MetricLogger(delimiter="  ")
     metric_logger.add_meter("lr", SmoothedValue(window=1, fmt="{value:.6f}"))
+    metric_logger.add_meter("total_loss", SmoothedValue(window=1, fmt="{value:.4f}"))
+    metric_logger.add_meter("pred_loss", SmoothedValue(window=1, fmt="{value:.4f}"))
+    metric_logger.add_meter("skip_loss", SmoothedValue(window=1, fmt="{value:.4f}"))
+    metric_logger.add_meter("current_lambda", SmoothedValue(window=1, fmt="{value:.4f}"))
+    metric_logger.add_meter("alpha_pred_loss", SmoothedValue(window=1, fmt="{value:.4f}"))
+    metric_logger.add_meter("is_phase1", SmoothedValue(window=1, fmt="{value:.0f}"))
+    metric_logger.add_meter("global_step", SmoothedValue(window=1, fmt="{value:.0f}"))
+    metric_logger.add_meter("loc_loss", SmoothedValue(window=1, fmt="{value:.4f}"))
+    metric_logger.add_meter("bce_loss", SmoothedValue(window=1, fmt="{value:.4f}"))
+    metric_logger.add_meter("ce_loss", SmoothedValue(window=1, fmt="{value:.4f}"))
     header = f"Train Epoch: [{epoch}]"
     log_freq = config.log_freq
 
@@ -75,17 +85,23 @@ def train(model, train_loaders, optimizer, tokenizer, epoch, global_step, device
         for d in train_loaders:
             d.sampler.set_epoch(epoch)
 
-    train_loader = train_loaders[0] if len(train_loaders) == 1 else None
-    if train_loader is None:
-        train_loader = train_loaders[0]
+    assert len(train_loaders) > 0, "There must be at least one train DataLoader"
 
+    # Only use the first dataset
+    train_loader = train_loaders[0]
 
     model_without_ddp = model.module if config.distributed else model
     iterator = metric_logger.log_every(train_loader, log_freq, header)
     num_batches = len(train_loader)
 
+    spfs_cfg = getattr(config, "SPFS_CONFIG", {})
+    phase1_epochs = spfs_cfg.get("phase1_epochs", 0)
+    phase1_steps = phase1_epochs * num_batches
+    ramp_up_steps = max(1, int(0.25 * num_batches))
 
     for i, (videos, text, start_times, end_times, lengths, fpss) in enumerate(iterator):
+        is_phase1 = epoch < phase1_epochs
+
         videos = videos.to(device, non_blocking=True)
         text_input = tokenizer(text, padding=True, return_tensors="pt").to(device)
 
@@ -93,94 +109,119 @@ def train(model, train_loaders, optimizer, tokenizer, epoch, global_step, device
             text_feat = model_without_ddp.encode_text(text_input)
             gamma, beta = model_without_ddp.streaming_vision_encoder.rnn.prepare_prompt(text_feat)
 
+            vit = model_without_ddp.streaming_vision_encoder.vit_lite
+            rnn = model_without_ddp.streaming_vision_encoder.rnn
+
             state = model_without_ddp.streaming_vision_encoder.init_hidden(videos.size(0), device)
-            all_scores = []
+            scores_list = []
+            pred_losses = []
+            skip_probs = []
 
-            for t in range(videos.shape[1]):
-                frame = videos[:, t]
-                vfeat, state = model_without_ddp.get_streaming_vid_feat(frame, state, gamma=gamma, beta=beta)
-                score = torch.nn.functional.cosine_similarity(vfeat, text_feat, dim=-1)
-                all_scores.append(score)
+            feat, _ = vit.extract_features(videos[:, 0])
+            out, state = rnn(feat, state, gamma, beta)
+            if model_without_ddp.config.model.use_streaming_vision_align:
+                out = model_without_ddp.streaming_vision_align(out)
+            else:
+                out = model_without_ddp.vision_align(out)
+            out = out / out.norm(dim=-1, keepdim=True)
+            scores_list.append(torch.nn.functional.cosine_similarity(out, text_feat, dim=-1))
 
-            scores = torch.stack(all_scores, dim=1)
+            for t in range(1, videos.shape[1]):
+                mu_t, logv_t = rnn.predict_next_feat()
+                gt_feat, _ = vit.extract_features(videos[:, t])
 
-            # Create labels from the localization data.
-            # A time vector is broadcasted against start and end times.
-            #
-            # The labels represent binary masks, which indicate whether each time step
-            # corresponds to an action occurrence in the video. The mask has shape [B, T],
-            # where:
-            # - B = batch size
-            # - T = number of time steps (video frames)
-            #
-            # For each video in the batch, we create a binary sequence where:
-            # 1.0 = time step is within the ground-truth action interval
-            # 0.0 = time step is outside the action interval
-            #
-            # This is done by broadcasting comparisons between:
-            # - time_vector: [1, T] tensor containing all time indices
-            # - start_frames: [B, 1] tensor of ground-truth start times
-            # - end_frames: [B, 1] tensor of ground-truth end times (clamped to video length)
-            #
-            # The final labels tensor is used for binary cross-entropy loss calculation.
+                pred_losses.append(0.5 * ((gt_feat - mu_t).pow(2) * torch.exp(-logv_t) + logv_t).mean())
+
+                conf = torch.exp(-logv_t)
+                skip_prob = torch.sigmoid(spfs_cfg.get("skip_decision_k", 10.0) * (conf - spfs_cfg.get("skip_decision_theta", 0.7)))
+                s_t = (skip_prob > 0.5).float().detach() + skip_prob - skip_prob.detach()
+                skip_probs.append(s_t)
+
+                if not is_phase1 and spfs_cfg.get("enabled", False):
+                    p_pred = 1.0 - math.exp(-global_step / spfs_cfg.get("scheduled_sampling_I0", 20000.0))
+                    use_pred = torch.rand(1, device=device) < p_pred
+                    frame_in = mu_t.detach() if use_pred else gt_feat
+                else:
+                    frame_in = gt_feat
+
+                out, state = rnn(frame_in, state, gamma, beta)
+                if config.model.get('use_streaming_vision_align', False):
+                    out = model_without_ddp.streaming_vision_align(out)
+                else:
+                    out = model_without_ddp.vision_align(out)
+                out = out / out.norm(dim=-1, keepdim=True)
+                scores_list.append(torch.nn.functional.cosine_similarity(out, text_feat, dim=-1))
+
+            scores = torch.stack(scores_list, dim=1)
+
             time_vector = torch.arange(scores.shape[1], device=device)[None, :]
             start_frames = start_times.to(device)[:, None]
-
-            # Clamp end times to the actual video length to avoid applying labels to padding.
-            # This is so that we don't create labels for time steps beyond the actual video duration.
             end_frames = torch.min(end_times.to(device), lengths.to(device))[:, None]
             labels = ((time_vector >= start_frames) & (time_vector < end_frames)).float()
-
-            # Create a mask that is True for valid frames and False for padded positions.
             valid_mask = time_vector < lengths.to(device)[:, None]
 
-            # Compute BCE loss only over the valid frames to avoid back-propagating
-            # through the padded regions of the videos.
-            bce = torch.nn.functional.binary_cross_entropy_with_logits(
-                scores,
-                labels,
-                reduction="none",
-            )
+            bce = torch.nn.functional.binary_cross_entropy_with_logits(scores, labels, reduction="none")
             bce = (bce * valid_mask.float()).sum() / valid_mask.sum()
 
-            # For cross entropy we also need to ignore logits corresponding to
-            # padded frames so that the softmax normalisation is computed only
-            # over valid time steps for each video in the batch.
             scores_masked = scores.masked_fill(~valid_mask, float("-inf"))
-
             peak = ((start_times + end_times) // 2)
             peak = torch.min(peak, lengths.to(device) - 1).to(device, dtype=torch.long)
             ce = torch.nn.functional.cross_entropy(scores_masked, peak)
 
-            loss = bce + ce
+            loc_loss = bce + ce
+            pred_loss_all = torch.stack(pred_losses).mean() if pred_losses else torch.tensor(0.0, device=device)
+            skip_loss = torch.stack(skip_probs).mean() if skip_probs else torch.tensor(0.0, device=device)
 
+            if is_phase1 or not spfs_cfg.get("enabled", False):
+                total_loss = pred_loss_all
+                current_lambda = 0.0
+                alpha_pred_loss = 0.0
+            else:
+                current_lambda = spfs_cfg.get("lambda_skip_loss", 0.01) * min(1.0, max(0.0, (global_step - phase1_steps) / ramp_up_steps))
+                alpha_pred_loss = spfs_cfg.get("alpha_pred_loss", 0.2)
+                total_loss = loc_loss + alpha_pred_loss * pred_loss_all + current_lambda * skip_loss
 
         if hasattr(config, "deepspeed") and config.deepspeed.enable:
-            model.backward(loss)
+            model.backward(total_loss)
             model.step()
         else:
-            optimizer.zero_grad()
+            optimizer_main.zero_grad()
+            optimizer_spfs.zero_grad()
             if config.use_half_precision:
-                scaler.scale(loss).backward()
+                scaler.scale(total_loss).backward()
                 if config.optimizer.max_grad_norm > 0:
-                    scaler.unscale_(optimizer)
+                    scaler.unscale_(optimizer_main)
                     torch.nn.utils.clip_grad_norm_(model.parameters(), config.optimizer.max_grad_norm)
-                scaler.step(optimizer)
+                scaler.step(optimizer_main)
+                scaler.step(optimizer_spfs)
                 scaler.update()
             else:
-                loss.backward()
+                total_loss.backward()
                 if config.optimizer.max_grad_norm > 0:
                     torch.nn.utils.clip_grad_norm_(model.parameters(), config.optimizer.max_grad_norm)
-                optimizer.step()
-            scheduler.step()
+                optimizer_main.step()
+                optimizer_spfs.step()
+            if not is_phase1 and spfs_cfg.get("enabled", False):
+                scheduler.step()
 
+        metric_logger.update(lr=optimizer_main.param_groups[0]["lr"])
+        metric_logger.update(total_loss=total_loss.item())
+        metric_logger.update(pred_loss=pred_loss_all.item())
+        metric_logger.update(skip_loss=skip_loss.item())
+        metric_logger.update(current_lambda=current_lambda)
+        metric_logger.update(alpha_pred_loss=alpha_pred_loss)
+        metric_logger.update(is_phase1=float(is_phase1))
+        metric_logger.update(global_step=global_step)
 
-        metric_logger.update(lr=optimizer.param_groups[0]["lr"])
+        if not is_phase1 and spfs_cfg.get("enabled", False):
+            metric_logger.update(loc_loss=loc_loss.item())
+            metric_logger.update(bce_loss=bce.item())
+            metric_logger.update(ce_loss=ce.item())
+
         global_step += 1
 
         if config.debug and (i + 1) % 5 == 0:
             break
-
 
     metric_logger.synchronize_between_processes()
     logger.info(f"Averaged stats: {metric_logger.global_avg()}")
@@ -208,8 +249,8 @@ def main(config):
     (
         model,
         model_without_ddp,
-        optimizer,
-        scheduler,
+        _,
+        _,
         scaler,
         tokenizer,
         start_epoch,
@@ -221,6 +262,12 @@ def main(config):
         find_unused_parameters=True,
         num_steps_per_epoch=num_steps_per_epoch,
     )
+
+    main_params = [p for n, p in model_without_ddp.named_parameters() if 'pred_' not in n and 'logvar' not in n]
+    spfs_params = [p for n, p in model_without_ddp.named_parameters() if 'pred_' in n or 'logvar' in n]
+    optimizer_main = torch.optim.AdamW(main_params, lr=config.optimizer.lr, betas=tuple(config.optimizer.opt_betas), weight_decay=config.optimizer.weight_decay)
+    optimizer_spfs = torch.optim.Adam(spfs_params, lr=config.optimizer.lr)
+    scheduler = create_scheduler(config.scheduler, optimizer_main)
 
     ckpt = config.model.get('cross_mamba_film_ckpt', '')
     if ckpt:
@@ -243,7 +290,8 @@ def main(config):
         global_step = train(
             model,
             train_loaders,
-            optimizer,
+            optimizer_main,
+            optimizer_spfs,
             tokenizer,
             epoch,
             global_step,
@@ -264,7 +312,8 @@ def main(config):
                     del state_dict[k]
             save_obj = {
                 "model": state_dict,
-                "optimizer": optimizer.state_dict(),
+                "optimizer_main": optimizer_main.state_dict(),
+                "optimizer_spfs": optimizer_spfs.state_dict(),
                 "scheduler": scheduler.state_dict(),
                 "scaler": scaler.state_dict(),
                 "config": config,

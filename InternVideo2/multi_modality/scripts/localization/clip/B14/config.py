@@ -169,3 +169,15 @@ unfreeze_mobileclip_pct = 0.5
 
 # ====================== FiLM fine-tuning =====================
 cross_mamba_film_ckpt = __hf_hub_download(repo_id=model_repo, filename="cross_mamba_film_ckpt.pt")
+
+# ====================== SPFS =====================
+SPFS_CONFIG = dict(
+    pred_rank=32,
+    enabled=True,
+    phase1_epochs=1,
+    alpha_pred_loss=0.2,
+    lambda_skip_loss=0.01,
+    skip_decision_k=10.0,
+    skip_decision_theta=0.7,
+    scheduled_sampling_I0=20000.0,
+)
