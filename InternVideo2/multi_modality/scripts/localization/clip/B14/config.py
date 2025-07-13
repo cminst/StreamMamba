@@ -112,7 +112,7 @@ optimizer = dict(
     different_lr=dict(enable=True, module_names=["streaming_vision_encoder.vit_lite"], lr=2e-6),
 )
 
-scheduler = dict(sched="cosine", epochs=1, min_lr_multi=0.01, warmup_epochs=0.1)
+scheduler = dict(sched="cosine", epochs=2, min_lr_multi=0.01, warmup_epochs=0.1)
 
 evaluate = False
 deep_fusion = False
@@ -183,7 +183,7 @@ SPFS_CONFIG = dict(
     # Phase-based parameter freezing
     freeze_phase1=dict(
         freeze_vision_encoder=True,      # Freeze main vision encoder
-        freeze_text_encoder=True,        # Freeze text encoder  
+        freeze_text_encoder=True,        # Freeze text encoder
         freeze_vision_align=True,        # Freeze vision alignment layers
         freeze_streaming_vision_align=True,  # Freeze streaming vision align
         freeze_rnn_non_pred=False,       # Don't freeze RNN non-predictor params
