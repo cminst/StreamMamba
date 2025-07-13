@@ -1,7 +1,7 @@
 from .internvideo2_clip_vision import CrossAttention, AttentiveBlock, AttentionPoolingBlock, RMSNorm, LayerScale, Attention, Mlp, Block, PatchEmbed
 
 from .mobileclip import TextTransformer, ClipTokenizer, VisionTransformer, vit_b16
-from .video_mamba_block import VideoMambaBlock, CrossMambaFiLM, StreamMamba
+from .video_mamba_block import VideoMambaBlock, CrossMambaFiLM, CrossMambaSPFS
 
 import logging
 import numpy as np
@@ -15,7 +15,7 @@ from torch import nn
 from .pos_embed import get_3d_sincos_pos_embed, get_2d_sincos_pos_embed, get_1d_sincos_pos_embed
 
 # Streaming Student Model
-class StreamingInternVideo2Student(nn.Module):
+class StreamMamba(nn.Module):
     def __init__(
             self,
             # Parameters for the MobileCLIP ViT
@@ -35,7 +35,7 @@ class StreamingInternVideo2Student(nn.Module):
         ):
         super().__init__()
 
-        # Create a MobileCLIP VisionTransformer class.
+        # MobileCLIP VisionTransformer class.
         self.vit_lite = timm.create_model(
             vit_lite_model_name,
             projection_dim = vit_lite_proj_dim
@@ -47,14 +47,12 @@ class StreamingInternVideo2Student(nn.Module):
         self.pred_rank = pred_rank
         self.text_embed_dim = text_embed_dim if text_embed_dim is not None else teacher_clip_embed_dim
 
-        # Note: The RNN input_size should match the output dimension of the MobileCLIP ViT
-        # when it is eventually plugged in. Using student_embed_dim as assumed here.
         if self.rnn_type == 'lstm':
             self.rnn = nn.LSTM(
                 input_size=vit_lite_embed_dim,
                 hidden_size=rnn_hidden_size,
                 num_layers=rnn_num_layers,
-                batch_first=True, # Expects (batch, seq, feature)
+                batch_first=True,
                 dropout=rnn_dropout if rnn_num_layers > 1 else 0.0
             )
         elif self.rnn_type == 'gru':
@@ -81,7 +79,7 @@ class StreamingInternVideo2Student(nn.Module):
             )
         elif self.rnn_type == 'stream_mamba':
             text_dim = text_embed_dim if text_embed_dim is not None else teacher_clip_embed_dim
-            self.rnn = StreamMamba(
+            self.rnn = CrossMambaSPFS(
                 in_dim=vit_lite_embed_dim,
                 hidden_dim=rnn_hidden_size,
                 clip_dim=teacher_clip_embed_dim,
@@ -188,7 +186,7 @@ if __name__ == '__main__':
         "teacher_clip_embed_dim": teacher_output_dim,
     }
 
-    student_model = StreamingInternVideo2Student(**student_config).to(device)
+    student_model = StreamMamba(**student_config).to(device)
     student_model.eval()
 
     print(f"Student model created with {sum(p.numel() for p in student_model.parameters())/1e6:.2f}M parameters.")

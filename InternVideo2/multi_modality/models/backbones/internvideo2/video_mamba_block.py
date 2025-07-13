@@ -83,8 +83,7 @@ class CrossMambaFiLM(VideoMambaBlock):
         return super().forward(frame_feat, state)
 
 
-
-class StreamMamba(CrossMambaFiLM):
+class CrossMambaSPFS(CrossMambaFiLM):
     """CrossMambaFiLM with a low-rank feature predictor for SPFS."""
 
     def __init__(self, *args, pred_rank=32, **kw):

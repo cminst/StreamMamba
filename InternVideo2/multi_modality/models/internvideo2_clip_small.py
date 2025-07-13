@@ -10,7 +10,7 @@ from PIL import Image
 import torchvision.transforms as transforms
 from torchvision.transforms import InterpolationMode
 
-from .backbones.internvideo2 import InternVideo2, TextTransformer, ClipTokenizer, VisionTransformer, StreamingInternVideo2Student
+from .backbones.internvideo2 import InternVideo2, TextTransformer, ClipTokenizer, VisionTransformer, StreamMamba
 from .criterions import VTC_VTM_Loss
 from .utils import unwrap_state_dict
 
@@ -63,7 +63,7 @@ class InternVideo2_CLIP_small(nn.Module):
                 )
             )
 
-        # Build StreamingInternVideo2Student for distillation
+        # Build StreamMamba for distillation
         self.streaming_vision_encoder = self.build_streaming_vision_encoder()
 
         # Build text encoder
@@ -343,14 +343,14 @@ class InternVideo2_CLIP_small(nn.Module):
 
     def build_streaming_vision_encoder(self):
         """
-        Build the StreamingInternVideo2Student model.
+        Build the StreamMamba model.
 
         Returns: (vision_encoder, vision_layernorm). Each is a `nn.Module`.
         """
 
         config = self.config.model.streaming_vision_encoder
 
-        streaming_vision_encoder = StreamingInternVideo2Student(
+        streaming_vision_encoder = StreamMamba(
             vit_lite_model_name=self.mobileclip_cfg["image_cfg"]["model_name"],
             vit_lite_proj_dim=self.mobileclip_cfg["embed_dim"], # Projection dimension
             vit_lite_embed_dim=config.vit_lite_embed_dim, # Output dimension

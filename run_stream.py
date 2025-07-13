@@ -1,6 +1,6 @@
 import torch
 import torch.nn.functional as F
-from InternVideo2.multi_modality.models.backbones.internvideo2.internvideo2_clip_recycle import StreamingInternVideo2Student
+from InternVideo2.multi_modality.models.backbones.internvideo2.internvideo2_clip_recycle import StreamMamba
 from InternVideo2.multi_modality.models.backbones.internvideo2.video_mamba_block import CrossMambaFiLM
 
 
@@ -26,7 +26,7 @@ def main():
         "text_embed_dim": 768,
     }
 
-    model = StreamingInternVideo2Student(**student_config).to(device)
+    model = StreamMamba(**student_config).to(device)
     model.eval()
 
     # Prepare FiLM parameters from text prompt
