@@ -107,5 +107,5 @@ class CrossMambaSPFS(CrossMambaFiLM):
                 raise RuntimeError("No hidden state available for prediction")
             h = self.last_hidden
         mu = self.pred_V(h) @ self.pred_U.T
-        unc = self.logvar(h).squeeze(-1)
+        unc = self.logvar(h)
         return mu, unc
