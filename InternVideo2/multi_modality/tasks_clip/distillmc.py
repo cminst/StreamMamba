@@ -131,11 +131,6 @@ def main(config):
     )
     config.scheduler = scheduler
 
-    if config.get("use_bf16", True):
-        data_type = torch.bfloat16
-    else:
-        data_type = torch.float16
-
     logger.info("Start training")
     start_time = time.time()
     for epoch in range(start_epoch, config.scheduler.epochs):
