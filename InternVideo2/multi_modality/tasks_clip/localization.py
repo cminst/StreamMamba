@@ -227,7 +227,7 @@ def main(config):
         num_steps_per_epoch=num_steps_per_epoch,
     )
 
-    ckpt = config.model.get('cross_mamba_film_ckpt', '')
+    ckpt = config.model.get('cross_mamba_film_ckpt_path', '')
     if ckpt:
         logger.info(f"Loading cross mamba FiLM weights from {ckpt}")
         state = torch.load(ckpt, map_location='cpu')
@@ -236,7 +236,7 @@ def main(config):
         msg = model_without_ddp.load_state_dict(state, strict=False)
         logger.info(msg)
     else:
-        logger.error("Couldn't find cross_mamba_film_ckpt in config['model'].")
+        logger.error("Couldn't find cross_mamba_film_ckpt_path in config['model'].")
         return
 
     # Freeze all parameters except FiLM
