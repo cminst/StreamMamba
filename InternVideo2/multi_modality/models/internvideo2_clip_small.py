@@ -102,6 +102,15 @@ class InternVideo2_CLIP_small(nn.Module):
                 else:
                     p.requires_grad = False
 
+        if self.config.model.get('train_low_rank_predictor_only', False):
+            # Freeze everything first
+            for p in self.parameters():
+                p.requires_grad = False
+            # Unfreeze low-rank predictor parameters in the streaming RNN
+            for name, p in self.streaming_vision_encoder.rnn.named_parameters():
+                if 'pred_' in name or 'logvar' in name:
+                    p.requires_grad = True
+
         # Define image transformation pipeline
         img_size = self.config.model.vision_encoder.img_size
         self.transform = transforms.Compose(
