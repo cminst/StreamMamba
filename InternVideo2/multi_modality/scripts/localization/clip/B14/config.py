@@ -93,7 +93,8 @@ model = dict(
     vision_ckpt_path=__hf_hub_download(repo_id=model_repo, filename="internvideo2_vision.pt"),
     load_vision_ckpt_from_internvideo2_stage2=False,
     mobileclip_ckpt_path=__hf_hub_download(repo_id=model_repo, filename="mobileclip_blt.pt"),
-    extra_ckpt_path=__hf_hub_download(repo_id=model_repo, filename="internvideo2_clip.pt")
+    extra_ckpt_path=__hf_hub_download(repo_id=model_repo, filename="internvideo2_clip.pt"),
+    cross_mamba_film_ckpt_path = __hf_hub_download(repo_id=model_repo, filename="cross_mamba_film_warmup.pt")
 )
 
 criterion = dict(
@@ -165,6 +166,3 @@ contrastive_ramp_iters = 500
 # ====================== unfreeze mobileclip =====================
 enable_mobileclip_ft = False
 unfreeze_mobileclip_pct = 0.5
-
-# ====================== FiLM fine-tuning =====================
-cross_mamba_film_ckpt = __hf_hub_download(repo_id=model_repo, filename="cross_mamba_film_warmup.pt")

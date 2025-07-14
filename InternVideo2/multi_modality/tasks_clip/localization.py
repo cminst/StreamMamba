@@ -235,6 +235,9 @@ def main(config):
             state = state['model']
         msg = model_without_ddp.load_state_dict(state, strict=False)
         logger.info(msg)
+    else:
+        logger.error("Couldn't find cross_mamba_film_ckpt in config['model'].")
+        return
 
     # Freeze all parameters except FiLM
     for name, p in model_without_ddp.named_parameters():
