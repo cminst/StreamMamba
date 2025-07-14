@@ -72,13 +72,7 @@ def train(model, train_loaders, optimizer, tokenizer, epoch, global_step, device
     metric_logger = MetricLogger(delimiter="  ")
     metric_logger.add_meter("lr", SmoothedValue(window=1, fmt="{value:.6f}"))
     metric_logger.add_meter("total_loss", SmoothedValue(window=1, fmt="{value:.4f}"))
-    metric_logger.add_meter("pred_loss", SmoothedValue(window=1, fmt="{value:.4f}"))
-    metric_logger.add_meter("skip_loss", SmoothedValue(window=1, fmt="{value:.4f}"))
-    metric_logger.add_meter("current_lambda", SmoothedValue(window=1, fmt="{value:.4f}"))
-    metric_logger.add_meter("alpha_pred_loss", SmoothedValue(window=1, fmt="{value:.4f}"))
-    metric_logger.add_meter("is_phase1", SmoothedValue(window=1, fmt="{value:.0f}"))
     metric_logger.add_meter("global_step", SmoothedValue(window=1, fmt="{value:.0f}"))
-    metric_logger.add_meter("loc_loss", SmoothedValue(window=1, fmt="{value:.4f}"))
     metric_logger.add_meter("bce_loss", SmoothedValue(window=1, fmt="{value:.4f}"))
     metric_logger.add_meter("ce_loss", SmoothedValue(window=1, fmt="{value:.4f}"))
     header = f"Train Epoch: [{epoch}]"
@@ -97,23 +91,9 @@ def train(model, train_loaders, optimizer, tokenizer, epoch, global_step, device
     iterator = metric_logger.log_every(train_loader, log_freq, header)
     num_batches = len(train_loader)
 
-    spfs_cfg = getattr(config, "SPFS_CONFIG", {})
-    phase1_epochs = spfs_cfg.get("phase1_epochs", 0)
-    phase1_steps = phase1_epochs * num_batches
-    ramp_up_steps = max(1, int(0.25 * num_batches))
-
-    # Set phase-based parameter freezing at the start of each epoch
-    current_phase = 1 if epoch < phase1_epochs else 2
-
-    # Only call set_phase_freezing if SPFS is enabled
-    if spfs_cfg.get("enabled", False):
-        model_without_ddp.set_phase_freezing(current_phase, spfs_cfg)
-        logger.info(f"Epoch {epoch}: Training in Phase {current_phase} (Phase 1 epochs: {phase1_epochs})")
-    else:
-        logger.info(f"Epoch {epoch}: SPFS disabled, training normally")
+    logger.info(f"Epoch {epoch}: fine-tuning FiLM parameters")
 
     for i, (videos, text, start_times, end_times, lengths, fpss) in enumerate(iterator):
-        is_phase1 = epoch < phase1_epochs
 
         videos = videos.to(device, non_blocking=True)
         text_input = tokenizer(text, padding=True, return_tensors="pt").to(device)
@@ -127,37 +107,10 @@ def train(model, train_loaders, optimizer, tokenizer, epoch, global_step, device
 
             state = model_without_ddp.streaming_vision_encoder.init_hidden(videos.size(0), device)
             scores_list = []
-            pred_losses = []
-            skip_probs = []
 
-            feat, _ = vit.extract_features(videos[:, 0])
-            out, state = rnn(feat, state, gamma, beta)
-            if model_without_ddp.config.model.use_streaming_vision_align:
-                out = model_without_ddp.streaming_vision_align(out)
-            else:
-                out = model_without_ddp.vision_align(out)
-            out = out / out.norm(dim=-1, keepdim=True)
-            scores_list.append(torch.nn.functional.cosine_similarity(out, text_feat, dim=-1))
-
-            for t in range(1, videos.shape[1]):
-                mu_t, logv_t = rnn.predict_next_feat()
-                gt_feat, _ = vit.extract_features(videos[:, t])
-
-                pred_losses.append(0.5 * ((gt_feat - mu_t).pow(2) * torch.exp(-logv_t) + logv_t).mean())
-
-                conf = torch.exp(-logv_t)
-                skip_prob = torch.sigmoid(spfs_cfg.get("skip_decision_k", 10.0) * (conf - spfs_cfg.get("skip_decision_theta", 0.7)))
-                s_t = (skip_prob > 0.5).float().detach() + skip_prob - skip_prob.detach()
-                skip_probs.append(s_t)
-
-                if not is_phase1 and spfs_cfg.get("enabled", False):
-                    p_pred = 1.0 - math.exp(-global_step / spfs_cfg.get("scheduled_sampling_I0", 20000.0))
-                    use_pred = torch.rand(1, device=device) < p_pred
-                    frame_in = mu_t.detach() if use_pred else gt_feat
-                else:
-                    frame_in = gt_feat
-
-                out, state = rnn(frame_in, state, gamma, beta)
+            for t in range(videos.shape[1]):
+                feat, _ = vit.extract_features(videos[:, t])
+                out, state = rnn(feat, state, gamma, beta)
                 if config.model.get('use_streaming_vision_align', False):
                     out = model_without_ddp.streaming_vision_align(out)
                 else:
@@ -183,18 +136,7 @@ def train(model, train_loaders, optimizer, tokenizer, epoch, global_step, device
             peak = torch.min(peak, lengths - 1).to(device, dtype=torch.long)
             ce = torch.nn.functional.cross_entropy(scores_masked, peak)
 
-            loc_loss = bce + ce
-            pred_loss_all = torch.stack(pred_losses).mean() if pred_losses else torch.tensor(0.0, device=device)
-            skip_loss = torch.stack(skip_probs).mean() if skip_probs else torch.tensor(0.0, device=device)
-
-            if is_phase1 or not spfs_cfg.get("enabled", False):
-                total_loss = pred_loss_all
-                current_lambda = 0.0
-                alpha_pred_loss = 0.0
-            else:
-                current_lambda = spfs_cfg.get("lambda_skip_loss", 0.01) * min(1.0, max(0.0, (global_step - phase1_steps) / ramp_up_steps))
-                alpha_pred_loss = spfs_cfg.get("alpha_pred_loss", 0.2)
-                total_loss = loc_loss + alpha_pred_loss * pred_loss_all + current_lambda * skip_loss
+            total_loss = bce + ce
 
         if hasattr(config, "deepspeed") and config.deepspeed.enable:
             model.backward(total_loss)
@@ -213,22 +155,13 @@ def train(model, train_loaders, optimizer, tokenizer, epoch, global_step, device
                 if config.optimizer.max_grad_norm > 0:
                     torch.nn.utils.clip_grad_norm_(model.parameters(), config.optimizer.max_grad_norm)
                 optimizer.step()
-            if not is_phase1 and spfs_cfg.get("enabled", False):
-                scheduler.step()
+            scheduler.step()
 
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         metric_logger.update(total_loss=total_loss.item())
-        metric_logger.update(pred_loss=pred_loss_all.item())
-        metric_logger.update(skip_loss=skip_loss.item())
-        metric_logger.update(current_lambda=current_lambda)
-        metric_logger.update(alpha_pred_loss=alpha_pred_loss)
-        metric_logger.update(is_phase1=float(is_phase1))
+        metric_logger.update(bce_loss=bce.item())
+        metric_logger.update(ce_loss=ce.item())
         metric_logger.update(global_step=global_step)
-
-        if not is_phase1 and spfs_cfg.get("enabled", False):
-            metric_logger.update(loc_loss=loc_loss.item())
-            metric_logger.update(bce_loss=bce.item())
-            metric_logger.update(ce_loss=ce.item())
 
         global_step += 1
 
@@ -237,11 +170,9 @@ def train(model, train_loaders, optimizer, tokenizer, epoch, global_step, device
                 log_payload = {
                     "lr": optimizer.param_groups[0]["lr"],
                     "total_loss": total_loss.item(),
-                    "pred_loss": pred_loss_all.item(),
-                    "skip_loss": skip_loss.item(),
+                    "bce_loss": bce.item(),
+                    "ce_loss": ce.item(),
                 }
-                if not is_phase1 and spfs_cfg.get("enabled", False):
-                    log_payload["loc_loss"] = loc_loss.item()
 
                 logger.info(f"{header} [Step {i}] {metric_logger}")
 
@@ -296,9 +227,6 @@ def main(config):
         num_steps_per_epoch=num_steps_per_epoch,
     )
 
-    optimizer = torch.optim.AdamW(model_without_ddp.parameters(), lr=config.optimizer.lr, betas=tuple(config.optimizer.opt_betas), weight_decay=config.optimizer.weight_decay)
-    scheduler = create_scheduler(config.scheduler, optimizer)
-
     ckpt = config.model.get('cross_mamba_film_ckpt', '')
     if ckpt:
         logger.info(f"Loading cross mamba FiLM weights from {ckpt}")
@@ -307,6 +235,19 @@ def main(config):
             state = state['model']
         msg = model_without_ddp.load_state_dict(state, strict=False)
         logger.info(msg)
+
+    # Freeze all parameters except FiLM
+    for name, p in model_without_ddp.named_parameters():
+        p.requires_grad = "streaming_vision_encoder.rnn.film" in name
+    trainable = sum(p.numel() for p in model_without_ddp.parameters() if p.requires_grad)
+    total = sum(p.numel() for p in model_without_ddp.parameters())
+    logger.info(f"Trainable parameters: {trainable} / {total}")
+
+    optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model_without_ddp.parameters()),
+                                  lr=config.optimizer.lr,
+                                  betas=tuple(config.optimizer.opt_betas),
+                                  weight_decay=config.optimizer.weight_decay)
+    scheduler = create_scheduler(config.scheduler, optimizer)
     if is_main_process() and config.wandb.enable:
         import wandb
         wandb.watch(model)
@@ -315,14 +256,6 @@ def main(config):
 
     logger.info("Start training")
     start_time = time.time()
-
-    # Set initial phase freezing if SPFS is enabled
-    spfs_cfg = getattr(config, "SPFS_CONFIG", {})
-    if spfs_cfg.get("enabled", False):
-        phase1_epochs = spfs_cfg.get("phase1_epochs", 0)
-        initial_phase = 1 if start_epoch < phase1_epochs else 2
-        model_without_ddp.set_phase_freezing(initial_phase, spfs_cfg)
-        logger.info(f"Initialized training with Phase {initial_phase} parameter freezing")
 
     for epoch in range(start_epoch, config.scheduler.epochs):
         global_step = train(
