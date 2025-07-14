@@ -213,8 +213,8 @@ def main(config):
     (
         model,
         model_without_ddp,
-        _,
-        _,
+        optimizer,
+        scheduler,
         scaler,
         tokenizer,
         start_epoch,
@@ -243,11 +243,6 @@ def main(config):
     total = sum(p.numel() for p in model_without_ddp.parameters())
     logger.info(f"Trainable parameters: {trainable} / {total}")
 
-    optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model_without_ddp.parameters()),
-                                  lr=config.optimizer.lr,
-                                  betas=tuple(config.optimizer.opt_betas),
-                                  weight_decay=config.optimizer.weight_decay)
-    scheduler = create_scheduler(config.scheduler, optimizer)
     if is_main_process() and config.wandb.enable:
         import wandb
         wandb.watch(model)
