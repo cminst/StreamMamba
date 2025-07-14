@@ -128,7 +128,8 @@ class InternVideo2_CLIP_small(nn.Module):
         self.load_checkpoint(
             vision_ckpt_path=config.model.vision_ckpt_path,
             mobileclip_ckpt_path=config.model.mobileclip_ckpt_path,
-            extra_ckpt_path=config.model.get("extra_ckpt_path", None)
+            extra_ckpt_path=config.model.get("extra_ckpt_path", None),
+            cross_mamba_film_ckpt_path=config.model.get("cross_mamba_film_ckpt_path", None)
         )
 
         # Initialize loss criterion
@@ -149,21 +150,21 @@ class InternVideo2_CLIP_small(nn.Module):
     def set_phase_freezing(self, phase, spfs_config):
         """
         Set parameter freezing based on training phase for SPFS.
-        
+
         Args:
             phase (int): 1 for phase 1, 2 for phase 2
             spfs_config (dict): SPFS configuration containing freeze settings
         """
         import logging
         logger = logging.getLogger(__name__)
-        
+
         if phase == 1:
             freeze_config = spfs_config.get('freeze_phase1', {})
         else:
             freeze_config = spfs_config.get('freeze_phase2', {})
-        
+
         logger.info(f"Setting Phase {phase} parameter freezing: {freeze_config}")
-        
+
         # Freeze/unfreeze vision encoder
         if freeze_config.get('freeze_vision_encoder', False):
             for p in self.vision_encoder.parameters():
@@ -173,7 +174,7 @@ class InternVideo2_CLIP_small(nn.Module):
             for p in self.vision_encoder.parameters():
                 p.requires_grad = True
             logger.info("Unfrozen: vision_encoder")
-                
+
         # Freeze/unfreeze text encoder
         if freeze_config.get('freeze_text_encoder', False):
             for p in self.text_encoder.parameters():
@@ -183,7 +184,7 @@ class InternVideo2_CLIP_small(nn.Module):
             for p in self.text_encoder.parameters():
                 p.requires_grad = True
             logger.info("Unfrozen: text_encoder")
-                
+
         # Freeze/unfreeze vision alignment layers
         if freeze_config.get('freeze_vision_align', False):
             for p in self.vision_align.parameters():
@@ -193,7 +194,7 @@ class InternVideo2_CLIP_small(nn.Module):
             for p in self.vision_align.parameters():
                 p.requires_grad = True
             logger.info("Unfrozen: vision_align")
-                
+
         # Freeze/unfreeze streaming vision alignment layers
         if hasattr(self, 'streaming_vision_align') and freeze_config.get('freeze_streaming_vision_align', False):
             for p in self.streaming_vision_align.parameters():
@@ -203,7 +204,7 @@ class InternVideo2_CLIP_small(nn.Module):
             for p in self.streaming_vision_align.parameters():
                 p.requires_grad = True
             logger.info("Unfrozen: streaming_vision_align")
-                
+
         # Freeze/unfreeze RNN non-predictor parameters
         if freeze_config.get('freeze_rnn_non_pred', False):
             for name, p in self.streaming_vision_encoder.rnn.named_parameters():
@@ -215,7 +216,7 @@ class InternVideo2_CLIP_small(nn.Module):
                 if 'pred_' not in name and 'logvar' not in name:
                     p.requires_grad = True
             logger.info("Unfrozen: RNN non-predictor parameters")
-                    
+
         # Freeze/unfreeze predictor heads
         if freeze_config.get('freeze_predictor_heads', False):
             for name, p in self.streaming_vision_encoder.rnn.named_parameters():
@@ -227,7 +228,7 @@ class InternVideo2_CLIP_small(nn.Module):
                 if 'pred_' in name or 'logvar' in name:
                     p.requires_grad = True
             logger.info("Unfrozen: predictor heads")
-            
+
         # Log summary of trainable parameters
         trainable_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
         total_params = sum(p.numel() for p in self.parameters())
@@ -461,7 +462,7 @@ class InternVideo2_CLIP_small(nn.Module):
 
         return streaming_vision_encoder
 
-    def load_checkpoint(self, vision_ckpt_path=None, mobileclip_ckpt_path=None, extra_ckpt_path=None):
+    def load_checkpoint(self, vision_ckpt_path=None, mobileclip_ckpt_path=None, extra_ckpt_path=None, cross_mamba_film_ckpt_path=None):
         assert vision_ckpt_path is not None, "No vision_encoder checkpoint"
         assert mobileclip_ckpt_path is not None, "No mobileclip checkpoint (for text_encoder and single_vision_encoder)"
 
@@ -518,6 +519,15 @@ class InternVideo2_CLIP_small(nn.Module):
             extra_ckpt = unwrap_state_dict(torch.load(extra_ckpt_path, map_location='cpu'))
 
             for k, v in extra_ckpt.items():
+                new_ckpt[k] = v
+
+        if cross_mamba_film_ckpt_path is not None:
+            logger.info(f"Load cross_mamba_film checkpoint from {cross_mamba_film_ckpt_path}")
+            cross_mamba_film_ckpt = unwrap_state_dict(torch.load(cross_mamba_film_ckpt_path, map_location='cpu'))
+
+            for k, v in cross_mamba_film_ckpt.items():
+                if 'streaming' in k:
+                    logger.info(f"- Loading {k} from cross_mamba_film_ckpt")
                 new_ckpt[k] = v
 
         msg = self.load_state_dict(new_ckpt, strict=False)
