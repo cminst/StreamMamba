@@ -70,14 +70,13 @@ model = dict(
     ),
     streaming_vision_encoder = dict(
         vit_lite_embed_dim = 768,
-        rnn_type = 'stream_mamba',
+        rnn_type = 'cross_mamba_film',
         rnn_hidden_size = 1024,
         rnn_num_layers = 3,
         rnn_dropout = 0.0,
         fc_hidden_layers = [768],
         teacher_clip_embed_dim = 768,
         text_embed_dim = 512,
-        pred_rank = 32,
     ),
     mobileclip_type=dict(
         name="mobileclip_b"
@@ -112,7 +111,7 @@ optimizer = dict(
     different_lr=dict(enable=True, module_names=["streaming_vision_encoder.vit_lite"], lr=2e-6),
 )
 
-scheduler = dict(sched="cosine", epochs=2, min_lr_multi=0.01, warmup_epochs=0.1)
+scheduler = dict(sched="cosine", epochs=1, min_lr_multi=0.01, warmup_epochs=0.1)
 
 evaluate = False
 deep_fusion = False
@@ -168,33 +167,4 @@ enable_mobileclip_ft = False
 unfreeze_mobileclip_pct = 0.5
 
 # ====================== FiLM fine-tuning =====================
-cross_mamba_film_ckpt = __hf_hub_download(repo_id=model_repo, filename="cross_mamba_film_ckpt.pt")
-
-# ====================== SPFS =====================
-SPFS_CONFIG = dict(
-    pred_rank=32,
-    enabled=True,
-    phase1_epochs=1,
-    alpha_pred_loss=0.2,
-    lambda_skip_loss=0.01,
-    skip_decision_k=10.0,
-    skip_decision_theta=0.7,
-    scheduled_sampling_I0=20000.0,
-    # Phase-based parameter freezing
-    freeze_phase1=dict(
-        freeze_vision_encoder=True,      # Freeze main vision encoder
-        freeze_text_encoder=True,        # Freeze text encoder
-        freeze_vision_align=True,        # Freeze vision alignment layers
-        freeze_streaming_vision_align=True,  # Freeze streaming vision align
-        freeze_rnn_non_pred=False,       # Don't freeze RNN non-predictor params
-        freeze_predictor_heads=False,    # Don't freeze predictor heads
-    ),
-    freeze_phase2=dict(
-        freeze_vision_encoder=False,     # Unfreeze everything in phase 2
-        freeze_text_encoder=False,
-        freeze_vision_align=False,
-        freeze_streaming_vision_align=False,
-        freeze_rnn_non_pred=False,
-        freeze_predictor_heads=False,
-    ),
-)
+cross_mamba_film_ckpt = __hf_hub_download(repo_id=model_repo, filename="cross_mamba_film_warmup.pt")
