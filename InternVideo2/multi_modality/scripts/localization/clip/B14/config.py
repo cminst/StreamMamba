@@ -138,7 +138,7 @@ mode = "loc"
 
 # ========================= others ==========================
 output_dir = './training_outputs_window/'  # output dir
-resume = True  # if True, load optimizer and scheduler states as well
+resume = False  # if True, load optimizer and scheduler states as well
 debug = False
 log_freq = 1
 seed = 42
@@ -147,7 +147,7 @@ save_latest = False
 save_iter = 100
 eval_freq_steps = 50
 
-auto_resume = True
+auto_resume = False
 pretrained_path = ""
 
 deepspeed = dict(
