@@ -71,7 +71,6 @@ class CrossMambaFiLM(VideoMambaBlock):
             text_dim = clip_dim
         self.film = nn.Linear(text_dim, 2 * in_dim, bias=True)
 
-    @torch.no_grad()
     def prepare_prompt(self, prompt_vec):
         """Prepare FiLM parameters from text embedding."""
         gamma, beta = self.film(prompt_vec).chunk(2, dim=-1)
