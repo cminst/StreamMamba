@@ -401,16 +401,12 @@ class InternVideo2_CLIP_small(nn.Module):
 
         for k, v in mobileclip_ckpt.items():
             if k.startswith('text_encoder.'):
-                # print(f"    - Loading parameter {k} for the MobileCLIP text encoder.")
                 new_ckpt[k] = v
             elif k.startswith('image_encoder.'):
-                # print(f"    - Loading parameter {k} for the MobileCLIP vision encoder.")
-                # Map MobileCLIP's image_encoder keys to the streaming_vision_encoder.vit_lite module
                 new_k = 'streaming_vision_encoder.vit_lite.' + k[len('image_encoder.model.'):]
                 new_ckpt[new_k] = v
 
         # load extra checkpoint
-        # often when post-pretrain after previous pretraining, thus the keys are same
         if extra_ckpt_path is not None:
             logger.info(f"Load extra checkpoint from {extra_ckpt_path}")
             extra_ckpt = unwrap_state_dict(torch.load(extra_ckpt_path, map_location='cpu'))
