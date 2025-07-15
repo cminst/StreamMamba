@@ -38,11 +38,6 @@ def parse_args():
         help="Configuration name",
     )
     parser.add_argument(
-        "--branch",
-        default=None,
-        help="Git branch to checkout before evaluation",
-    )
-    parser.add_argument(
         "--checkpoint-dir",
         help="Directory that contains the checkpoint file",
     )
@@ -68,9 +63,6 @@ def find_checkpoint(ckpt_dir: str) -> str:
 def main():
     ensure_dependencies()
     args = parse_args()
-
-    if args.branch:
-        subprocess.check_call(["git", "checkout", args.branch])
 
     sys.path.append(os.getcwd())
 
