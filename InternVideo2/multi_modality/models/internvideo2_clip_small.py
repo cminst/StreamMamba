@@ -79,28 +79,22 @@ class InternVideo2_CLIP_small(nn.Module):
 
         # Freeze model parameters if specified in the config
         if self.config.model.freeze_vision:
-            for name, p in self.vision_encoder.named_parameters():
-                if self.config.model.open_vision_clip_projector and name.startswith('clip_projector'):
-                    p.requires_grad = False
-                else:
-                    p.requires_grad = False
-
-            for name, p in self.vision_align.named_parameters():
-                if self.config.model.open_vision_clip_projector and name.startswith('clip_projector'):
-                    p.requires_grad = False
-                else:
-                    p.requires_grad = False
+            self.freeze_vision()
 
         if self.config.model.freeze_mobileclip_vision:
-            for name, p in self.streaming_vision_encoder.vit_lite.named_parameters():
-                p.requires_grad = False
+            self.freeze_mobileclip_vision()
 
         if self.config.model.freeze_mobileclip_text:
-            for name, p in self.text_encoder.named_parameters():
-                if self.config.model.open_text_projection and name.startswith('projection_layer'):
-                    p.requires_grad = False
-                else:
-                    p.requires_grad = False
+            self.freeze_mobileclip_text()
+
+        if getattr(self.config.model, "freeze_mamba", False):
+            self.freeze_mamba()
+
+        if getattr(self.config.model, "freeze_prediction_head", False):
+            self.freeze_prediction_head()
+
+        if getattr(self.config.model, "freeze_confidence_head", False):
+            self.freeze_confidence_head()
 
         # Define image transformation pipeline
         img_size = self.config.model.vision_encoder.img_size
@@ -434,3 +428,72 @@ class InternVideo2_CLIP_small(nn.Module):
         label_probs = (100.0 * vid_feat @ txt_feat.T)
         top_probs, top_labels = label_probs.float().cpu().topk(top, dim=-1)
         return top_probs, top_labels
+
+    # ------------------------------------------------------------------
+    # Parameter Freezing Utilities
+    # ------------------------------------------------------------------
+    def _set_requires_grad(self, module, flag: bool):
+        for p in module.parameters():
+            p.requires_grad = flag
+
+    def freeze_vision(self):
+        for name, p in self.vision_encoder.named_parameters():
+            if self.config.model.open_vision_clip_projector and name.startswith('clip_projector'):
+                continue
+            p.requires_grad = False
+        for name, p in self.vision_align.named_parameters():
+            if self.config.model.open_vision_clip_projector and name.startswith('clip_projector'):
+                continue
+            p.requires_grad = False
+
+    def unfreeze_vision(self):
+        self._set_requires_grad(self.vision_encoder, True)
+        self._set_requires_grad(self.vision_align, True)
+
+    def freeze_mobileclip_vision(self):
+        self._set_requires_grad(self.streaming_vision_encoder.vit_lite, False)
+
+    def unfreeze_mobileclip_vision(self):
+        self._set_requires_grad(self.streaming_vision_encoder.vit_lite, True)
+
+    def freeze_mobileclip_text(self):
+        for name, p in self.text_encoder.named_parameters():
+            if self.config.model.open_text_projection and name.startswith('projection_layer'):
+                continue
+            p.requires_grad = False
+
+    def unfreeze_mobileclip_text(self):
+        self._set_requires_grad(self.text_encoder, True)
+
+    def freeze_mamba(self):
+        for name, p in self.streaming_vision_encoder.rnn.named_parameters():
+            if name.startswith('pred_') or name.startswith('logvar'):
+                continue
+            p.requires_grad = False
+
+    def unfreeze_mamba(self):
+        for name, p in self.streaming_vision_encoder.rnn.named_parameters():
+            if name.startswith('pred_') or name.startswith('logvar'):
+                continue
+            p.requires_grad = True
+
+    def freeze_prediction_head(self):
+        if hasattr(self.streaming_vision_encoder.rnn, 'pred_U'):
+            self.streaming_vision_encoder.rnn.pred_U.requires_grad = False
+        if hasattr(self.streaming_vision_encoder.rnn, 'pred_V'):
+            self._set_requires_grad(self.streaming_vision_encoder.rnn.pred_V, False)
+
+    def unfreeze_prediction_head(self):
+        if hasattr(self.streaming_vision_encoder.rnn, 'pred_U'):
+            self.streaming_vision_encoder.rnn.pred_U.requires_grad = True
+        if hasattr(self.streaming_vision_encoder.rnn, 'pred_V'):
+            self._set_requires_grad(self.streaming_vision_encoder.rnn.pred_V, True)
+
+    def freeze_confidence_head(self):
+        if hasattr(self.streaming_vision_encoder.rnn, 'logvar'):
+            self._set_requires_grad(self.streaming_vision_encoder.rnn.logvar, False)
+
+    def unfreeze_confidence_head(self):
+        if hasattr(self.streaming_vision_encoder.rnn, 'logvar'):
+            self._set_requires_grad(self.streaming_vision_encoder.rnn.logvar, True)
+
