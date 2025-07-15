@@ -170,7 +170,7 @@ def train(
                     target_next = model_without_ddp.vision_align(target_next)
 
                 # mu_t = predicted next embedding, conf_logit = confidence
-                mu_t, logvar = model.streaming_vision_encoder.rnn.predict_next_feat(new_h)
+                mu_t, logvar = model.streaming_vision_encoder.rnn.predict_next_feat(h = new_h)
                 conf_logit = -logvar.squeeze(-1)
 
                 # Use a hybrid loss for the 2 phases
