@@ -104,7 +104,7 @@ class StreamMamba(nn.Module):
             return (h0, c0)
         return h0
 
-    def forward(self, single_frame_input, prev_hidden_state, gamma=None, beta=None, tau=None):
+    def forward(self, single_frame_input, prev_hidden_state, gamma=None, beta=None):
         """
         Processes a single frame (or a small chunk of frames) and updates the hidden state.
 
@@ -115,40 +115,24 @@ class StreamMamba(nn.Module):
             prev_hidden_state (tuple or torch.Tensor): Previous hidden state from the RNN.
                 For LSTM: (h_prev, c_prev)
                 For GRU: h_prev
+            gamma (torch.Tensor): Used for FiLM
+            beta (torch.Tensor): Used for FiLM
 
         Returns:
             student_embedding (torch.Tensor): The output embedding for the current step.
                                             Shape: (B, teacher_clip_embed_dim)
             current_hidden_state (tuple or torch.Tensor): The updated RNN hidden state.
         """
-        # single_frame_input shape: (B, C, T_chunk, H, W) or (B, C, H, W)
-        # ViT-Lite expects (B, C, H, W)
-
         if len(single_frame_input.shape) == 5:
-            single_frame_input = single_frame_input.squeeze(2)  # Remove the T_chunk dimension
+            single_frame_input = single_frame_input.squeeze(2)
 
-        if self.rnn_type == 'mamba_spfs':
-            threshold = 0.7 if tau is None else tau
-            if self.rnn.last_hidden is not None:
-                mu, logvar = self.rnn.predict_next_feat()
-                conf = torch.exp(-logvar)
-                if torch.all(conf > threshold):
-                    frame_feature = mu
-                else:
-                    frame_feature, _ = self.vit_lite.extract_features(single_frame_input)
-            else:
-                frame_feature, _ = self.vit_lite.extract_features(single_frame_input)
+        frame_feature, _ = self.vit_lite.extract_features(single_frame_input)
+
+        if self.rnn_type in ['mamba', 'mamba_spfs']:
             student_embedding, current_hidden_state = self.rnn(frame_feature, prev_hidden_state)
-            return student_embedding, current_hidden_state
-
-        frame_feature, _ = self.vit_lite.extract_features(single_frame_input)  # (B, student_embed_dim)
-
-        if self.rnn_type == 'mamba':
-            student_embedding, current_hidden_state = self.rnn(frame_feature, prev_hidden_state)
-            return student_embedding, current_hidden_state
         elif self.rnn_type == 'cross_mamba_film':
             student_embedding, current_hidden_state = self.rnn(frame_feature, prev_hidden_state, gamma, beta)
-            return student_embedding, current_hidden_state
-        student_embedding = self.output_fc(rnn_output_last_step)
+        else: # LSTM, GRU
+            raise NotImplementedError("Assuming Mamba for this review.")
 
         return student_embedding, current_hidden_state
