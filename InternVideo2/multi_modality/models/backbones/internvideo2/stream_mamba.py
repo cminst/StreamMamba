@@ -1,18 +1,8 @@
-from .internvideo2_clip_vision import CrossAttention, AttentiveBlock, AttentionPoolingBlock, RMSNorm, LayerScale, Attention, Mlp, Block, PatchEmbed
-
-from .mobileclip import TextTransformer, ClipTokenizer, VisionTransformer, vit_b16
 from .video_mamba_block import VideoMambaBlock, CrossMambaFiLM, MambaSPFS
 
-import logging
-import numpy as np
 import torch
 import timm
-import torch.nn.functional as F
-from timm.models.layers import DropPath, to_2tuple, trunc_normal_
-from timm.models.registry import register_model
 from torch import nn
-
-from .pos_embed import get_3d_sincos_pos_embed, get_2d_sincos_pos_embed, get_1d_sincos_pos_embed
 
 # Streaming Student Model
 class StreamMamba(nn.Module):
