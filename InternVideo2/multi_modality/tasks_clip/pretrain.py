@@ -494,7 +494,7 @@ def train(
             image = image.permute(0, 2, 1, 3, 4)
             B, C, T, H, W = image.shape
 
-            mc_image = image # <----- Change this later ==================================================++++++++++++++++++++++++==
+            mc_image = image
 
             assert T >= MODEL_MAX_FRAMES, f"Video (orig) has {T} frames, needs {MODEL_MAX_FRAMES}."
 
@@ -598,7 +598,6 @@ def train(
         final_batch_nce_loss_for_logging = batch_total_nce_for_logging / num_sliding_windows
         average_cosine_sim_for_logging = batch_total_sim_for_logging / num_sliding_windows
 
-        # --- Logging Metrics (after all windows in a batch item are processed) ---
         metric_logger.update(**{'video-stream-target-loss': final_batch_cosine_loss_for_logging})
         metric_logger.update(**{'video-stream-nce-loss': final_batch_nce_loss_for_logging})
         metric_logger.update(**{'video-stream-target-sim': average_cosine_sim_for_logging})
@@ -611,17 +610,14 @@ def train(
                 different_lr_value = pg["lr"]
                 break
 
-        # If found a different learning rate, log it, otherwise use default
         if different_lr_value is not None:
             metric_logger.update(different_lr=different_lr_value)
         else:
-            # No different learning rate found, log the default one
             metric_logger.update(different_lr=optimizer.param_groups[0]["lr"])
 
         if hasattr(model_without_ddp, 'temp'):
             metric_logger.update(temperature=model_without_ddp.temp.item())
 
-        # Increment global_step once per batch item (outer loop iteration)
         global_step += 1
         if global_step % EVAL_FREQ_STEPS == 0 and is_main_process():
             logger.info(f"Performing periodic evaluation at global step {global_step}...")
