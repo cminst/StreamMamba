@@ -83,14 +83,20 @@ class CrossMambaFiLM(VideoMambaBlock):
 
 
 class MambaSPFS(VideoMambaBlock):
-    """VideoMambaBlock with a low-rank feature predictor for SPFS."""
+    """VideoMambaBlock with a feature predictor for Self-Predictive Feature Skipping (SPFS)."""
 
     def __init__(self, *args, pred_rank=32, **kw):
         super().__init__(*args, **kw)
         d = self.proj.out_features
-        r = pred_rank
-        self.pred_U = nn.Parameter(torch.randn(d, r))
-        self.pred_V = nn.Linear(self.ssm.d_model, r, bias=False)
+        self.r = r = pred_rank
+
+        # if pred_rank is None, use a simple Linear instead.
+        if r:
+            self.pred_U = nn.Parameter(torch.randn(d, r))
+            self.pred_V = nn.Linear(self.ssm.d_model, r, bias=False)
+        else:
+            self.pred_head = nn.Linear(self.ssm.d_model, d)
+
         self.logvar = nn.Linear(self.ssm.d_model, 1)
         self.last_hidden = None
 
@@ -105,6 +111,11 @@ class MambaSPFS(VideoMambaBlock):
             if self.last_hidden is None:
                 raise RuntimeError("No hidden state available for prediction")
             h = self.last_hidden
-        mu = self.pred_V(h) @ self.pred_U.T
+
+        if self.r:
+            mu = self.pred_V(h) @ self.pred_U.T
+        else:
+            mu = self.pred_head(h)
+
         unc = self.logvar(h)
         return mu, unc

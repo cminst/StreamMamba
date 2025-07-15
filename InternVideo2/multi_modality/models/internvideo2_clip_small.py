@@ -430,6 +430,7 @@ class InternVideo2_CLIP_small(nn.Module):
         return top_probs, top_labels
 
     # ========== Parameter Freezing Utilities ==========
+
     def _set_requires_grad(self, module, flag: bool):
         for p in module.parameters():
             p.requires_grad = flag
@@ -465,12 +466,14 @@ class InternVideo2_CLIP_small(nn.Module):
 
     def freeze_mamba(self):
         for name, p in self.streaming_vision_encoder.rnn.named_parameters():
+            # Skip predictor and confidence heads
             if name.startswith('pred_') or name.startswith('logvar'):
                 continue
             p.requires_grad = False
 
     def unfreeze_mamba(self):
         for name, p in self.streaming_vision_encoder.rnn.named_parameters():
+            # Skip predictor and confidence heads
             if name.startswith('pred_') or name.startswith('logvar'):
                 continue
             p.requires_grad = True
@@ -480,12 +483,16 @@ class InternVideo2_CLIP_small(nn.Module):
             self.streaming_vision_encoder.rnn.pred_U.requires_grad = False
         if hasattr(self.streaming_vision_encoder.rnn, 'pred_V'):
             self._set_requires_grad(self.streaming_vision_encoder.rnn.pred_V, False)
+        if hasattr(self.streaming_vision_encoder.rnn, 'pred_head'):
+            self._set_requires_grad(self.streaming_vision_encoder.rnn.pred_head, False)
 
     def unfreeze_prediction_head(self):
         if hasattr(self.streaming_vision_encoder.rnn, 'pred_U'):
             self.streaming_vision_encoder.rnn.pred_U.requires_grad = True
         if hasattr(self.streaming_vision_encoder.rnn, 'pred_V'):
             self._set_requires_grad(self.streaming_vision_encoder.rnn.pred_V, True)
+        if hasattr(self.streaming_vision_encoder.rnn, 'pred_head'):
+            self._set_requires_grad(self.streaming_vision_encoder.rnn.pred_head, True)
 
     def freeze_confidence_head(self):
         if hasattr(self.streaming_vision_encoder.rnn, 'logvar'):
