@@ -162,12 +162,16 @@ def train(
                     target_curr = model_without_ddp.vision_align(target_curr)
 
                     # ------------------------------------
-
-                    next_window_start = window_start + 1
-                    next_window_end = window_end + 1
-                    next_window = image[:, :, next_window_start:next_window_end, :, :]
-                    target_next = model_without_ddp.vision_encoder(next_window)
-                    target_next = model_without_ddp.vision_align(target_next)
+                    # Use the next frame's mobileclip embedding
+                    if idx_curr + 1 < T:
+                        next_frame = image[:, :, idx_curr + 1, :, :].unsqueeze(2)
+                        next_frame = next_frame.squeeze(2)
+                        target_next, _ = model_without_ddp.streaming_vision_encoder.vit_lite.extract_features(next_frame)
+                    else:
+                        # Use current frame as fallback just in case
+                        current_frame = image[:, :, idx_curr, :, :].unsqueeze(2)
+                        current_frame = current_frame.squeeze(2)
+                        target_next, _ = model_without_ddp.streaming_vision_encoder.vit_lite.extract_features(current_frame)
 
                 # mu_t = predicted next embedding, conf_logit = confidence
                 mu_t, logvar = model.streaming_vision_encoder.rnn.predict_next_feat()
