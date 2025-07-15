@@ -1,7 +1,7 @@
 from .internvideo2_clip_vision import CrossAttention, AttentiveBlock, AttentionPoolingBlock, RMSNorm, LayerScale, Attention, Mlp, Block, PatchEmbed
 
 from .mobileclip import TextTransformer, ClipTokenizer, VisionTransformer, vit_b16
-from .video_mamba_block import VideoMambaBlock, CrossMambaFiLM, CrossMambaSPFS
+from .video_mamba_block import VideoMambaBlock, CrossMambaFiLM, MambaSPFS
 
 import logging
 import numpy as np
@@ -22,7 +22,7 @@ class StreamMamba(nn.Module):
             vit_lite_proj_dim=512,
             vit_lite_embed_dim=768,
 
-            rnn_type='lstm', # 'lstm', 'gru', 'mamba', 'cross_mamba_film', or 'stream_mamba'
+            rnn_type='lstm', # 'lstm', 'gru', 'mamba', 'cross_mamba_film', or 'mamba_spfs'
             rnn_hidden_size=1024,
             rnn_num_layers=1,
             rnn_dropout=0.0,
@@ -76,18 +76,16 @@ class StreamMamba(nn.Module):
                 clip_dim=teacher_clip_embed_dim,
                 text_dim=text_dim,
             )
-        elif self.rnn_type == 'stream_mamba':
-            text_dim = text_embed_dim if text_embed_dim is not None else teacher_clip_embed_dim
-            self.rnn = CrossMambaSPFS(
+        elif self.rnn_type == 'mamba_spfs':
+            self.rnn = MambaSPFS(
                 in_dim=vit_lite_embed_dim,
                 hidden_dim=rnn_hidden_size,
                 clip_dim=teacher_clip_embed_dim,
-                text_dim=text_dim,
                 pred_rank=pred_rank,
             )
         else:
             raise NotImplementedError(
-                f"Unsupported RNN type: {rnn_type}. Choose 'lstm', 'gru', 'mamba', 'cross_mamba_film' or 'stream_mamba'."
+                f"Unsupported RNN type: {rnn_type}. Choose 'lstm', 'gru', 'mamba', 'cross_mamba_film' or 'mamba_spfs'."
             )
 
         # Fully Connected layers to project RNN output to teacher's embedding dimension
@@ -105,9 +103,9 @@ class StreamMamba(nn.Module):
             self.output_fc = nn.Identity()
 
     def init_hidden(self, batch_size, device):
-        if self.rnn_type in ['mamba', 'cross_mamba_film', 'stream_mamba']:
+        if self.rnn_type in ['mamba', 'cross_mamba_film', 'mamba_spfs']:
             state = self.rnn.init_state(batch_size, device)
-            if self.rnn_type == 'stream_mamba':
+            if self.rnn_type == 'mamba_spfs':
                 self.rnn.last_hidden = None
             return state
         h0 = torch.zeros(self.rnn_num_layers, batch_size, self.rnn_hidden_size).to(device)
@@ -139,7 +137,7 @@ class StreamMamba(nn.Module):
         if len(single_frame_input.shape) == 5:
             single_frame_input = single_frame_input.squeeze(2)  # Remove the T_chunk dimension
 
-        if self.rnn_type == 'stream_mamba':
+        if self.rnn_type == 'mamba_spfs':
             threshold = 0.7 if tau is None else tau
             if self.rnn.last_hidden is not None:
                 mu, logvar = self.rnn.predict_next_feat()
@@ -150,7 +148,7 @@ class StreamMamba(nn.Module):
                     frame_feature, _ = self.vit_lite.extract_features(single_frame_input)
             else:
                 frame_feature, _ = self.vit_lite.extract_features(single_frame_input)
-            student_embedding, current_hidden_state = self.rnn(frame_feature, prev_hidden_state, gamma, beta)
+            student_embedding, current_hidden_state = self.rnn(frame_feature, prev_hidden_state)
             return student_embedding, current_hidden_state
 
         frame_feature, _ = self.vit_lite.extract_features(single_frame_input)  # (B, student_embed_dim)
