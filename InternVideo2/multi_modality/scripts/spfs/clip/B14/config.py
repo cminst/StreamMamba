@@ -90,5 +90,6 @@ evaluate = False
 device = 'cuda'
 mode = 'pt'
 output_dir = './training_outputs_spfs/'
+debug = False
 wandb = dict(enable=False)
 seed = 42
