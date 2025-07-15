@@ -134,25 +134,25 @@ def train(
         B, C, T, H, W = image.shape
         assert T >= MODEL_MAX_FRAMES
 
-        # Warm up the hidden state with the first few frames without calculating loss
-        h = model.streaming_vision_encoder.init_hidden(batch_size=B, device=device)
-        with torch.no_grad():
-            for t in range(MODEL_MAX_FRAMES - 1):
-                frame = image[:, :, t, :, :].unsqueeze(2)
-                _, h = model.streaming_vision_encoder(frame, h)
+        with torch.cuda.amp.autocast(enabled=config.use_half_precision, dtype=data_type):
+            # Warm up the hidden state with the first few frames without calculating loss
+            h = model.streaming_vision_encoder.init_hidden(batch_size=B, device=device)
+            with torch.no_grad():
+                for t in range(MODEL_MAX_FRAMES - 1):
+                    frame = image[:, :, t, :, :].unsqueeze(2)
+                    _, h = model.streaming_vision_encoder(frame, h)
 
-        num_steps = T - (MODEL_MAX_FRAMES - 1)
+            num_steps = T - (MODEL_MAX_FRAMES - 1)
 
-        loss_primary_acc = loss_pred_acc = loss_calib_acc = loss_skip_acc = 0.0
+            loss_primary_acc = loss_pred_acc = loss_calib_acc = loss_skip_acc = 0.0
 
-        for step in range(num_steps):
-            idx_curr = (MODEL_MAX_FRAMES - 1) + step
-            frame_curr = image[:, :, idx_curr, :, :].unsqueeze(2)
-            with torch.cuda.amp.autocast(enabled=config.use_half_precision, dtype=data_type):
+            for step in range(num_steps):
+                idx_curr = (MODEL_MAX_FRAMES - 1) + step
+                frame_curr = image[:, :, idx_curr, :, :].unsqueeze(2)
 
                 # out_t is for primary distillation loss, new_h is the updated hidden state
                 out_t, new_h = model.streaming_vision_encoder(frame_curr, h)
-    
+
                 # Teacher targets for distillation
                 with torch.no_grad():
                     window_start = idx_curr - MODEL_MAX_FRAMES + 1
@@ -160,26 +160,26 @@ def train(
                     curr_window = image[:, :, window_start:window_end, :, :]
                     target_curr = model_without_ddp.vision_encoder(curr_window)
                     target_curr = model_without_ddp.vision_align(target_curr)
-    
+
                     # ------------------------------------
-    
+
                     next_window_start = window_start + 1
                     next_window_end = window_end + 1
                     next_window = image[:, :, next_window_start:next_window_end, :, :]
                     target_next = model_without_ddp.vision_encoder(next_window)
                     target_next = model_without_ddp.vision_align(target_next)
-    
+
                 # mu_t = predicted next embedding, conf_logit = confidence
                 mu_t, logvar = model.streaming_vision_encoder.rnn.predict_next_feat(new_h)
                 conf_logit = -logvar.squeeze(-1)
-    
+
                 # Use a hybrid loss for the 2 phases
                 if epoch == 0:
                     # Phase 1: Warm-up the Prediction Head
                     L_pred = cosine_loss_fn(mu_t, target_next)
                     loss = L_pred
                     L_primary = L_calib = L_skip = torch.tensor(0.0, device=device) # Set others to 0
-    
+
                 else:
                     # Phase 2: Joint Fine-tuning
                     L_primary = primary_loss_fn(out_t, target_curr)
@@ -189,36 +189,36 @@ def train(
                         target_c = (pred_quality > 0.98).float()
                     L_calib = bce_loss_fn(conf_logit.squeeze(-1), target_c)
                     L_skip = -(torch.log(torch.sigmoid(conf_logit) + 1e-8)).mean()
-    
+
                     loss = L_primary + L_pred + lambda_calib * L_calib + lambda_skip * L_skip
 
-            if hasattr(config, "deepspeed") and config.deepspeed.enable:
-                model.backward(loss)
-                model.step()
-            else:
-                optimizer.zero_grad()
-                if config.use_half_precision:
-                    scaler.scale(loss).backward()
-                    if config.optimizer.max_grad_norm > 0:
-                        scaler.unscale_(optimizer)
-                        torch.nn.utils.clip_grad_norm_(model.parameters(), config.optimizer.max_grad_norm)
-                    scaler.step(optimizer)
-                    scaler.update()
+                if hasattr(config, "deepspeed") and config.deepspeed.enable:
+                    model.backward(loss)
+                    model.step()
                 else:
-                    loss.backward()
-                    if config.optimizer.max_grad_norm > 0:
-                        torch.nn.utils.clip_grad_norm_(model.parameters(), config.optimizer.max_grad_norm)
-                    optimizer.step()
-                scheduler.step()
+                    optimizer.zero_grad()
+                    if config.use_half_precision:
+                        scaler.scale(loss).backward()
+                        if config.optimizer.max_grad_norm > 0:
+                            scaler.unscale_(optimizer)
+                            torch.nn.utils.clip_grad_norm_(model.parameters(), config.optimizer.max_grad_norm)
+                        scaler.step(optimizer)
+                        scaler.update()
+                    else:
+                        loss.backward()
+                        if config.optimizer.max_grad_norm > 0:
+                            torch.nn.utils.clip_grad_norm_(model.parameters(), config.optimizer.max_grad_norm)
+                        optimizer.step()
+                    scheduler.step()
 
-            # Backprop through time (BPTT)
-            h = new_h
+                # Backprop through time (BPTT)
+                h = new_h
 
-            # Accumulate itemized losses for logging
-            loss_primary_acc += L_primary.item()
-            loss_pred_acc += L_pred.item()
-            loss_calib_acc += L_calib.item()
-            loss_skip_acc += L_skip.item()
+                # Accumulate itemized losses for logging
+                loss_primary_acc += L_primary.item()
+                loss_pred_acc += L_pred.item()
+                loss_calib_acc += L_calib.item()
+                loss_skip_acc += L_skip.item()
 
         step_count = max(num_steps, 1)
         metric_logger.update(L_primary=loss_primary_acc / step_count)
