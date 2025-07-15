@@ -158,8 +158,12 @@ def train(
                     window_start = idx_curr - MODEL_MAX_FRAMES + 1
                     window_end = idx_curr + 1
                     curr_window = image[:, :, window_start:window_end, :, :]
-                    target_curr = model_without_ddp.vision_encoder(curr_window)
-                    target_curr = model_without_ddp.vision_align(target_curr)
+
+                    # Only calculate the InternVideo2 B14 embeddings for Phase 2
+                    if epoch != 0:
+                        target_curr = model_without_ddp.vision_align(model_without_ddp.vision_encoder(curr_window))
+                    else:
+                        target_curr = None
 
                     # ------------------------------------
                     # Use the next frame's mobileclip embedding
