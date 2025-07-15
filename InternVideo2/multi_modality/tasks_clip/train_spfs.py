@@ -9,14 +9,13 @@ import numpy as np
 
 from os.path import join
 
-# Early check for dataset path
+# Check for dataset path
 if not os.environ.get("DATASET_ROOT"):
     raise RuntimeError(
         "DATASET_ROOT environment variable is not set. "
         "Please export DATASET_ROOT to point to your dataset root before running this script."
     )
 
-# Third-party imports
 import cv2
 import matplotlib.pyplot as plt
 import torch
@@ -31,7 +30,6 @@ from torchvision import transforms
 from torchvision.transforms.functional import InterpolationMode
 from tqdm import tqdm
 
-# Local application imports
 from dataset import MetaLoader_rs, create_dataset, create_loader, create_stateful_sampler
 from dataset.serialize import local_broadcast_process_authkey
 from models import *
@@ -48,109 +46,6 @@ from utils.optimizer import (
 
 logger = logging.getLogger(__name__)
 
-
-def get_rng_state():
-    return {
-        "random_state": random.getstate(),
-        "numpy_state": np.random.get_state(),
-        "torch_state": torch.get_rng_state(),
-        "cuda_state": torch.cuda.get_rng_state_all(),
-    }
-
-
-def set_rng_state(state):
-    if not state:
-        return
-    try:
-        if "random_state" in state and state["random_state"] is not None:
-            random.setstate(state["random_state"])
-        if "numpy_state" in state and state["numpy_state"] is not None:
-            np.random.set_state(state["numpy_state"])
-        if "torch_state" in state and state["torch_state"] is not None:
-            torch.set_rng_state(state["torch_state"])
-        if "cuda_state" in state and state["cuda_state"] is not None and torch.cuda.is_available():
-            torch.cuda.set_rng_state_all(state["cuda_state"])
-    except Exception as e:
-        logger.warning(f"Failed to restore RNG state: {e}")
-
-
-def unfreeze_mobileclip_vision(model, optimizer, scheduler, config):
-    """Unfreeze MobileCLIP vision encoder and add its params to the optimizer."""
-    logger.info("Unfreezing MobileCLIP vision encoder parameters")
-
-    submodule = model.streaming_vision_encoder.vit_lite
-    for p in submodule.parameters():
-        p.requires_grad = True
-
-    weight_decay = config.optimizer.weight_decay
-    named_param_tuples = []
-    for name, param in submodule.named_parameters():
-        full_name = f"streaming_vision_encoder.vit_lite.{name}"
-        if len(param.shape) == 1 or full_name.endswith(".bias"):
-            wd = 0
-        else:
-            wd = weight_decay
-        named_param_tuples.append([full_name, param, wd])
-
-    if hasattr(config.optimizer, "different_lr") and config.optimizer.different_lr.enable:
-        diff_names = config.optimizer.different_lr.module_names
-        diff_lr = config.optimizer.different_lr.lr
-    else:
-        diff_names = []
-        diff_lr = None
-
-    named_param_tuples = add_different_lr(named_param_tuples, diff_names, diff_lr, config.optimizer.lr)
-    param_groups = create_optimizer_params_group(named_param_tuples, config.optimizer.lr)
-    extend_optimizer_with_param_groups(optimizer, scheduler, param_groups)
-
-    # Mark as unfrozen so we don't unfreeze again
-    config.model.freeze_mobileclip_vision = False
-
-def save_debug_step_data(output_dir, global_step, frame_idx,
-                         new_frame_input, # Input to streaming_vision_encoder
-                         current_hidden_state_input, # Hidden state input to streaming_vision_encoder
-                         actual_window_input, # Input to vision_encoder (full model)
-                         stream_embedding_output, # Output of streaming pipeline
-                         target_embedding_output, # Output of target pipeline
-                         model_state_dict,
-                         config=None): # Optional: save config for completeness
-    """
-    Saves all relevant tensors and model state for a single debug step.
-    """
-    step_dir = os.path.join(output_dir, f"debug_step_{global_step}_frame_{frame_idx}")
-    os.makedirs(step_dir, exist_ok=True)
-
-    # Save tensors
-    torch.save(new_frame_input.cpu(), os.path.join(step_dir, "new_frame_input.pt"))
-    torch.save(actual_window_input.cpu(), os.path.join(step_dir, "actual_window_input.pt"))
-    torch.save(stream_embedding_output.cpu(), os.path.join(step_dir, "stream_embedding_output.pt"))
-    torch.save(target_embedding_output.cpu(), os.path.join(step_dir, "target_embedding_output.pt"))
-
-    if isinstance(current_hidden_state_input, tuple):
-        cpu_hidden_state = tuple(h.cpu() for h in current_hidden_state_input)
-    elif isinstance(current_hidden_state_input, torch.Tensor):
-        cpu_hidden_state = current_hidden_state_input.cpu()
-    else:
-        cpu_hidden_state = current_hidden_state_input
-
-    with open(os.path.join(step_dir, "current_hidden_state_input.pkl"), "wb") as f:
-        pickle.dump(cpu_hidden_state, f)
-
-    torch.save(model_state_dict, os.path.join(step_dir, "model_state_dict.pth"))
-
-    if config:
-        with open(os.path.join(step_dir, "config.pkl"), "wb") as f:
-            pickle.dump(config, f)
-
-    print(f"Saved debug data for global_step {global_step}, frame_idx {frame_idx} to {step_dir}")
-
-# Helper to read frames from video
-def _frame_from_video(video_cap):
-    while video_cap.isOpened():
-        ret, frame = video_cap.read()
-        if not ret:
-            break
-        yield frame # BGR numpy array
 
 def get_inference_transform(img_size):
      return transforms.Compose(
@@ -182,159 +77,7 @@ def preprocess_frame(frame_bgr_np, transform, device):
 
     return frame_tensor_batch
 
-# Model evaluation
-def evaluate_streaming_similarity(
-    model,
-    device,
-    streaming_transform, # The preprocessing transform
-    video_path,
-    model_max_frames,
-    output_dir,
-    global_step, # Current training step for filename
-    config
-):
-    """
-    Evaluates the cosine similarity between streaming and full window features
-    for a specific video and saves a plot.
-
-    Returns the average cosine similarity over the comparable frames.
-    """
-
-    regular_transform = transforms.Compose(
-        [
-            transforms.Resize(
-                (model.config.model.vision_encoder.img_size, model.config.model.vision_encoder.img_size),
-                interpolation=transforms.InterpolationMode.BILINEAR,
-            ),
-            transforms.ToTensor(),
-            transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
-        ]
-    )
-
-    # Ensure model is in evaluation mode and on the correct device
-    model.eval()
-    model.to(device) # Ensure model is on device, though it should be already
-
-    cosine_similarities = []
-    frame_indices_for_plot = []
-    avg_similarity = -1.0 # Default value if no frames processed
-
-    logger.info(f"Starting evaluation on video: {video_path}")
-
-    video_cap = cv2.VideoCapture(video_path)
-    if not video_cap.isOpened():
-        logger.error(f"Error: Could not open video {video_path} for evaluation.")
-        return avg_similarity # Return default if video can't be opened
-
-    all_frames_raw = list(_frame_from_video(video_cap)) # List of numpy arrays (H, W, C, BGR)
-    video_cap.release()
-
-    if len(all_frames_raw) < model_max_frames:
-        logger.warning(f"Evaluation video {video_path} has {len(all_frames_raw)} frames, less than MODEL_MAX_FRAMES ({model_max_frames}). Skipping evaluation.")
-        return avg_similarity # Return default if video is too short
-
-    with torch.autocast("cuda", dtype=torch.bfloat16), torch.no_grad():
-        curr_hidden_state_streaming = model.streaming_vision_encoder.init_hidden(batch_size=1, device=device)
-
-        logger.info(f"Warming up streaming model for evaluation with first {model_max_frames - 1} frames...")
-
-        for i in range(model_max_frames - 1):
-            frame_data = all_frames_raw[i]
-            frame_tensor_batch = preprocess_frame(frame_data, streaming_transform, device)
-            frame_tensor_streaming_input = frame_tensor_batch.unsqueeze(2)
-            raw_stream_embedding_dummy, curr_hidden_state_streaming = model.streaming_vision_encoder(
-                frame_tensor_streaming_input,
-                curr_hidden_state_streaming
-            )
-        logger.info(f"Warm-up complete for evaluation.")
-
-        logger.info(f"Processing and comparing from frame {model_max_frames - 1} onwards...")
-
-        for frame_idx in range(model_max_frames - 1, len(all_frames_raw)):
-            current_frame_data_streaming = all_frames_raw[frame_idx]
-
-            frame_tensor_batch = preprocess_frame(current_frame_data_streaming, streaming_transform, device)
-
-            frame_tensor_streaming_input = frame_tensor_batch.unsqueeze(2)
-
-            raw_stream_embedding, new_hidden_state = model.streaming_vision_encoder(
-                frame_tensor_streaming_input,
-                curr_hidden_state_streaming
-            )
-
-            # Align and Normalize the raw streaming embedding
-            if config.model.use_streaming_vision_align:
-                aligned_stream_embedding = model.streaming_vision_align(raw_stream_embedding)
-            else:
-                aligned_stream_embedding = model.vision_align(raw_stream_embedding)
-            stream_embedding = aligned_stream_embedding / (aligned_stream_embedding.norm(dim=-1, keepdim=True) + 1e-9)
-
-            # Update the hidden state for the next frame
-            curr_hidden_state_streaming = new_hidden_state
-
-            # Full Model Feature for the corresponding window
-            window_start_idx = frame_idx - model_max_frames + 1
-            window_end_idx = frame_idx + 1 # Slicing is exclusive at the end
-            current_window_frames_data = all_frames_raw[window_start_idx : window_end_idx] # List of BGR numpy arrays
-
-            # Preprocess all frames in the window and stack them
-            list_of_frame_tensors = [preprocess_frame(f, regular_transform, device) for f in current_window_frames_data]
-            window_tensor_full = torch.stack(list_of_frame_tensors, dim=2) # Shape: [B=1, C, T, H, W]
-
-            # Pass the full window tensor to the full vision encoder
-            raw_target_embedding = model.vision_encoder(window_tensor_full)
-
-            # Align and Normalize the raw target embedding
-            aligned_target_embedding = model.vision_align(raw_target_embedding)
-            target_embedding = aligned_target_embedding / (aligned_target_embedding.norm(dim=-1, keepdim=True) + 1e-9)
-
-            # Cosine sim
-            similarity = torch.nn.functional.cosine_similarity(stream_embedding, target_embedding, dim=1)
-
-            sim_value = similarity.item()
-            cosine_similarities.append(sim_value)
-            frame_indices_for_plot.append(frame_idx)
-
-        # Evaluation Complete
-        if cosine_similarities:
-            avg_similarity = sum(cosine_similarities) / len(cosine_similarities)
-            logger.info(f"Evaluation complete. Average Cosine Similarity: {avg_similarity:.4f}")
-
-            # Plot and save
-            plt.figure(figsize=(12, 6))
-            plt.plot(frame_indices_for_plot, cosine_similarities, 'g-', label='Cosine Similarity (Streaming vs Full Window)')
-            plt.xlabel(f'Frame Number (Window of {model_max_frames} frames ending at this frame)')
-            plt.ylabel('Cosine Similarity')
-            plt.title(f'Feature Similarity Over Time - Video: {os.path.basename(video_path)}\nTraining Step: {global_step}')
-            plt.legend()
-            plt.grid(True)
-            plt.ylim(-0.1, 1.1) # Cosine similarity range
-            plt.axhline(y=avg_similarity, color='b', linestyle='--', label=f'Average: {avg_similarity:.4f}')
-            plt.legend()
-
-            graph_save_dir = join(output_dir, 'cosine_sim_graphs')
-            os.makedirs(graph_save_dir, exist_ok=True)
-            graph_filename = f'graph_step_{global_step:07d}.png' # Use padded step number
-            graph_save_path = join(graph_save_dir, graph_filename)
-
-            plt.savefig(graph_save_path)
-            logger.info(f"Saved evaluation plot to {graph_save_path}")
-
-            plt.close('all')
-        else:
-            logger.warning("No cosine similarities were calculated during evaluation.")
-
-
-    # Set model back to training mode
-    model.train()
-    logger.info("Evaluation complete. Model set back to train() mode.")
-
-    return avg_similarity
-
-
 # Main training function
-# Main training function
-
 def train(
     model,
     train_loaders,
@@ -347,8 +90,7 @@ def train(
     scaler,
     config,
     data_type,
-    skip_num=0,
-    log_debug=False,
+    skip_num=0
 ):
     """Simplified SPFS training loop following pretrain scheduler logic."""
 
@@ -589,13 +331,6 @@ def main(config):
         num_steps_per_epoch=num_steps_per_epoch,
     )
 
-    # restore RNG state from checkpoint if available
-    if config.resume and os.path.isfile(config.pretrained_path):
-        try:
-            ckpt = torch.load(config.pretrained_path, map_location="cpu")
-            set_rng_state(ckpt.get("rng_state"))
-        except Exception as e:
-            logger.warning(f"Failed to load RNG state from checkpoint: {e}")
     if is_main_process() and config.wandb.enable:
         wandb.watch(model)
 
@@ -633,7 +368,6 @@ def main(config):
                 config,
                 data_type,
                 skip_num = global_step - start_step,
-                log_debug = True
             )
 
         # Save checkpoint before next epoch
@@ -661,7 +395,6 @@ def main(config):
                 "config": config,
                 "epoch": epoch,
                 "global_step": global_step,
-                "rng_state": get_rng_state(),
             }
             if config.get("save_latest", False):
                 torch.save(save_obj, join(config.output_dir, "ckpt_latest.pth"))
