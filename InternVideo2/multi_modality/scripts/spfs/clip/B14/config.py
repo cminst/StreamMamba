@@ -128,15 +128,15 @@ gradient_checkpointing = True
 # ========================= wandb ==========================
 wandb = dict(
     enable=True,
-    entity="qingy2019-conker-mobile-inc-",  # username or team name to store the runs, see https://docs.wandb.ai/ref/python/init
-    project="window_iv2",  # setup in your command line
+    entity="qingy2019-conker-mobile-inc-",
+    project="window_iv2",
 )
 dist_url = "env://"
 device = "cuda"
 mode = "pt"
 
 # ========================= others ==========================
-output_dir = './train_outputs_spfs/'  # output dir
+output_dir = './train_outputs_spfs/'
 resume = False
 debug = False
 log_freq = 1
