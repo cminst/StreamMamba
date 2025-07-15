@@ -1,4 +1,3 @@
-import math
 import torch
 from torch import nn
 from mamba_ssm.modules.mamba2 import Mamba2
