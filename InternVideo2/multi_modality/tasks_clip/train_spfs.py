@@ -61,12 +61,9 @@ def preprocess_frame(frame_bgr_np, transform, device):
     frame_rgb_np = cv2.cvtColor(frame_bgr_np, cv2.COLOR_BGR2RGB)
     pil_image = Image.fromarray(frame_rgb_np)
 
-    # Apply the transform pipeline
-    # Output shape: [C, H, W]
     transformed_tensor_chw = transform(pil_image)
 
-    # Add batch dimension and move to device
-    frame_tensor_batch = transformed_tensor_chw.unsqueeze(0).to(device) # [1, C, H, W]
+    frame_tensor_batch = transformed_tensor_chw.unsqueeze(0).to(device)
 
     return frame_tensor_batch
 
@@ -85,7 +82,11 @@ def train(
     data_type,
     skip_num=0
 ):
-    """Simplified SPFS training loop following pretrain scheduler logic."""
+    """
+    Hybrid SPFS training loop.
+    - Phase 1 (epoch 0): Warms up the prediction head.
+    - Phase 2 (epoch > 0): Jointly fine-tunes all components.
+    """
 
     model_without_ddp = model.module if config.distributed else model
     model.train()
@@ -117,6 +118,7 @@ def train(
         disable=not is_main_process(),
     )
 
+    # Loss fns and hyperparam
     cosine_loss_fn = lambda pred, target: 1 - torch.nn.functional.cosine_similarity(pred, target.detach(), dim=-1).mean()
     bce_loss_fn = BCEWithLogitsLoss()
     primary_loss_fn = MSELoss()
@@ -132,6 +134,7 @@ def train(
         B, C, T, H, W = image.shape
         assert T >= MODEL_MAX_FRAMES
 
+        # Warm up the hidden state with the first few frames without calculating loss
         h = model.streaming_vision_encoder.init_hidden(batch_size=B, device=device)
         with torch.no_grad():
             for t in range(MODEL_MAX_FRAMES - 1):
@@ -140,39 +143,53 @@ def train(
 
         num_steps = T - (MODEL_MAX_FRAMES - 1)
 
-        loss_primary = loss_pred = loss_calib = loss_skip = 0.0
+        loss_primary_acc = loss_pred_acc = loss_calib_acc = loss_skip_acc = 0.0
 
         for step in range(num_steps):
             idx_curr = (MODEL_MAX_FRAMES - 1) + step
             frame_curr = image[:, :, idx_curr, :, :].unsqueeze(2)
+
+            # out_t is for primary distillation loss, new_h is the updated hidden state
             out_t, new_h = model.streaming_vision_encoder(frame_curr, h)
 
-            window_start = idx_curr - MODEL_MAX_FRAMES + 1
-            window_end = idx_curr + 1
-            curr_window = image[:, :, window_start:window_end, :, :]
+            # Teacher targets for distillation
             with torch.no_grad():
+                window_start = idx_curr - MODEL_MAX_FRAMES + 1
+                window_end = idx_curr + 1
+                curr_window = image[:, :, window_start:window_end, :, :]
                 target_curr = model_without_ddp.vision_encoder(curr_window)
                 target_curr = model_without_ddp.vision_align(target_curr)
 
-            next_window_start = window_start + 1
-            next_window_end = window_end + 1
-            next_window = image[:, :, next_window_start:next_window_end, :, :]
-            with torch.no_grad():
+                # ------------------------------------
+
+                next_window_start = window_start + 1
+                next_window_end = window_end + 1
+                next_window = image[:, :, next_window_start:next_window_end, :, :]
                 target_next = model_without_ddp.vision_encoder(next_window)
                 target_next = model_without_ddp.vision_align(target_next)
 
+            # mu_t = predicted next embedding, conf_logit = confidence
             mu_t, logvar = model.streaming_vision_encoder.rnn.predict_next_feat(new_h)
             conf_logit = -logvar.squeeze(-1)
 
-            L_primary = primary_loss_fn(out_t, target_curr)
-            L_pred = cosine_loss_fn(mu_t, target_next)
-            with torch.no_grad():
-                pred_quality = torch.nn.functional.cosine_similarity(mu_t, target_next, dim=-1)
-                target_c = (pred_quality > 0.98).float()
-            L_calib = bce_loss_fn(conf_logit.squeeze(), target_c)
-            L_skip = -(torch.log(torch.sigmoid(conf_logit) + 1e-8)).mean()
+            # Use a hybrid loss for the 2 phases
+            if epoch == 0:
+                # Phase 1: Warm-up the Prediction Head
+                L_pred = cosine_loss_fn(mu_t, target_next)
+                loss = L_pred
+                L_primary = L_calib = L_skip = torch.tensor(0.0, device=device) # Set others to 0
 
-            loss = L_primary + L_pred + lambda_calib * L_calib + lambda_skip * L_skip
+            else:
+                # Phase 2: Joint Fine-tuning
+                L_primary = primary_loss_fn(out_t, target_curr)
+                L_pred = cosine_loss_fn(mu_t, target_next)
+                with torch.no_grad():
+                    pred_quality = torch.nn.functional.cosine_similarity(mu_t, target_next, dim=-1)
+                    target_c = (pred_quality > 0.98).float()
+                L_calib = bce_loss_fn(conf_logit.squeeze(-1), target_c)
+                L_skip = -(torch.log(torch.sigmoid(conf_logit) + 1e-8)).mean()
+
+                loss = L_primary + L_pred + lambda_calib * L_calib + lambda_skip * L_skip
 
             if hasattr(config, "deepspeed") and config.deepspeed.enable:
                 model.backward(loss)
@@ -193,17 +210,20 @@ def train(
                     optimizer.step()
                 scheduler.step()
 
-            h = tuple(hh.detach().clone() for hh in new_h)
-            loss_primary += L_primary.item()
-            loss_pred += L_pred.item()
-            loss_calib += L_calib.item()
-            loss_skip += L_skip.item()
+            # Backprop through time (BPTT)
+            h = new_h
+
+            # Accumulate itemized losses for logging
+            loss_primary_acc += L_primary.item()
+            loss_pred_acc += L_pred.item()
+            loss_calib_acc += L_calib.item()
+            loss_skip_acc += L_skip.item()
 
         step_count = max(num_steps, 1)
-        metric_logger.update(L_primary=loss_primary / step_count)
-        metric_logger.update(L_pred=loss_pred / step_count)
-        metric_logger.update(L_calib=loss_calib / step_count)
-        metric_logger.update(L_skip=loss_skip / step_count)
+        metric_logger.update(L_primary=loss_primary_acc / step_count)
+        metric_logger.update(L_pred=loss_pred_acc / step_count)
+        metric_logger.update(L_calib=loss_calib_acc / step_count)
+        metric_logger.update(L_skip=loss_skip_acc / step_count)
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
 
         diff_lr = None
@@ -213,26 +233,26 @@ def train(
                 break
         metric_logger.update(different_lr=diff_lr if diff_lr is not None else optimizer.param_groups[0]["lr"])
 
+        # Logging
         global_step += 1
         if i % config.log_freq == 0:
             progress_bar.set_postfix({
-                "L_primary": metric_logger.meters["L_primary"].avg,
-                "L_pred": metric_logger.meters["L_pred"].avg,
-                "L_calib": metric_logger.meters["L_calib"].avg,
-                "L_skip": metric_logger.meters["L_skip"].avg,
+                "L_primary": f"{metric_logger.meters['L_primary'].avg:.4f}",
+                "L_pred": f"{metric_logger.meters['L_pred'].avg:.4f}",
+                "L_calib": f"{metric_logger.meters['L_calib'].avg:.4f}",
             })
             if is_main_process():
                 logger.info(f"Training: [Epoch {epoch}] [Step {i}] {metric_logger}")
             if is_main_process() and config.wandb.enable:
                 log_dict_to_wandb(metric_logger.get_global_avg_dict(), step=global_step, prefix="train/")
 
+    # End-of-epoch logging
     metric_logger.synchronize_between_processes()
     logger.info(f"Averaged stats for Epoch [{epoch}]: {metric_logger.global_avg()}")
     if is_main_process() and config.wandb.enable:
         log_dict_to_wandb(metric_logger.get_global_avg_dict(), step=global_step, prefix=f"epoch_{epoch}/")
 
     return global_step
-
 
 def clone_collate_fn(batch):
     # Recursively clone every Tensor in the sample so its storage is fresh
@@ -272,7 +292,6 @@ def setup_dataloaders(config, mode="pt"):
 
     # =============================================================
 
-    # eval side stays the same
     test_datasets, test_dataset_names = create_dataset(f"{mode}_eval", config)
     test_loaders = create_loader(
         test_datasets,
