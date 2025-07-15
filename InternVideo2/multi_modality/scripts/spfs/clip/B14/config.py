@@ -79,7 +79,7 @@ model = dict(
 
 optimizer = dict(
     opt='adamW',
-    lr=1e-4,
+    lr=1e-5,
     opt_betas=[0.9, 0.98],
     weight_decay=0.01,
 )
