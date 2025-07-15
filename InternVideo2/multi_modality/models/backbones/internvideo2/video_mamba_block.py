@@ -83,8 +83,8 @@ class CrossMambaFiLM(VideoMambaBlock):
         return super().forward(frame_feat, state)
 
 
-class CrossMambaSPFS(CrossMambaFiLM):
-    """CrossMambaFiLM with a low-rank feature predictor for SPFS."""
+class MambaSPFS(VideoMambaBlock):
+    """VideoMambaBlock with a low-rank feature predictor for SPFS."""
 
     def __init__(self, *args, pred_rank=32, **kw):
         super().__init__(*args, **kw)
@@ -95,8 +95,8 @@ class CrossMambaSPFS(CrossMambaFiLM):
         self.logvar = nn.Linear(self.ssm.d_model, 1)
         self.last_hidden = None
 
-    def forward(self, frame_feat, state, gamma=None, beta=None, tau=None):
-        clip_emb, state = super().forward(frame_feat, state, gamma, beta, tau)
+    def forward(self, frame_feat, state):
+        clip_emb, state = super().forward(frame_feat, state)
         # Store hidden representation for next-step prediction
         self.last_hidden = self._hidden
         return clip_emb, state

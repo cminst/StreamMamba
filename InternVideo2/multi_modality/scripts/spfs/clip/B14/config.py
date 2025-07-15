@@ -54,7 +54,7 @@ model = dict(
     ),
     streaming_vision_encoder=dict(
         vit_lite_embed_dim=768,
-        rnn_type='stream_mamba',
+        rnn_type='mamba_spfs',
         rnn_hidden_size=1024,
         rnn_num_layers=3,
         rnn_dropout=0.0,
