@@ -2,7 +2,6 @@
 import datetime
 import logging
 import os
-import pickle
 import time
 import random
 import numpy as np
@@ -22,7 +21,6 @@ import torch
 import torch.backends.cudnn as cudnn
 import torch.distributed as dist
 import wandb
-from huggingface_hub import hf_hub_download
 from PIL import Image
 from torch.nn import BCEWithLogitsLoss, MSELoss, CosineEmbeddingLoss
 from torch.utils.data._utils.collate import default_collate
@@ -38,11 +36,6 @@ from utils.basic_utils import MetricLogger, SmoothedValue, setup_seed
 from utils.config_utils import setup_main
 from utils.distributed import get_rank, is_main_process
 from utils.logger import log_dict_to_wandb, setup_wandb
-from utils.optimizer import (
-    add_different_lr,
-    create_optimizer_params_group,
-    extend_optimizer_with_param_groups,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -401,7 +394,6 @@ def main(config):
             else:
                 torch.save(save_obj, join(config.output_dir, f"ckpt_{epoch:02d}.pth"))
 
-        # -- End of Epoch --
         start_step = global_step
         dist.barrier()
 
