@@ -1,7 +1,7 @@
 import os
 import torch
 import torch.nn.functional as F
-from timm.models.layers import DropPath, to_2tuple
+from timm.layers import DropPath, to_2tuple
 from torch import nn
 
 import torch.utils.checkpoint as checkpoint
