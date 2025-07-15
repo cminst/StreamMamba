@@ -78,9 +78,7 @@ model = dict(
         teacher_clip_embed_dim = 768,
         text_embed_dim = 512,
     ),
-    mobileclip_type=dict(
-        name="mobileclip_b"
-    ),
+    mobileclip_type=dict(name="mobileclip_b"),
     temp=1 / 100.0,
     temp_min=1 / 100.0,
     use_streaming_vision_align = False,
@@ -138,7 +136,7 @@ device = "cuda"
 mode = "pt"
 
 # ========================= others ==========================
-output_dir = './training_outputs_window/'  # output dir
+output_dir = './train_outputs_pretrain/'  # output dir
 resume = True  # if True, load optimizer and scheduler states as well
 debug = False
 log_freq = 1
