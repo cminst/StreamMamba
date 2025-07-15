@@ -34,7 +34,7 @@ class InternVideo2_CLIP_small(nn.Module):
         self.is_pretrain = is_pretrain
 
         # Load MobileCLIP encoder configuration
-        self.mobileclip_cfg = mobileclip_cfg = json.load(
+        self.mobileclip_cfg = json.load(
             open(os.path.join(
                 "./models/backbones/internvideo2/mobileclip/configs/" +
                 f"{self.config.model.mobileclip_type.name}.json"))
@@ -429,9 +429,7 @@ class InternVideo2_CLIP_small(nn.Module):
         top_probs, top_labels = label_probs.float().cpu().topk(top, dim=-1)
         return top_probs, top_labels
 
-    # ------------------------------------------------------------------
-    # Parameter Freezing Utilities
-    # ------------------------------------------------------------------
+    # ========== Parameter Freezing Utilities ==========
     def _set_requires_grad(self, module, flag: bool):
         for p in module.parameters():
             p.requires_grad = flag
@@ -496,4 +494,3 @@ class InternVideo2_CLIP_small(nn.Module):
     def unfreeze_confidence_head(self):
         if hasattr(self.streaming_vision_encoder.rnn, 'logvar'):
             self._set_requires_grad(self.streaming_vision_encoder.rnn.logvar, True)
-
