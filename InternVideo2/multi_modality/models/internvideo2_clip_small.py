@@ -355,6 +355,7 @@ class InternVideo2_CLIP_small(nn.Module):
             fc_hidden_layers = config.fc_hidden_layers,
             teacher_clip_embed_dim = config.teacher_clip_embed_dim,
             text_embed_dim = self.mobileclip_cfg["embed_dim"],
+            pred_rank = config.get('pred_rank', None), # Rank for SPFS
         )
 
         return streaming_vision_encoder
