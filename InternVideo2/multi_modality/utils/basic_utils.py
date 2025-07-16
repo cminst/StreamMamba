@@ -132,6 +132,11 @@ class MetricLogger(object):
         d = {f"{prefix}{k}": m.global_avg if m.count > 0 else 0. for k, m in self.meters.items()}
         return d
 
+    def get_value_dict(self, prefix=""):
+        """include a separator (e.g., `/`, or "_") at the end of `prefix`"""
+        d = {f"{prefix}{k}": m.value if m.count > 0 else 0. for k, m in self.meters.items()}
+        return d
+
     def synchronize_between_processes(self):
         for meter in self.meters.values():
             meter.synchronize_between_processes()
@@ -253,7 +258,7 @@ def find_files_by_suffix_recursively(root: str, suffix: Union[str, List[str]]):
     Args:
         root: path to the directory to start search files
         suffix: any str as suffix, or can match multiple such strings
-            when input is List[str]. 
+            when input is List[str].
             Example 1, e.g., suffix: `.jpg` or [`.jpg`, `.png`]
             Example 2, e.g., use a `*` in the `suffix`: `START*.jpg.`.
     """

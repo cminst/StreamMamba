@@ -93,8 +93,8 @@ def train(
     model.train()
 
     metric_logger = MetricLogger(delimiter="  ")
-    metric_logger.add_meter("lr", SmoothedValue(window=1, fmt="{value:.6f}"))
-    metric_logger.add_meter("different_lr", SmoothedValue(window=1, fmt="{value:.6f}"))
+    metric_logger.add_meter("lr", SmoothedValue(window=1, fmt="{value:.10f}"))
+    metric_logger.add_meter("different_lr", SmoothedValue(window=1, fmt="{value:.10f}"))
     metric_logger.add_meter("L_primary", SmoothedValue(window=1, fmt="{value:.4f}"))
     metric_logger.add_meter("L_pred", SmoothedValue(window=1, fmt="{value:.4f}"))
     metric_logger.add_meter("L_calib", SmoothedValue(window=1, fmt="{value:.4f}"))
@@ -249,15 +249,15 @@ def train(
         global_step += step_count
         if i % config.log_freq == 0:
             progress_bar.set_postfix(
-                L_primary=f"{metric_logger.meters['L_primary'].avg:.4f}",
-                L_pred=f"{metric_logger.meters['L_pred'].avg:.4f}",
-                L_calib=f"{metric_logger.meters['L_calib'].avg:.4f}",
+                L_primary=f"{metric_logger.meters['L_primary']:.4f}",
+                L_pred=f"{metric_logger.meters['L_pred']:.4f}",
+                L_calib=f"{metric_logger.meters['L_calib']:.4f}",
             )
             if is_main_process():
                 logger.info(f"Training: [Epoch {epoch}] [Step {i}] {metric_logger}")
             if is_main_process() and config.wandb.enable:
                 log_dict_to_wandb(
-                    metric_logger.get_global_avg_dict(),
+                    metric_logger.get_value_dict(),
                     step=global_step,
                     prefix="train/",
                 )
@@ -266,7 +266,7 @@ def train(
     logger.info(f"Averaged stats for Epoch [{epoch}]: {metric_logger.global_avg()}")
     if is_main_process() and config.wandb.enable:
         log_dict_to_wandb(
-            metric_logger.get_global_avg_dict(),
+            metric_logger.get_value_dict(),
             step=global_step,
             prefix=f"epoch_{epoch}/",
         )
