@@ -625,7 +625,7 @@ def train(
                 logger.info(f"{header} [Step {i}] {metric_logger}")
 
             if is_main_process() and config.wandb.enable:
-                averaged_logs_for_wandb = metric_logger.get_global_avg_dict()
+                averaged_logs_for_wandb = metric_logger.get_value_dict()
                 log_dict_to_wandb(averaged_logs_for_wandb, step=global_step, prefix="train/")
 
 
@@ -662,7 +662,7 @@ def train(
     metric_logger.synchronize_between_processes()
     logger.info(f"Averaged stats for Epoch [{epoch}]: {metric_logger.global_avg()}")
     if is_main_process() and config.wandb.enable:
-        log_dict_to_wandb(metric_logger.get_global_avg_dict(), step=global_step, prefix=f"epoch_{epoch}/")
+        log_dict_to_wandb(metric_logger.get_value_dict(), step=global_step, prefix=f"epoch_{epoch}/")
 
     return global_step
 
