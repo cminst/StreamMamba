@@ -3,11 +3,11 @@
 ## Requirements
 
 ```shell
-pip install -r requirements.txt
+~/IV2/mamba$ pip install -e .
+~/IV2/InternVideo2/multi_modality$ pip install -r requirements.txt
 ```
 
-In addition, to ensure no issues arise with installation of Flash Attention, feel free to install the correct version from [here](https://github.com/mjun0812/flash-attention-prebuild-wheels)
-
+In addition, to ensure no issues arise with installation of Flash Attention, feel free to install prebuilt wheels from [here](https://github.com/mjun0812/flash-attention-prebuild-wheels)
 
 ## Note
 

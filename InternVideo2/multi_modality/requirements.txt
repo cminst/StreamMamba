@@ -3,7 +3,6 @@ decord
 deepspeed
 einops
 huggingface_hub
-flash_attn
 fvcore
 imageio
 librosa
