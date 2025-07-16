@@ -161,23 +161,24 @@ def train(
 
                 # Teacher targets
                 with torch.no_grad():
-                    window_start = idx_curr - MODEL_MAX_FRAMES + 1
-                    window_end = idx_curr + 1
-                    curr_window = image[:, :, window_start:window_end, :, :]
-
-                    # InternVideo2 B14 embeddings for distillation
-                    target_curr = model_without_ddp.vision_align(
-                        model_without_ddp.vision_encoder(curr_window)
-                    )
-
                     # Next-frame target (MobileCLIP)
                     if idx_curr + 1 < T:
                         next_frame = image[:, :, idx_curr + 1, :, :]
-                    else:                       # last frame – use current as fallback
+                    else:
                         next_frame = image[:, :, idx_curr, :, :]
-                    target_next, _ = model_without_ddp.streaming_vision_encoder.vit_lite.extract_features(
-                        next_frame
-                    )
+
+                    target_next, _ = model_without_ddp.streaming_vision_encoder.vit_lite.extract_features(next_frame)
+
+                    # InternVideo2 B14 embeddings for distillation (Phase 2 only)
+                    if epoch > 0:
+                        window_start = idx_curr - MODEL_MAX_FRAMES + 1
+                        window_end = idx_curr + 1
+                        curr_window = image[:, :, window_start:window_end, :, :]
+                        target_curr = model_without_ddp.vision_align(
+                            model_without_ddp.vision_encoder(curr_window)
+                        )
+                    else:
+                        target_curr = None
 
                 # ----------
 
