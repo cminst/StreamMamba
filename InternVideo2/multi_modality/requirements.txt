@@ -1,6 +1,7 @@
 av
 decord
 deepspeed
+open-clip-torch
 einops
 huggingface_hub
 fvcore
