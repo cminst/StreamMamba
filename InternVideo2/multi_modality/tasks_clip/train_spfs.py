@@ -246,7 +246,7 @@ def train(
         )
         metric_logger.update(different_lr=diff_lr)
 
-        global_step += 1
+        global_step += step_count
         if i % config.log_freq == 0:
             progress_bar.set_postfix(
                 L_primary=f"{metric_logger.meters['L_primary'].avg:.4f}",
