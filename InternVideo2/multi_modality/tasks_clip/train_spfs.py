@@ -128,19 +128,21 @@ def train(
     MODEL_MAX_FRAMES = config.num_frames
 
     for i, data_pair in enumerate(progress_bar):
-        media_type, (image, text, idx) = data_pair
+        _, (image, _, _) = data_pair
         image = image.to(device, non_blocking=True)
         image = image.permute(0, 2, 1, 3, 4)
+
         B, C, T, H, W = image.shape
         assert T >= MODEL_MAX_FRAMES
 
-        with torch.cuda.amp.autocast(enabled=config.use_half_precision, dtype=data_type):
-            # Warm up the hidden state with the first few frames without calculating loss
+        with torch.amp.autocast('cuda', enabled=config.use_half_precision, dtype=data_type):
+            # Warm up hidden state
             h = model.streaming_vision_encoder.init_hidden(batch_size=B, device=device)
-            with torch.no_grad():
-                for t in range(MODEL_MAX_FRAMES - 1):
-                    frame = image[:, :, t, :, :].unsqueeze(2)
-                    _, h = model.streaming_vision_encoder(frame, h)
+            if epoch > 0:  # Only run streaming_vision_encoder in phase 2
+                with torch.no_grad():
+                    for t in range(MODEL_MAX_FRAMES - 1):
+                        frame = image[:, :, t, :, :].unsqueeze(2)
+                        _, h = model.streaming_vision_encoder(frame, h)
 
             num_steps = T - (MODEL_MAX_FRAMES - 1)
 
@@ -150,8 +152,13 @@ def train(
                 idx_curr = (MODEL_MAX_FRAMES - 1) + step
                 frame_curr = image[:, :, idx_curr, :, :].unsqueeze(2)
 
-                # out_t is for primary distillation loss, new_h is the updated hidden state
-                out_t, new_h = model.streaming_vision_encoder(frame_curr, h)
+                if epoch > 0:  # Only run streaming_vision_encoder in phase 2
+                    # out_t is for primary distillation loss, new_h is the updated hidden state
+                    out_t, new_h = model.streaming_vision_encoder(frame_curr, h)
+                    out_t = model_without_ddp.vision_align(out_t)
+                else:
+                    out_t = None
+                    new_h = h
 
                 # Teacher targets for distillation
                 with torch.no_grad():
@@ -160,13 +167,14 @@ def train(
                     curr_window = image[:, :, window_start:window_end, :, :]
 
                     # Only calculate the InternVideo2 B14 embeddings for Phase 2
-                    if epoch != 0:
-                        target_curr = model_without_ddp.vision_align(model_without_ddp.vision_encoder(curr_window))
-                    else:
+                    if epoch == 0:
                         target_curr = None
+                    else:
+                        target_curr = model_without_ddp.vision_align(
+                            model_without_ddp.vision_encoder(curr_window)
+                        )
 
-                    # ------------------------------------
-                    # Use the next frame's mobileclip embedding
+                    # MobileCLIP embedding of next frame
                     if idx_curr + 1 < T:
                         next_frame = image[:, :, idx_curr + 1, :, :].unsqueeze(2)
                         next_frame = next_frame.squeeze(2)
@@ -219,10 +227,10 @@ def train(
                         optimizer.step()
                     scheduler.step()
 
-                # Backprop through time (BPTT)
-                h = new_h
+                # Backprop through time (BPTT, Phase 2 Only)
+                if epoch > 0:
+                    h = new_h
 
-                # Accumulate itemized losses for logging
                 loss_primary_acc += L_primary.item()
                 loss_pred_acc += L_pred.item()
                 loss_calib_acc += L_calib.item()
@@ -255,7 +263,6 @@ def train(
             if is_main_process() and config.wandb.enable:
                 log_dict_to_wandb(metric_logger.get_global_avg_dict(), step=global_step, prefix="train/")
 
-    # End-of-epoch logging
     metric_logger.synchronize_between_processes()
     logger.info(f"Averaged stats for Epoch [{epoch}]: {metric_logger.global_avg()}")
     if is_main_process() and config.wandb.enable:
