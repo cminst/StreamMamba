@@ -249,9 +249,9 @@ def train(
         global_step += step_count
         if i % config.log_freq == 0:
             progress_bar.set_postfix(
-                L_primary=f"{metric_logger.meters['L_primary']:.4f}",
-                L_pred=f"{metric_logger.meters['L_pred']:.4f}",
-                L_calib=f"{metric_logger.meters['L_calib']:.4f}",
+                L_primary=f"{metric_logger.meters['L_primary'].value:.4f}",
+                L_pred=f"{metric_logger.meters['L_pred'].value:.4f}",
+                L_calib=f"{metric_logger.meters['L_calib'].value:.4f}",
             )
             if is_main_process():
                 logger.info(f"Training: [Epoch {epoch}] [Step {i}] {metric_logger}")
