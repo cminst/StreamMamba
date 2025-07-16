@@ -72,7 +72,7 @@ def train(
     model,
     train_loaders,
     optimizer,
-    tokenizer,
+    _, # don't need tokenizer
     epoch,
     global_step,
     device,
@@ -80,11 +80,12 @@ def train(
     scaler,
     config,
     data_type,
-    skip_num=0
+    skip_num=0,
 ):
     """
     Hybrid SPFS training loop.
-    - Phase 1 (epoch 0): Warms up the prediction head.
+    - Phase 1 (epoch 0): Warms up the prediction head and also feeds video
+      through the Mamba so the hidden state is updated correctly.
     - Phase 2 (epoch > 0): Jointly fine-tunes all components.
     """
 
@@ -106,7 +107,7 @@ def train(
 
     seed = config.seed + epoch
     train_loader_agg = MetaLoader_rs(
-        name2loader=dict(list(zip(media_types, train_loaders))),
+        name2loader=dict(zip(media_types, train_loaders)),
         skip_num=skip_num,
         seed=seed,
     )
@@ -118,8 +119,10 @@ def train(
         disable=not is_main_process(),
     )
 
-    # Loss fns and hyperparam
-    cosine_loss_fn = lambda pred, target: 1 - torch.nn.functional.cosine_similarity(pred, target.detach(), dim=-1).mean()
+    # Loss fns and hyper-param
+    cosine_loss_fn = lambda pred, target: 1 - torch.nn.functional.cosine_similarity(
+        pred, target.detach(), dim=-1
+    ).mean()
     bce_loss_fn = BCEWithLogitsLoss()
     primary_loss_fn = MSELoss()
 
@@ -129,80 +132,72 @@ def train(
 
     for i, data_pair in enumerate(progress_bar):
         _, (image, _, _) = data_pair
+
         image = image.to(device, non_blocking=True)
         image = image.permute(0, 2, 1, 3, 4)
 
         B, C, T, H, W = image.shape
-        assert T >= MODEL_MAX_FRAMES
+        assert T >= MODEL_MAX_FRAMES, f"Video batch contains sequences shorter than {MODEL_MAX_FRAMES} frames."
 
         with torch.amp.autocast('cuda', enabled=config.use_half_precision, dtype=data_type):
             # Warm up hidden state
             h = model.streaming_vision_encoder.init_hidden(batch_size=B, device=device)
-            if epoch > 0:  # Only run streaming_vision_encoder in phase 2
+
+            for t in range(MODEL_MAX_FRAMES - 1):
+                frame = image[:, :, t, :, :].unsqueeze(2) # [B, C, 1, H, W]
                 with torch.no_grad():
-                    for t in range(MODEL_MAX_FRAMES - 1):
-                        frame = image[:, :, t, :, :].unsqueeze(2)
-                        _, h = model.streaming_vision_encoder(frame, h)
+                    _, h = model.streaming_vision_encoder(frame, h)
 
             num_steps = T - (MODEL_MAX_FRAMES - 1)
-
             loss_primary_acc = loss_pred_acc = loss_calib_acc = loss_skip_acc = 0.0
 
             for step in range(num_steps):
                 idx_curr = (MODEL_MAX_FRAMES - 1) + step
                 frame_curr = image[:, :, idx_curr, :, :].unsqueeze(2)
 
-                if epoch > 0:  # Only run streaming_vision_encoder in phase 2
-                    # out_t is for primary distillation loss, new_h is the updated hidden state
-                    out_t, new_h = model.streaming_vision_encoder(frame_curr, h)
-                    out_t = model_without_ddp.vision_align(out_t)
-                else:
-                    out_t = None
-                    new_h = h
+                # Forward through Mamba
+                out_t, new_h = model.streaming_vision_encoder(frame_curr, h)
+                out_t = model_without_ddp.vision_align(out_t)
 
-                # Teacher targets for distillation
+                # Teacher targets
                 with torch.no_grad():
                     window_start = idx_curr - MODEL_MAX_FRAMES + 1
                     window_end = idx_curr + 1
                     curr_window = image[:, :, window_start:window_end, :, :]
 
-                    # Only calculate the InternVideo2 B14 embeddings for Phase 2
-                    if epoch == 0:
-                        target_curr = None
-                    else:
-                        target_curr = model_without_ddp.vision_align(
-                            model_without_ddp.vision_encoder(curr_window)
-                        )
+                    # InternVideo2 B14 embeddings for distillation
+                    target_curr = model_without_ddp.vision_align(
+                        model_without_ddp.vision_encoder(curr_window)
+                    )
 
-                    # MobileCLIP embedding of next frame
+                    # Next-frame target (MobileCLIP)
                     if idx_curr + 1 < T:
-                        next_frame = image[:, :, idx_curr + 1, :, :].unsqueeze(2)
-                        next_frame = next_frame.squeeze(2)
-                        target_next, _ = model_without_ddp.streaming_vision_encoder.vit_lite.extract_features(next_frame)
-                    else:
-                        # Use current frame as fallback just in case
-                        current_frame = image[:, :, idx_curr, :, :].unsqueeze(2)
-                        current_frame = current_frame.squeeze(2)
-                        target_next, _ = model_without_ddp.streaming_vision_encoder.vit_lite.extract_features(current_frame)
+                        next_frame = image[:, :, idx_curr + 1, :, :]
+                    else:                       # last frame – use current as fallback
+                        next_frame = image[:, :, idx_curr, :, :]
+                    target_next, _ = model_without_ddp.streaming_vision_encoder.vit_lite.extract_features(
+                        next_frame
+                    )
 
-                # mu_t = predicted next embedding, conf_logit = confidence
+                # ----------
+
                 mu_t, logvar = model.streaming_vision_encoder.rnn.predict_next_feat()
                 conf_logit = -logvar.squeeze(-1)
 
-                # Use a hybrid loss for the 2 phases
+                L_pred = cosine_loss_fn(mu_t, target_next)
+
                 if epoch == 0:
-                    # Phase 1: Warm-up the Prediction Head
-                    L_pred = cosine_loss_fn(mu_t, target_next)
+                    # Phase-1: only train predictor head (primary & other losses = 0)
                     loss = L_pred
                     L_primary = L_calib = L_skip = torch.tensor(0.0, device=device) # Set others to 0
-
                 else:
-                    # Phase 2: Joint Fine-tuning
+                    # Phase-2: joint fine-tuning
                     L_primary = primary_loss_fn(out_t, target_curr)
-                    L_pred = cosine_loss_fn(mu_t, target_next)
+
                     with torch.no_grad():
-                        pred_quality = torch.nn.functional.cosine_similarity(mu_t, target_next, dim=-1)
-                        target_c = (pred_quality > 0.98).float()
+                        target_c = (
+                            torch.nn.functional.cosine_similarity(mu_t, target_next, dim=-1) > 0.98
+                        ).float()
                     L_calib = bce_loss_fn(conf_logit.squeeze(-1), target_c)
                     L_skip = -(torch.log(torch.sigmoid(conf_logit) + 1e-8)).mean()
 
@@ -211,25 +206,27 @@ def train(
                 if hasattr(config, "deepspeed") and config.deepspeed.enable:
                     model.backward(loss)
                     model.step()
-                else:
+                else:  # standard AMP path
                     optimizer.zero_grad()
                     if config.use_half_precision:
                         scaler.scale(loss).backward()
                         if config.optimizer.max_grad_norm > 0:
                             scaler.unscale_(optimizer)
-                            torch.nn.utils.clip_grad_norm_(model.parameters(), config.optimizer.max_grad_norm)
+                            torch.nn.utils.clip_grad_norm_(
+                                model.parameters(), config.optimizer.max_grad_norm
+                            )
                         scaler.step(optimizer)
                         scaler.update()
                     else:
                         loss.backward()
                         if config.optimizer.max_grad_norm > 0:
-                            torch.nn.utils.clip_grad_norm_(model.parameters(), config.optimizer.max_grad_norm)
+                            torch.nn.utils.clip_grad_norm_(
+                                model.parameters(), config.optimizer.max_grad_norm
+                            )
                         optimizer.step()
                     scheduler.step()
 
-                # Backprop through time (BPTT, Phase 2 Only)
-                if epoch > 0:
-                    h = new_h
+                h = new_h # update hidden for BPTT
 
                 loss_primary_acc += L_primary.item()
                 loss_pred_acc += L_pred.item()
@@ -243,30 +240,36 @@ def train(
         metric_logger.update(L_skip=loss_skip_acc / step_count)
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
 
-        diff_lr = None
-        for pg in optimizer.param_groups:
-            if pg.get("different_lr", False):
-                diff_lr = pg["lr"]
-                break
-        metric_logger.update(different_lr=diff_lr if diff_lr is not None else optimizer.param_groups[0]["lr"])
+        diff_lr = next(
+            (pg["lr"] for pg in optimizer.param_groups if pg.get("different_lr", False)),
+            optimizer.param_groups[0]["lr"],
+        )
+        metric_logger.update(different_lr=diff_lr)
 
-        # Logging
         global_step += 1
         if i % config.log_freq == 0:
-            progress_bar.set_postfix({
-                "L_primary": f"{metric_logger.meters['L_primary'].avg:.4f}",
-                "L_pred": f"{metric_logger.meters['L_pred'].avg:.4f}",
-                "L_calib": f"{metric_logger.meters['L_calib'].avg:.4f}",
-            })
+            progress_bar.set_postfix(
+                L_primary=f"{metric_logger.meters['L_primary'].avg:.4f}",
+                L_pred=f"{metric_logger.meters['L_pred'].avg:.4f}",
+                L_calib=f"{metric_logger.meters['L_calib'].avg:.4f}",
+            )
             if is_main_process():
                 logger.info(f"Training: [Epoch {epoch}] [Step {i}] {metric_logger}")
             if is_main_process() and config.wandb.enable:
-                log_dict_to_wandb(metric_logger.get_global_avg_dict(), step=global_step, prefix="train/")
+                log_dict_to_wandb(
+                    metric_logger.get_global_avg_dict(),
+                    step=global_step,
+                    prefix="train/",
+                )
 
     metric_logger.synchronize_between_processes()
     logger.info(f"Averaged stats for Epoch [{epoch}]: {metric_logger.global_avg()}")
     if is_main_process() and config.wandb.enable:
-        log_dict_to_wandb(metric_logger.get_global_avg_dict(), step=global_step, prefix=f"epoch_{epoch}/")
+        log_dict_to_wandb(
+            metric_logger.get_global_avg_dict(),
+            step=global_step,
+            prefix=f"epoch_{epoch}/",
+        )
 
     return global_step
 
