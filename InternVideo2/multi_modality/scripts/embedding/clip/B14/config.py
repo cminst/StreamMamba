@@ -95,7 +95,14 @@ deepspeed = dict(enable=False)
 
 # Unused training params
 evaluate = True
-optimizer = {}
-scheduler = {}
+optimizer = dict(
+    opt="adamW",
+    lr=1e-5,
+    opt_betas=[0.9, 0.98],
+    weight_decay=0.01,
+    max_grad_norm=0.7,
+    different_lr=dict(enable=False, module_names=[], lr=2e-6),
+)
+scheduler = dict(sched='cosine', epochs=1, min_lr_multi=0.01, warmup_epochs=0.1)
 wandb = dict(enable=False)
 debug = False
