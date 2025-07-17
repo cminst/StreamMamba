@@ -131,7 +131,7 @@ def train(
     MODEL_MAX_FRAMES = config.num_frames
 
     for i, data_pair in enumerate(progress_bar):
-        _, (image, _, _) = data_pair
+        _, (image, _, idx) = data_pair
 
         image = image.to(device, non_blocking=True)
         image = image.permute(0, 2, 1, 3, 4)
@@ -315,7 +315,7 @@ def setup_dataloaders(config, mode="pt"):
     test_datasets, test_dataset_names = create_dataset(f"{mode}_eval", config)
     test_loaders = create_loader(
         test_datasets,
-        [None] * len(test_datasets), # Eval loaders typically don't need samplers in DDP if evaluating on all data
+        [None] * len(test_datasets),
         batch_size   = [config.inputs.batch_size_test[d.media_type] for d in test_datasets],
         num_workers  = [config.num_workers] * len(test_datasets),
         is_trains    = [False] * len(test_datasets),
