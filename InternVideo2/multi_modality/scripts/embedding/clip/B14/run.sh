@@ -10,7 +10,7 @@ OUTPUT_DIR="$(dirname $0)/$JOB_NAME"
 LOG_DIR="./logs/${JOB_NAME}"
 PARTITION='video'
 NNODE=1
-NUM_GPUS=4
+NUM_GPUS=1
 NUM_CPU=100
 
 torchrun \

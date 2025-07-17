@@ -5,6 +5,7 @@ import time
 import copy
 import numpy as np
 import concurrent.futures
+import math
 from os.path import join
 
 if not os.environ.get("DATASET_ROOT"):
@@ -59,9 +60,9 @@ def compute_embeddings_worker(gpu_id, model_replica, image_batch, step_indices, 
 def precompute(model, train_loaders, config):
     """
     Pre-computes embeddings using a sliding window approach, parallelized across multiple GPUs.
-    Only the main process (rank 0) performs the computation and saves files.
+    This function assumes it's being run from a SINGLE master process (e.g., launched with nproc=1).
     """
-    model_without_ddp = model.module if config.distributed else model
+    model_without_ddp = model.module if (config.distributed and get_world_size() > 1) else model
 
     vision_encoder_template = model_without_ddp.vision_encoder
     vision_align_template = model_without_ddp.vision_align
@@ -69,40 +70,38 @@ def precompute(model, train_loaders, config):
     vision_encoder_template.eval()
     vision_align_template.eval()
 
-    num_gpus = config.get("num_gpus_for_computation", 1)
-    if is_main_process():
-        logger.info(f"Creating {num_gpus} model replicas for parallel computation.")
-        model_replicas = [
-            torch.nn.ModuleDict({
-                'vision_encoder': copy.deepcopy(vision_encoder_template),
-                'vision_align': copy.deepcopy(vision_align_template)
-            }) for _ in range(num_gpus)
-        ]
-    else:
-        model_replicas = []
+    num_gpus_comp = config.get("num_gpus_for_computation", 1)
+    logger.info(f"Creating {num_gpus_comp} model replicas for parallel computation on GPUs 0 to {num_gpus_comp-1}.")
+    model_replicas = [
+        torch.nn.ModuleDict({
+            'vision_encoder': copy.deepcopy(vision_encoder_template),
+            'vision_align': copy.deepcopy(vision_align_template)
+        }) for _ in range(num_gpus_comp)
+    ]
 
     media_types = get_media_types(train_loaders)
-    if config.distributed:
-        for loader in train_loaders:
-            loader.sampler.set_epoch(0)
-
     train_loader_agg = MetaLoader_rs(
         name2loader=dict(zip(media_types, train_loaders)),
         skip_num=0,
         seed=config.seed,
     )
 
-    total_batches = len(train_loader_agg)
+    video_dataset = train_loader_agg.name2loader['video'].dataset
+    video_batch_size = config.inputs.batch_size['video']
+    total_batches = math.ceil(len(video_dataset) / video_batch_size)
     padding_len = len(str(total_batches))
+    logger.info(f"Found {len(video_dataset)} samples. With batch size {video_batch_size}, expecting to process {total_batches} batches.")
 
     progress_bar = tqdm(
         train_loader_agg,
-        total=total_batches,
+        total=total_batches, # Use the correct total number of batches
         desc="Pre-computing Embeddings",
         disable=not is_main_process(),
     )
 
     for i, data_pair in enumerate(progress_bar):
+        # This script is designed for a single process to orchestrate the work.
+        # If launched with DDP, only the main rank will perform computation and saving.
         if not is_main_process():
             continue
 
@@ -120,13 +119,10 @@ def precompute(model, train_loaders, config):
 
         num_steps = T - (MODEL_MAX_FRAMES - 1)
         step_indices = np.arange(num_steps)
-
-        # Split the steps among the available computation GPUs
-        step_chunks = np.array_split(step_indices, num_gpus)
+        step_chunks = np.array_split(step_indices, num_gpus_comp)
 
         all_embeddings = {}
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=num_gpus) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=num_gpus_comp) as executor:
             future_to_gpu = {
                 executor.submit(compute_embeddings_worker, gpu_id, model_replicas[gpu_id], image, chunks, config): gpu_id
                 for gpu_id, chunks in enumerate(step_chunks) if len(chunks) > 0
@@ -134,7 +130,6 @@ def precompute(model, train_loaders, config):
 
             for future in concurrent.futures.as_completed(future_to_gpu):
                 try:
-                    # Collect results from completed threads
                     result_dict = future.result()
                     all_embeddings.update(result_dict)
                 except Exception as exc:
@@ -150,17 +145,19 @@ def precompute(model, train_loaders, config):
 
         final_tensor = torch.stack(sorted_embeddings, dim=1)
 
-        output_path = join(config.output_dir, f"embed_b{str(i).zfill(padding_len)}.pt")
+        output_filename = f"embed_b{str(i).zfill(padding_len)}.pt"
+        output_path = join(config.output_dir, output_filename)
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         torch.save(final_tensor, output_path)
 
         if i % config.log_freq == 0:
             progress_bar.set_postfix(
-                last_saved=f"embed_b{str(i).zfill(padding_len)}.pt",
+                last_saved=output_filename,
                 shape=f"{list(final_tensor.shape)}"
             )
 
-    dist.barrier()
+    if get_world_size() > 1:
+        dist.barrier()
 
 
 def main(config):
@@ -185,14 +182,9 @@ def main(config):
     logger.info("Setting up model to extract encoder weights...")
     model_cls = eval(config.model.get('model_cls', 'InternVideo2_CLIP'))
     (
-        model,
-        model_without_ddp,
-        _, _, _, _, _, _,
+        model, _, _, _, _, _, _, _,
     ) = setup_model(
-        config,
-        model_cls=model_cls,
-        pretrain=True,
-        find_unused_parameters=False,
+        config, model_cls=model_cls, pretrain=True, find_unused_parameters=False,
     )
 
     logger.info("Starting embedding pre-computation...")
