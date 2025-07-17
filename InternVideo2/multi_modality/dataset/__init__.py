@@ -15,6 +15,7 @@ from dataset.ret_dataset import (ImgTxtRetTrainDataset,
                                  VidTxtRetMCEvalDataset,
                                  VidTxtRetMCNewEvalDataset)
 
+from dataset.precomputed_dataset import PrecomputedEmbeddingDataset
 from dataset.qa_dataset import ImageQADataset, VideoQADataset
 from dataset.pt_dataset import (
     ImgTxtPtTrainDataset,
@@ -510,16 +511,9 @@ def iterate_dataloaders(dataloaders):
         for idx, data in enumerate(data_tuples):
             yield dataloaders[idx].dataset.media_type, data
 
-from .precomputed_dataset import PrecomputedEmbeddingDataset
-
 def add_precomputed_embeddings(datasets, embedding_root):
     """Wrap datasets with PrecomputedEmbeddingDataset when embedding_root is provided."""
     if embedding_root is None:
         return datasets
-    wrapped = []
-    for d in datasets:
-        if getattr(d, "media_type", None) == "video":
-            wrapped.append(PrecomputedEmbeddingDataset(d, embedding_root))
-        else:
-            wrapped.append(d)
-    return wrapped
+
+    return [PrecomputedEmbeddingDataset(d, embedding_root) for d in datasets]
