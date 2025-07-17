@@ -98,3 +98,4 @@ evaluate = True
 optimizer = {}
 scheduler = {}
 wandb = dict(enable=False)
+debug = False
