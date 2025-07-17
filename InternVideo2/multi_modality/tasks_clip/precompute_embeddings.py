@@ -164,10 +164,6 @@ def precompute(model, train_loaders, config):
 
 
 def main(config):
-    if config.distributed:
-        dist.init_process_group(backend="nccl", init_method=config.dist_url)
-        torch.cuda.set_device(get_rank())
-
     setup_seed(config.seed + get_rank())
     cudnn.benchmark = True
 
