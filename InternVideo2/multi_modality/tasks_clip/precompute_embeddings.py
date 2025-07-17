@@ -171,7 +171,7 @@ def main(config):
         os.makedirs(config.output_dir, exist_ok=True)
 
     logger.info("Setting up dataloaders...")
-    train_loaders, _, _ = setup_dataloaders(config, mode=config.mode, sequential=True)
+    train_loaders, _, _ = setup_dataloaders(config, mode=config.mode, sequential=False)
 
     logger.info(f"train_file: {config.train_file}")
 
