@@ -197,7 +197,7 @@ def train(
 
                     with torch.no_grad():
                         target_c = (
-                            torch.nn.functional.cosine_similarity(mu_t, target_next, dim=-1) > 0.98
+                            torch.nn.functional.cosine_similarity(mu_t, target_next, dim=-1) >= 0.85
                         ).float()
                     L_calib = bce_loss_fn(conf_logit.squeeze(-1), target_c)
                     L_skip = -(torch.log(torch.sigmoid(conf_logit) + 1e-8)).mean()
