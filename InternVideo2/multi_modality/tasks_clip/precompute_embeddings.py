@@ -182,7 +182,7 @@ def main(config):
     logger.info("Setting up model to extract encoder weights...")
     model_cls = eval(config.model.get('model_cls', 'InternVideo2_CLIP'))
     (
-        model, _, _, _, _, _, _, _,
+        _, model, _, _, _, _, _, _,
     ) = setup_model(
         config, model_cls=model_cls, pretrain=True, find_unused_parameters=False,
     )
