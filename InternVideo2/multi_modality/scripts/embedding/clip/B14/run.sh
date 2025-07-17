@@ -17,6 +17,6 @@ torchrun \
     --nnodes=${NNODE} \
     --nproc_per_node=${NUM_GPUS} \
     --rdzv_backend=c10d \
-    tasks_clip/train_spfs.py \
+    tasks_clip/precompute_embeddings.py \
     $(dirname $0)/config.py \
     output_dir ${OUTPUT_DIR}
