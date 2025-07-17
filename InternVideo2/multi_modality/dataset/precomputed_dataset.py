@@ -8,7 +8,7 @@ class PrecomputedEmbeddingDataset(Dataset):
         self.base_dataset = base_dataset
         self.embedding_root = embedding_root
         self.suffix = suffix
-        self.media_type = getattr(base_dataset, "media_type", None)
+        self.media_type = "video"
         self._digits = len(str(len(base_dataset)))
 
     def __len__(self):
