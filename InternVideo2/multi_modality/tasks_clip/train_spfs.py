@@ -28,7 +28,13 @@ from torchvision import transforms
 from torchvision.transforms.functional import InterpolationMode
 from tqdm import tqdm
 
-from dataset import MetaLoader_rs, create_dataset, create_loader, create_stateful_sampler
+from dataset import (
+    MetaLoader_rs,
+    create_dataset,
+    create_loader,
+    create_stateful_sampler,
+    add_precomputed_embeddings,
+)
 from dataset.serialize import local_broadcast_process_authkey
 from models import *
 from tasks_clip.shared_utils import get_media_types, setup_model
@@ -131,7 +137,12 @@ def train(
     MODEL_MAX_FRAMES = config.num_frames
 
     for i, data_pair in enumerate(progress_bar):
-        _, (image, _, idx) = data_pair
+        batch = data_pair[1]
+        if len(batch) == 4:
+            image, _, idx, teacher_emb = batch
+        else:
+            image, _, idx = batch
+            teacher_emb = None
 
         image = image.to(device, non_blocking=True)
         image = image.permute(0, 2, 1, 3, 4)
@@ -171,12 +182,15 @@ def train(
 
                     # InternVideo2 B14 embeddings for distillation (Phase 2 only)
                     if epoch > 0:
-                        window_start = idx_curr - MODEL_MAX_FRAMES + 1
-                        window_end = idx_curr + 1
-                        curr_window = image[:, :, window_start:window_end, :, :]
-                        target_curr = model_without_ddp.vision_align(
-                            model_without_ddp.vision_encoder(curr_window)
-                        )
+                        if teacher_emb is not None:
+                            target_curr = teacher_emb[:, step, :].to(device)
+                        else:
+                            window_start = idx_curr - MODEL_MAX_FRAMES + 1
+                            window_end = idx_curr + 1
+                            curr_window = image[:, :, window_start:window_end, :, :]
+                            target_curr = model_without_ddp.vision_align(
+                                model_without_ddp.vision_encoder(curr_window)
+                            )
                     else:
                         target_curr = None
 
@@ -292,6 +306,7 @@ def clone_collate_fn(batch):
 def setup_dataloaders(config, mode="pt"):
     logger.info(f"Creating dataset for {mode}")
     train_datasets = create_dataset(f"{mode}_train", config)
+    train_datasets = add_precomputed_embeddings(train_datasets, getattr(config, "teacher_embedding_dir", None))
     media_types = get_media_types(train_datasets)
 
     if not config.distributed:

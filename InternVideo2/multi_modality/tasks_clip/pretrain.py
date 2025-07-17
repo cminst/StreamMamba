@@ -29,7 +29,13 @@ from torchvision import transforms
 from torchvision.transforms.functional import InterpolationMode
 from tqdm import tqdm
 
-from dataset import MetaLoader_rs, create_dataset, create_loader, create_stateful_sampler
+from dataset import (
+    MetaLoader_rs,
+    create_dataset,
+    create_loader,
+    create_stateful_sampler,
+    add_precomputed_embeddings,
+)
 from dataset.serialize import local_broadcast_process_authkey
 from models import *
 from tasks_clip.shared_utils import get_media_types, setup_model
@@ -437,7 +443,12 @@ def train(
                 model_without_ddp, optimizer, scheduler, config
             )
 
-        _, (image, text, _) = data_pair
+        batch = data_pair[1]
+        if len(batch) == 4:
+            image, text, _, teacher_emb = batch
+        else:
+            image, text, _ = batch
+            teacher_emb = None
 
         image = image.to(device, non_blocking=True)
 
@@ -510,10 +521,13 @@ def train(
                 window_end_idx = current_frame_in_video_idx + 1
                 current_window_frames_orig = image[:, :, window_start_idx:window_end_idx, :, :]
 
-                with torch.no_grad():
-                    raw_target_emb_orig = model_without_ddp.vision_encoder(current_window_frames_orig)
-                    aligned_target_emb_orig = model_without_ddp.vision_align(raw_target_emb_orig)
-                    target_embedding = aligned_target_emb_orig / (aligned_target_emb_orig.norm(dim=-1, keepdim=True) + 1e-9)
+                if teacher_emb is not None:
+                    target_embedding = teacher_emb[:, frame_window_step_idx, :].to(device)
+                else:
+                    with torch.no_grad():
+                        raw_target_emb_orig = model_without_ddp.vision_encoder(current_window_frames_orig)
+                        aligned_target_emb_orig = model_without_ddp.vision_align(raw_target_emb_orig)
+                        target_embedding = aligned_target_emb_orig / (aligned_target_emb_orig.norm(dim=-1, keepdim=True) + 1e-9)
 
                 # Loss for this sliding window step
                 cosine_loss_val = cosine_sim_loss(stream_embedding, target_embedding)
@@ -685,6 +699,7 @@ def clone_collate_fn(batch):
 def setup_dataloaders(config, mode="pt"):
     logger.info(f"Creating dataset for {mode}")
     train_datasets = create_dataset(f"{mode}_train", config)
+    train_datasets = add_precomputed_embeddings(train_datasets, getattr(config, "teacher_embedding_dir", None))
     media_types = get_media_types(train_datasets)
 
     if not config.distributed:
