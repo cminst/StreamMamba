@@ -125,3 +125,4 @@ optimizer = dict(
 scheduler = dict(sched='cosine', epochs=1, min_lr_multi=0.01, warmup_epochs=0.1)
 wandb = dict(enable=False)
 debug = False
+pretrained_path = ''
