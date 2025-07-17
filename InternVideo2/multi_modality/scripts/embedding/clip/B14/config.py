@@ -89,9 +89,10 @@ mode = "pt"
 seed = 42
 log_freq = 10
 
-# We disable deepspeed as we are manually managing devices for inference.
-# DDP is still used for the distributed sampler in the dataloader.
-deepspeed = dict(enable=False)
+deepspeed = dict(
+    enable=True,
+    stage=1,
+)
 
 # Unused training params
 evaluate = True
