@@ -173,6 +173,15 @@ def main(config):
     logger.info("Setting up dataloaders...")
     train_loaders, _, _ = setup_dataloaders(config, mode=config.mode)
 
+    logger.info(f"train_file: {config.train_file}")
+
+    setup_seed(config.seed + get_rank())
+
+    num_steps_per_epoch = sum(len(d) for d in train_loaders) * 247 # Using each individual frame for training
+
+    config.scheduler.num_training_steps = num_steps_per_epoch * config.scheduler.epochs
+    config.scheduler.num_warmup_steps = num_steps_per_epoch * config.scheduler.warmup_epochs
+
     logger.info("Setting up model to extract encoder weights...")
     model_cls = eval(config.model.get('model_cls', 'InternVideo2_CLIP'))
     (
