@@ -28,7 +28,7 @@ def add_weight_decay(model, weight_decay, no_decay_list=(), filter_bias_and_bn=T
     return named_param_tuples
 
 
-def add_different_lr(named_param_tuples_or_model, diff_lr_names, diff_lr, default_lr):
+def add_different_lr(named_param_tuples_or_model, diff_lr_names, diff_lr, default_lr, log = False):
     """use lr=diff_lr for modules named found in diff_lr_names,
     otherwise use lr=default_lr
 
@@ -37,6 +37,7 @@ def add_different_lr(named_param_tuples_or_model, diff_lr_names, diff_lr, defaul
         diff_lr_names: List(str)
         diff_lr: float
         default_lr: float
+        log: bool
     Returns:
         named_param_tuples_with_lr: List([name, param, weight_decay, lr])
     """
@@ -45,9 +46,9 @@ def add_different_lr(named_param_tuples_or_model, diff_lr_names, diff_lr, defaul
     for name, p, wd in named_param_tuples_or_model:
         use_diff_lr = False
         for diff_name in diff_lr_names:
-            # if diff_name in name:
             if re.search(diff_name, name) is not None:
-                logger.info(f"param {name} use different_lr: {diff_lr}")
+                if log:
+                    logger.info(f"param {name} use different_lr: {diff_lr}")
                 use_diff_lr = True
                 break
 
@@ -56,7 +57,7 @@ def add_different_lr(named_param_tuples_or_model, diff_lr_names, diff_lr, defaul
             [name, p, wd, lr_to_use]
         )
 
-    if is_main_process():
+    if is_main_process() and log:
         for name, _, wd, diff_lr in named_param_tuples_with_lr:
             logger.info(f"param {name}: wd: {wd}, lr: {diff_lr}")
 
@@ -170,4 +171,3 @@ def extend_optimizer_with_param_groups(optimizer, scheduler, param_groups):
             scheduler.base_lrs.append(group["lr"])
             if hasattr(scheduler, "_last_lr"):
                 scheduler._last_lr.append(group["lr"])
-
