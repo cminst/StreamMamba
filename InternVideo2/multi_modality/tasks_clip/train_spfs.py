@@ -15,13 +15,12 @@ if not os.environ.get("DATASET_ROOT"):
     )
 
 import cv2
-import matplotlib.pyplot as plt
 import torch
 import torch.backends.cudnn as cudnn
 import torch.distributed as dist
 import wandb
 from PIL import Image
-from torch.nn import BCEWithLogitsLoss, MSELoss, CosineEmbeddingLoss
+from torch.nn import BCEWithLogitsLoss, MSELoss
 from torch.utils.data._utils.collate import default_collate
 from torchvision import transforms
 from torchvision.transforms.functional import InterpolationMode
