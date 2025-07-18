@@ -132,16 +132,16 @@ def train(
     bce_loss_fn = BCEWithLogitsLoss()
     primary_loss_fn = MSELoss()
 
-    lambda_calib = getattr(config, "lambda_calib", 1.0)
-    lambda_skip = getattr(config, "lambda_skip", 0.1)
+    lambda_calib = config.get("lambda_calib", 1.0)
+    lambda_skip = config.get("lambda_skip", 0.1)
     MODEL_MAX_FRAMES = config.num_frames
 
     for i, data_pair in enumerate(progress_bar):
         batch = data_pair[1]
         if len(batch) == 4:
-            image, _, idx, teacher_emb = batch
+            image, _, _, teacher_emb = batch
         else:
-            image, _, idx = batch
+            image, _, _ = batch
             teacher_emb = None
 
         image = image.to(device, non_blocking=True)
