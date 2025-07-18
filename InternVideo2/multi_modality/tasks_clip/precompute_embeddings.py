@@ -15,6 +15,7 @@ if not os.environ.get("DATASET_ROOT"):
     )
 
 import torch
+from torch.utils.data import SequentialSampler
 import torch.backends.cudnn as cudnn
 import torch.distributed as dist
 from tqdm import tqdm
@@ -83,14 +84,15 @@ def precompute(model, train_loaders, config):
     train_loader_agg = MetaLoader_rs(
         name2loader=dict(zip(media_types, train_loaders)),
         skip_num=0,
-        seed=config.seed,
+        seed=None,  # keep deterministic sequential order
     )
 
     video_dataset = train_loader_agg.name2loader['video'].dataset
     video_batch_size = config.inputs.batch_size['video']
     total_batches = math.ceil(len(video_dataset) / video_batch_size)
-    padding_len = len(str(total_batches))
-    logger.info(f"Found {len(video_dataset)} samples. With batch size {video_batch_size}, expecting to process {total_batches} batches.")
+    padding_len = len(str(len(video_dataset)))
+    logger.info(
+        f"Found {len(video_dataset)} samples. With batch size {video_batch_size}, expecting to process {total_batches} batches.")
 
     progress_bar = tqdm(
         train_loader_agg,
@@ -105,7 +107,7 @@ def precompute(model, train_loaders, config):
         if not is_main_process():
             continue
 
-        _, (image, _, _) = data_pair
+        _, (image, _, idx) = data_pair
 
         # B, T, C, H, W -> permute to B, C, T, H, W
         image = image.permute(0, 2, 1, 3, 4)
@@ -145,10 +147,11 @@ def precompute(model, train_loaders, config):
 
         final_tensor = torch.stack(sorted_embeddings, dim=1)
 
-        output_filename = f"embed_b{str(i).zfill(padding_len)}.pt"
-        output_path = join(config.output_dir, output_filename)
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        torch.save(final_tensor, output_path)
+        for b, vid_idx in enumerate(idx.tolist()):
+            output_filename = f"{str(vid_idx).zfill(padding_len)}.pt"
+            output_path = join(config.output_dir, output_filename)
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            torch.save(final_tensor[b], output_path)
 
         if i % config.log_freq == 0:
             progress_bar.set_postfix(
@@ -168,7 +171,7 @@ def main(config):
         os.makedirs(config.output_dir, exist_ok=True)
 
     logger.info("Setting up dataloaders...")
-    train_loaders, _, _ = setup_dataloaders(config, mode=config.mode)
+    train_loaders, _, _ = setup_dataloaders(config, mode=config.mode, sequential=False)
 
     logger.info(f"train_file: {config.train_file}")
 
@@ -202,7 +205,7 @@ def main(config):
         dist.destroy_process_group()
 
 
-def setup_dataloaders(config, mode="pt"):
+def setup_dataloaders(config, mode="pt", sequential=False):
     logger.info(f"Creating dataset for {mode}")
     train_datasets = create_dataset(f"{mode}_train", config)
     media_types = get_media_types(train_datasets)
@@ -211,7 +214,10 @@ def setup_dataloaders(config, mode="pt"):
         raise RuntimeError("Distributed training is required for multi-GPU operations.")
 
     batch_size = [config.inputs.batch_size[k] for k in media_types]
-    samplers   = create_stateful_sampler(train_datasets, batch_size)
+    if sequential:
+        samplers = [SequentialSampler(d) for d in train_datasets]
+    else:
+        samplers = create_stateful_sampler(train_datasets, batch_size)
 
     train_loaders = create_loader(
         train_datasets,

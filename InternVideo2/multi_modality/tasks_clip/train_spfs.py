@@ -28,7 +28,13 @@ from torchvision import transforms
 from torchvision.transforms.functional import InterpolationMode
 from tqdm import tqdm
 
-from dataset import MetaLoader_rs, create_dataset, create_loader, create_stateful_sampler
+from dataset import (
+    MetaLoader_rs,
+    create_dataset,
+    create_loader,
+    create_stateful_sampler,
+    add_precomputed_embeddings,
+)
 from dataset.serialize import local_broadcast_process_authkey
 from models import *
 from tasks_clip.shared_utils import get_media_types, setup_model
@@ -126,12 +132,17 @@ def train(
     bce_loss_fn = BCEWithLogitsLoss()
     primary_loss_fn = MSELoss()
 
-    lambda_calib = getattr(config, "lambda_calib", 1.0)
-    lambda_skip = getattr(config, "lambda_skip", 0.1)
+    lambda_calib = config.get("lambda_calib", 1.0)
+    lambda_skip = config.get("lambda_skip", 0.1)
     MODEL_MAX_FRAMES = config.num_frames
 
     for i, data_pair in enumerate(progress_bar):
-        _, (image, _, idx) = data_pair
+        batch = data_pair[1]
+        if len(batch) == 4:
+            image, _, _, teacher_emb = batch
+        else:
+            image, _, _ = batch
+            teacher_emb = None
 
         image = image.to(device, non_blocking=True)
         image = image.permute(0, 2, 1, 3, 4)
@@ -171,12 +182,15 @@ def train(
 
                     # InternVideo2 B14 embeddings for distillation (Phase 2 only)
                     if epoch > 0:
-                        window_start = idx_curr - MODEL_MAX_FRAMES + 1
-                        window_end = idx_curr + 1
-                        curr_window = image[:, :, window_start:window_end, :, :]
-                        target_curr = model_without_ddp.vision_align(
-                            model_without_ddp.vision_encoder(curr_window)
-                        )
+                        if teacher_emb is not None:
+                            target_curr = teacher_emb[:, step, :].to(device)
+                        else:
+                            window_start = idx_curr - MODEL_MAX_FRAMES + 1
+                            window_end = idx_curr + 1
+                            curr_window = image[:, :, window_start:window_end, :, :]
+                            target_curr = model_without_ddp.vision_align(
+                                model_without_ddp.vision_encoder(curr_window)
+                            )
                     else:
                         target_curr = None
 
@@ -292,6 +306,7 @@ def clone_collate_fn(batch):
 def setup_dataloaders(config, mode="pt"):
     logger.info(f"Creating dataset for {mode}")
     train_datasets = create_dataset(f"{mode}_train", config)
+    train_datasets = add_precomputed_embeddings(train_datasets, getattr(config, "teacher_embedding_dir", None))
     media_types = get_media_types(train_datasets)
 
     if not config.distributed:
@@ -344,6 +359,21 @@ def main(config):
     config.scheduler.num_training_steps = num_steps_per_epoch * config.scheduler.epochs
     config.scheduler.num_warmup_steps = num_steps_per_epoch * config.scheduler.warmup_epochs
     cudnn.benchmark = len(train_media_types) == 1
+
+    if getattr(config, "resume", False) and not getattr(config, "pretrained_path", ""):
+        ckpt_dir = os.path.join(config.output_dir, "ckpt_00.pth")
+        if not os.path.exists(ckpt_dir):
+            for fname in sorted(os.listdir(config.output_dir)):
+                if fname.startswith("ckpt_") and fname.endswith(".pth"):
+                    ckpt_dir = os.path.join(config.output_dir, fname)
+                    break
+        if os.path.exists(ckpt_dir):
+            logger.info(f"Auto-resume checkpoint from {ckpt_dir}")
+            config.pretrained_path = ckpt_dir
+        else:
+            logger.warning(
+                f"Resume flag set but no checkpoint found in {config.output_dir}"
+            )
 
     model_cls = eval(config.model.get('model_cls', 'InternVideo2_CLIP'))
     (

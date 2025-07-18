@@ -126,6 +126,11 @@ use_half_precision = True
 use_bf16 = True
 gradient_checkpointing = True
 
+# =================== spfs hyperparams =====================
+
+lambda_calib = 1.0
+lambda_skip = 0.1
+
 # ========================= wandb ==========================
 wandb = dict(
     enable=True,
