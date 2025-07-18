@@ -128,7 +128,14 @@ def train(
         pred, target.detach(), dim=-1
     ).mean()
     bce_loss_fn = BCEWithLogitsLoss()
+    mse_loss_fn = MSELoss()
     primary_loss_fn = MSELoss()
+
+    calibration_loss_type = config.get("calibration_loss_fn", "bce").lower()
+    if calibration_loss_type not in ["bce", "mse"]:
+        raise ValueError(
+            f"Unsupported calibration_loss_fn {calibration_loss_type}. Choose 'bce' or 'mse'."
+        )
 
     lambda_calib = config.get("lambda_calib", 1.0)
     lambda_skip = config.get("lambda_skip", 0.1)
@@ -208,10 +215,17 @@ def train(
                     L_primary = primary_loss_fn(out_t, target_curr)
 
                     with torch.no_grad():
-                        target_c = (
-                            torch.nn.functional.cosine_similarity(mu_t, target_next, dim=-1) >= 0.85
-                        ).float()
-                    L_calib = bce_loss_fn(conf_logit.squeeze(-1), target_c)
+                        sim_score = torch.nn.functional.cosine_similarity(
+                            mu_t, target_next, dim=-1
+                        )
+
+                    if calibration_loss_type == "bce":
+                        target_c = (sim_score >= 0.85).float()
+                        L_calib = bce_loss_fn(conf_logit.squeeze(-1), target_c)
+                    else:  # mse
+                        L_calib = mse_loss_fn(
+                            torch.sigmoid(conf_logit.squeeze(-1)), sim_score
+                        )
                     L_skip = -(torch.log(torch.sigmoid(conf_logit) + 1e-8)).mean()
 
                     loss = L_primary + L_pred + lambda_calib * L_calib + lambda_skip * L_skip

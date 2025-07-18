@@ -130,6 +130,7 @@ gradient_checkpointing = True
 
 lambda_calib = 1.0
 lambda_skip = 0.1
+calibration_loss_fn = 'mse' # or 'bce'
 
 # ========================= wandb ==========================
 wandb = dict(
