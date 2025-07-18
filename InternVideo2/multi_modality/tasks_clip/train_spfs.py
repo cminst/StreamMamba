@@ -1,4 +1,3 @@
-# Standard library imports
 import datetime
 import logging
 import os
@@ -78,7 +77,7 @@ def train(
     model,
     train_loaders,
     optimizer,
-    _, # don't need tokenizer
+    _,
     epoch,
     global_step,
     device,
@@ -289,7 +288,6 @@ def train(
     return global_step
 
 def clone_collate_fn(batch):
-    # Recursively clone every Tensor in the sample so its storage is fresh
     def clone_item(x):
         if isinstance(x, torch.Tensor):
             return x.clone()
@@ -318,7 +316,7 @@ def setup_dataloaders(config, mode="pt"):
 
     train_loaders = create_loader(
         train_datasets,
-        samplers, # Use samplers specific to train_datasets
+        samplers,
         batch_size   = batch_size,
         num_workers  = [config.num_workers] * len(media_types),
         is_trains    = [True] * len(media_types),
@@ -351,7 +349,7 @@ def main(config):
     setup_seed(config.seed + get_rank())
     device = torch.device(config.device)
 
-    train_loaders, test_name2loaders, train_media_types = setup_dataloaders(
+    train_loaders, _, train_media_types = setup_dataloaders(
         config, mode=config.mode
     )
     num_steps_per_epoch = sum(len(d) for d in train_loaders) * 247 # Using each individual frame for training
