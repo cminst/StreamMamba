@@ -360,6 +360,21 @@ def main(config):
     config.scheduler.num_warmup_steps = num_steps_per_epoch * config.scheduler.warmup_epochs
     cudnn.benchmark = len(train_media_types) == 1
 
+    if getattr(config, "resume", False) and not getattr(config, "pretrained_path", ""):
+        ckpt_dir = os.path.join(config.output_dir, "ckpt_00.pth")
+        if not os.path.exists(ckpt_dir):
+            for fname in sorted(os.listdir(config.output_dir)):
+                if fname.startswith("ckpt_") and fname.endswith(".pth"):
+                    ckpt_dir = os.path.join(config.output_dir, fname)
+                    break
+        if os.path.exists(ckpt_dir):
+            logger.info(f"Auto-resume checkpoint from {ckpt_dir}")
+            config.pretrained_path = ckpt_dir
+        else:
+            logger.warning(
+                f"Resume flag set but no checkpoint found in {config.output_dir}"
+            )
+
     model_cls = eval(config.model.get('model_cls', 'InternVideo2_CLIP'))
     (
         model,
