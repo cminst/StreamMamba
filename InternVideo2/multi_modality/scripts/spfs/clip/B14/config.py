@@ -150,7 +150,7 @@ log_freq = 1
 seed = 42
 
 save_latest = False
-save_iter = 100
+save_iter = 500
 
 auto_resume = False
 pretrained_path = ""
