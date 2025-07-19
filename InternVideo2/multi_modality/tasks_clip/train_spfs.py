@@ -284,7 +284,7 @@ def train(
                 "model": state_dict,
                 "optimizer": optimizer.state_dict(),
                 "scheduler": scheduler.state_dict() if scheduler is not None else None,
-                "scaler": scaler.state_dict(),
+                "scaler": scaler.state_dict() if scaler is not None else None,
                 "config": config,
                 "epoch": epoch,
                 "global_step": global_iter,
