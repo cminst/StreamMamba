@@ -99,7 +99,6 @@ def train(
     metric_logger = MetricLogger(delimiter="  ")
     metric_logger.add_meter("lr", SmoothedValue(window=1, fmt="{value:.10f}"))
     metric_logger.add_meter("different_lr", SmoothedValue(window=1, fmt="{value:.10f}"))
-    metric_logger.add_meter("L_primary", SmoothedValue(window=1, fmt="{value:.4f}"))
     metric_logger.add_meter("L_pred", SmoothedValue(window=1, fmt="{value:.4f}"))
     metric_logger.add_meter("L_calib", SmoothedValue(window=1, fmt="{value:.4f}"))
     metric_logger.add_meter("L_skip", SmoothedValue(window=1, fmt="{value:.4f}"))
@@ -129,7 +128,6 @@ def train(
     ).mean()
     bce_loss_fn = BCEWithLogitsLoss()
     mse_loss_fn = MSELoss()
-    primary_loss_fn = MSELoss()
 
     calibration_loss_type = config.get("calibration_loss_fn", "bce").lower()
     if calibration_loss_type not in ["bce", "mse"]:
@@ -144,10 +142,9 @@ def train(
     for i, data_pair in enumerate(progress_bar):
         batch = data_pair[1]
         if len(batch) == 4:
-            image, _, _, teacher_emb = batch
+            image, _, _, _ = batch
         else:
             image, _, _ = batch
-            teacher_emb = None
 
         image = image.to(device, non_blocking=True)
         image = image.permute(0, 2, 1, 3, 4)
@@ -165,7 +162,7 @@ def train(
                     _, h = model.streaming_vision_encoder(frame, h)
 
             num_steps = T - (MODEL_MAX_FRAMES - 1)
-            loss_primary_acc = loss_pred_acc = loss_calib_acc = loss_skip_acc = 0.0
+            loss_pred_acc = loss_calib_acc = loss_skip_acc = 0.0
 
             for step in range(num_steps):
                 idx_curr = (MODEL_MAX_FRAMES - 1) + step
@@ -185,20 +182,6 @@ def train(
 
                     target_next, _ = model_without_ddp.streaming_vision_encoder.vit_lite.extract_features(next_frame)
 
-                    # InternVideo2 B14 embeddings for distillation (Phase 2 only)
-                    if epoch > 0:
-                        if teacher_emb is not None:
-                            target_curr = teacher_emb[:, step, :].to(device)
-                        else:
-                            window_start = idx_curr - MODEL_MAX_FRAMES + 1
-                            window_end = idx_curr + 1
-                            curr_window = image[:, :, window_start:window_end, :, :]
-                            target_curr = model_without_ddp.vision_align(
-                                model_without_ddp.vision_encoder(curr_window)
-                            )
-                    else:
-                        target_curr = None
-
                 # ----------
 
                 mu_t, logvar = model.streaming_vision_encoder.rnn.predict_next_feat()
@@ -209,11 +192,9 @@ def train(
                 if epoch == 0:
                     # Phase-1: only train predictor head (primary & other losses = 0)
                     loss = L_pred
-                    L_primary = L_calib = L_skip = torch.tensor(0.0, device=device) # Set others to 0
+                    L_calib = L_skip = torch.tensor(0.0, device=device) # Set others to 0
                 else:
                     # Phase-2: joint fine-tuning
-                    L_primary = primary_loss_fn(out_t, target_curr)
-
                     with torch.no_grad():
                         sim_score = torch.nn.functional.cosine_similarity(
                             mu_t, target_next, dim=-1
@@ -228,7 +209,7 @@ def train(
                         )
                     L_skip = -(torch.log(torch.sigmoid(conf_logit) + 1e-8)).mean()
 
-                    loss = L_primary + L_pred + lambda_calib * L_calib + lambda_skip * L_skip
+                    loss = L_pred + lambda_calib * L_calib + lambda_skip * L_skip
 
                 if hasattr(config, "deepspeed") and config.deepspeed.enable:
                     model.backward(loss)
@@ -255,13 +236,11 @@ def train(
 
                 h = new_h # update hidden for BPTT
 
-                loss_primary_acc += L_primary.item()
                 loss_pred_acc += L_pred.item()
                 loss_calib_acc += L_calib.item()
                 loss_skip_acc += L_skip.item()
 
         step_count = max(num_steps, 1)
-        metric_logger.update(L_primary=loss_primary_acc / step_count)
         metric_logger.update(L_pred=loss_pred_acc / step_count)
         metric_logger.update(L_calib=loss_calib_acc / step_count)
         metric_logger.update(L_skip=loss_skip_acc / step_count)
@@ -276,9 +255,9 @@ def train(
         global_step += step_count
         if i % config.log_freq == 0:
             progress_bar.set_postfix(
-                L_primary=f"{metric_logger.meters['L_primary'].value:.4f}",
                 L_pred=f"{metric_logger.meters['L_pred'].value:.4f}",
                 L_calib=f"{metric_logger.meters['L_calib'].value:.4f}",
+                L_skip=f"{metric_logger.meters['L_skip'].value:.4f}",
             )
             if is_main_process():
                 logger.info(f"Training: [Epoch {epoch}] [Step {i}] {metric_logger}")
@@ -423,7 +402,6 @@ def main(config):
             model.freeze_confidence_head()
             model.unfreeze_prediction_head()
         else:
-            model.unfreeze_mamba()
             model.unfreeze_confidence_head()
             model.unfreeze_prediction_head()
 
