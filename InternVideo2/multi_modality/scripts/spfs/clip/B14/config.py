@@ -77,7 +77,7 @@ model = dict(
         fc_hidden_layers=[768],
         teacher_clip_embed_dim=768,
         text_embed_dim=512,
-        pred_rank=32, # or None for a full linear layer
+        pred_rank=64, # or None for a full linear layer
     ),
     mobileclip_type=dict(name='mobileclip_b'),
     temp=1 / 100.0,
@@ -107,7 +107,6 @@ optimizer = dict(
     opt_betas=[0.9, 0.98],
     weight_decay=0.01,
     max_grad_norm=0.7,
-    # use a different lr for some modules, e.g., larger lr for new modules
     different_lr=dict(enable=False, module_names=["streaming_vision_encoder.vit_lite"], lr=2e-6),
 )
 
@@ -119,7 +118,7 @@ evaluation = dict(
     eval_frame_ensemble="concat",  # [concat, max, mean, lse]
     eval_x_only=False,
     k_test=128,
-    eval_offload=True,  # offload gpu tensors to cpu to save memory.
+    eval_offload=True,
 )
 
 use_half_precision = True
@@ -144,7 +143,7 @@ mode = "pt"
 
 # ========================= others ==========================
 output_dir = './train_outputs_spfs/'
-resume = False
+resume = True
 debug = False
 log_freq = 1
 seed = 42
