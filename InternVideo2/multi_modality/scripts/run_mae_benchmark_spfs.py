@@ -303,7 +303,7 @@ def main():
                 )
 
             for j in pbar:
-                texts, probs, curr_hidden_state, skipped = retrieve_text_streaming(
+                _, probs, curr_hidden_state, skipped = retrieve_text_streaming(
                     frames[j+8],
                     [phrase],
                     intern_model,
