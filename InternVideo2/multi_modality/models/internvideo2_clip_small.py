@@ -1,16 +1,13 @@
 import logging
 import os
 import json
-import timm
 
 import torch
 from torch import nn
-import numpy as np
-from PIL import Image
 import torchvision.transforms as transforms
 from torchvision.transforms import InterpolationMode
 
-from .backbones.internvideo2 import InternVideo2, TextTransformer, ClipTokenizer, VisionTransformer, StreamMamba
+from .backbones.internvideo2 import InternVideo2, TextTransformer, ClipTokenizer, StreamMamba
 from .criterions import VTC_VTM_Loss
 from .utils import unwrap_state_dict
 
@@ -189,14 +186,18 @@ class InternVideo2_CLIP_small(nn.Module):
 
         return vfeat
 
-    def encode_streaming_vision(self, image, prev_hidden_state, gamma=None, beta=None, tau=None):
+    def encode_streaming_vision(self, image, prev_hidden_state, confidence_threshold=0.9, max_consecutive_skips=0, gamma=None, beta=None, tau=None):
         """Encode image/video frames using the streaming ViT.
+
+        Note: SPFS is disabled by default (max_consecutive_steps = 0)
 
         Args:
             image (torch.Tensor): The input images.
             prev_hidden_state (tuple or torch.Tensor): Previous hidden state from the RNN.
                 For LSTM: (h_prev, c_prev)
                 For GRU: h_prev
+            confidence_threshold (float): Confidence threshold for SPFS. Default 0.9
+            max_consecutive_skips (int): Maximum number of consecutive frames to skip. Default 0
             gamma (torch.Tensor, optional): FiLM scale parameters for conditioning the
                 streaming encoder. ``None`` if FiLM is not used.
             beta (torch.Tensor, optional): FiLM shift parameters for conditioning the
@@ -210,9 +211,11 @@ class InternVideo2_CLIP_small(nn.Module):
 
         assert len(image.shape) in [4, 5], f"Invalid dimension: {image.shape}"
 
-        vision_embeds, new_hidden_state = self.streaming_vision_encoder(
+        vision_embeds, new_hidden_state, skipped_frame = self.streaming_vision_encoder(
             image,
             prev_hidden_state=prev_hidden_state,
+            confidence_threshold=confidence_threshold,
+            max_consecutive_skips=max_consecutive_skips,
             gamma=gamma,
             beta=beta,
             tau=tau,
@@ -223,10 +226,12 @@ class InternVideo2_CLIP_small(nn.Module):
         else:
             vision_embeds_aligned = self.vision_align(vision_embeds)
 
-        return vision_embeds_aligned, new_hidden_state
+        return vision_embeds_aligned, new_hidden_state, skipped_frame
 
-    def get_streaming_vid_feat(self, frames: torch.Tensor, prev_hidden_state, gamma=None, beta=None, tau=None):
+    def get_streaming_vid_feat(self, frames: torch.Tensor, prev_hidden_state, confidence_threshold=0.9, max_consecutive_skips=0, gamma=None, beta=None, tau=None):
         """Return features for a single frame using the streaming ViT.
+
+        Note: SPFS is disabled by default (max_consecutive_steps = 0)
 
         Args:
             frames (torch.Tensor): Input frame(s) for the ViT-Lite.
@@ -234,6 +239,8 @@ class InternVideo2_CLIP_small(nn.Module):
                 ``(B, C, T_chunk, H, W)`` when processing multiple frames at once.
             prev_hidden_state (tuple or torch.Tensor): Previous hidden state from the RNN.
                 For LSTM: ``(h_prev, c_prev)``; for GRU: ``h_prev``.
+            confidence_threshold (float): Confidence threshold for SPFS. Default 0.9
+            max_consecutive_skips (int): Maximum number of consecutive frames to skip. Default 0
             gamma (torch.Tensor, optional): FiLM scale parameters for conditioning the
                 streaming encoder. ``None`` if FiLM is not used.
             beta (torch.Tensor, optional): FiLM shift parameters for conditioning the
@@ -244,9 +251,11 @@ class InternVideo2_CLIP_small(nn.Module):
             video feature embedding and ``new_hidden_state`` is the updated RNN state.
         """
         with torch.no_grad():
-            vfeat, new_hidden_state = self.encode_streaming_vision(
+            vfeat, new_hidden_state, skipped_frame = self.encode_streaming_vision(
                 frames,
                 prev_hidden_state=prev_hidden_state,
+                confidence_threshold=confidence_threshold,
+                max_consecutive_skips=max_consecutive_skips,
                 gamma=gamma,
                 beta=beta,
                 tau=tau,
@@ -255,7 +264,7 @@ class InternVideo2_CLIP_small(nn.Module):
             # vfeat = self.vision_proj(vfeat)
             vfeat /= vfeat.norm(dim=-1, keepdim=True)
 
-        return vfeat, new_hidden_state
+        return vfeat, new_hidden_state, skipped_frame
 
     def encode_text(self, text):
         """encode text.
@@ -311,9 +320,9 @@ class InternVideo2_CLIP_small(nn.Module):
             init_values=config.init_values,
             qk_normalization=config.qk_normalization,
             depth=config.depth,
-            use_flash_attn=False, # ENABLE FOR INCREASED PERFORMANCE
-            use_fused_rmsnorm=False, # ENABLE FOR INCREASED PERFORMANCE
-            use_fused_mlp=False, # ENABLE FOR INCREASED PERFORMANCE
+            use_flash_attn=False,
+            use_fused_rmsnorm=False,
+            use_fused_mlp=False,
             fused_mlp_heuristic=config.fused_mlp_heuristic,
             attn_pool_num_heads=config.attn_pool_num_heads,
             clip_embed_dim=config.clip_embed_dim,
