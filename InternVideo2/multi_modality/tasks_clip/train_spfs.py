@@ -283,7 +283,7 @@ def train(
             save_obj = {
                 "model": state_dict,
                 "optimizer": optimizer.state_dict(),
-                "scheduler": scheduler.state_dict(),
+                "scheduler": scheduler.state_dict() if scheduler is not None else None,
                 "scaler": scaler.state_dict(),
                 "config": config,
                 "epoch": epoch,
