@@ -8,6 +8,7 @@ import time
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from huggingface_hub import hf_hub_download
 
 
 def ensure_dependencies():
@@ -45,13 +46,13 @@ def parse_args():
     )
     parser.add_argument(
         "--mamba-weights",
-        required=True,
-        help="Path to the Mamba weights checkpoint file",
+        default=None,
+        help="Path to the Mamba weights checkpoint file. If not provided, will download from HF.",
     )
     parser.add_argument(
         "--spfs-weights",
-        required=True,
-        help="Path to the SPFS prediction/confidence head weights checkpoint file",
+        default=None,
+        help="Path to the SPFS prediction/confidence head weights checkpoint file. If not provided, will download from HF.",
     )
     parser.add_argument(
         "--confidence-threshold",
@@ -105,13 +106,20 @@ def main():
     intern_model = InternVideo2_CLIP_small(config)
     intern_model.to(device)
 
+    if args.mamba_weights is None:
+        print("Downloading mamba_mobileclip_ckpt.pt from Hugging Face...")
+        args.mamba_weights = hf_hub_download(repo_id="qingy2024/InternVideo2-B14", filename="mamba_mobileclip_ckpt.pt")
+    if args.spfs_weights is None:
+        print("Downloading spfs_ckpt.pt from Hugging Face...")
+        args.spfs_weights = hf_hub_download(repo_id="qingy2024/InternVideo2-B14", filename="spfs_ckpt.pt")
+
     # Load Mamba weights
     mamba_ckpt = torch.load(args.mamba_weights, map_location=device)
-    intern_model.streaming_vision_encoder.rnn.load_state_dict(mamba_ckpt, strict=False)
+    intern_model.load_state_dict(mamba_ckpt, strict=False)
 
     # Load SPFS weights
     spfs_ckpt = torch.load(args.spfs_weights, map_location=device)
-    intern_model.streaming_vision_encoder.rnn.load_state_dict(spfs_ckpt, strict=False)
+    intern_model.load_state_dict(spfs_ckpt, strict=False)
 
     intern_model.eval()
 

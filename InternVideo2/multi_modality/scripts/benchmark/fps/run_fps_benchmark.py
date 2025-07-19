@@ -8,6 +8,7 @@ import time
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from huggingface_hub import hf_hub_download
 
 
 def ensure_dependencies():
@@ -67,6 +68,16 @@ def parse_args():
         default="fps_graph.png",
         help="Path to output PNG graph of FPS",
     )
+    parser.add_argument(
+        "--mamba-weights",
+        default=None,
+        help="Path to mamba_mobileclip_ckpt.pt. If not provided, will download from HF.",
+    )
+    parser.add_argument(
+        "--spfs-weights",
+        default=None,
+        help="Path to spfs_ckpt.pt. If not provided, will download from HF.",
+    )
     return parser.parse_args()
 
 
@@ -104,6 +115,13 @@ def main():
 
     if "delta" not in args.config_name:
         config.model.text_ckpt_path = config.model.mobileclip_ckpt_path
+
+    if args.mamba_weights is None:
+        print("Downloading mamba_mobileclip_ckpt.pt from Hugging Face...")
+        args.mamba_weights = hf_hub_download(repo_id="qingy2024/InternVideo2-B14", filename="mamba_mobileclip_ckpt.pt")
+    if args.spfs_weights is None:
+        print("Downloading spfs_ckpt.pt from Hugging Face...")
+        args.spfs_weights = hf_hub_download(repo_id="qingy2024/InternVideo2-B14", filename="spfs_ckpt.pt")
 
     intern_model = InternVideo2_CLIP_small(config)
     intern_model.to(device)
@@ -151,7 +169,7 @@ def main():
                     torch.cuda.synchronize()
                 end = time.time()
                 total_time += end - start
-                
+
             fps = num_chunks / total_time if total_time > 0 and num_chunks > 0 else 0.0
 
         results.append({"video": video_path, "resolution": f"{w}x{h}", "pixels": pixels, "fps": fps})
