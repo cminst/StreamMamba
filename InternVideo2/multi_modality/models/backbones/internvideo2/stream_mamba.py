@@ -141,7 +141,7 @@ class StreamMamba(nn.Module):
         if self.rnn_type == 'mamba_spfs':
             if self.rnn.last_hidden is not None and getattr(self, 'consecutive_skips', 0) < max_consecutive_skips:
                 predicted_feature, confidence = self.rnn.predict_next_feat()
-                spfs_info.confidence = confidence
+                spfs_info.confidence = torch.sigmoid(confidence)
                 if torch.sigmoid(confidence) > confidence_threshold:
                     frame_feature = predicted_feature
                     spfs_info.skipped = True
