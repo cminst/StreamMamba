@@ -199,7 +199,7 @@ def main():
             if device.type == 'cuda':
                 torch.cuda.synchronize()
             start = time.time()
-            _, hidden, skipped = intern_model.encode_streaming_vision(
+            _, hidden, spfs_info = intern_model.encode_streaming_vision(
                 tensor,
                 hidden,
                 confidence_threshold=args.confidence_threshold,
@@ -209,7 +209,8 @@ def main():
                 torch.cuda.synchronize()
             end = time.time()
             total_time += end - start
-            if skipped:
+            print(f"Confidence: {spfs_info.confidence}")
+            if spfs_info.skipped:
                 skipped_frames += 1
 
         total_frames += len(frames)

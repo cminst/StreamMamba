@@ -254,7 +254,7 @@ def main():
             )
 
         for j in pbar:
-            texts, probs, curr_hidden_state = retrieve_text_streaming(
+            _, probs, curr_hidden_state, _ = retrieve_text_streaming(
                 frames[j+8],
                 [phrase],
                 intern_model,
@@ -272,7 +272,6 @@ def main():
         logits.append(list(zip(logit_curr, range(1, len(logit_curr) + 1))))
 
     preds = [int(x) for x in preds]
-    logits_v2 = [[(float(l[0]), l[1]) for l in x] for x in logits]
 
     json_write(preds, args.output_json)
 
@@ -282,8 +281,6 @@ def main():
     print(f"Saved MAE results to {args.output_json}")
     print(f"Saved MAE metrics to {args.output_json.replace('.json', '_metrics.json')}")
 
-    # Plotting is not directly applicable for a single run, but we can plot the distribution of errors if needed.
-    # For now, just print the average accuracy.
     print(f"Average MAE accuracy: {metrics['average']:.2f}")
 
 

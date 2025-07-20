@@ -211,7 +211,7 @@ class InternVideo2_CLIP_small(nn.Module):
 
         assert len(image.shape) in [4, 5], f"Invalid dimension: {image.shape}"
 
-        vision_embeds, new_hidden_state, skipped_frame = self.streaming_vision_encoder(
+        vision_embeds, new_hidden_state, spfs_info = self.streaming_vision_encoder(
             image,
             prev_hidden_state=prev_hidden_state,
             confidence_threshold=confidence_threshold,
@@ -225,7 +225,7 @@ class InternVideo2_CLIP_small(nn.Module):
         else:
             vision_embeds_aligned = self.vision_align(vision_embeds)
 
-        return vision_embeds_aligned, new_hidden_state, skipped_frame
+        return vision_embeds_aligned, new_hidden_state, spfs_info
 
     def get_streaming_vid_feat(self, frames: torch.Tensor, prev_hidden_state, confidence_threshold=0.9, max_consecutive_skips=0, gamma=None, beta=None):
         """Return features for a single frame using the streaming ViT.
@@ -250,7 +250,7 @@ class InternVideo2_CLIP_small(nn.Module):
             video feature embedding and ``new_hidden_state`` is the updated RNN state.
         """
         with torch.no_grad():
-            vfeat, new_hidden_state, skipped_frame = self.encode_streaming_vision(
+            vfeat, new_hidden_state, spfs_info = self.encode_streaming_vision(
                 frames,
                 prev_hidden_state=prev_hidden_state,
                 confidence_threshold=confidence_threshold,
@@ -262,7 +262,7 @@ class InternVideo2_CLIP_small(nn.Module):
             # vfeat = self.vision_proj(vfeat)
             vfeat /= vfeat.norm(dim=-1, keepdim=True)
 
-        return vfeat, new_hidden_state, skipped_frame
+        return vfeat, new_hidden_state, spfs_info
 
     def encode_text(self, text):
         """encode text.

@@ -139,7 +139,7 @@ def retrieve_text_streaming(
     frames_tensor = _prepare_frame_tensor(new_frame, size_t, device, log)
 
     # Get video features
-    vid_feat, new_hidden_state, skipped_frame = _get_video_features(
+    vid_feat, new_hidden_state, spfs_info = _get_video_features(
         vlm, frames_tensor, prev_hidden_state,
         confidence_threshold, max_consecutive_skips,
         gamma, beta, log
@@ -161,7 +161,7 @@ def retrieve_text_streaming(
     if log:
         _log_outputs(ret_texts, ret_probs, new_hidden_state)
 
-    return ret_texts, ret_probs, new_hidden_state, skipped_frame
+    return ret_texts, ret_probs, new_hidden_state, spfs_info
 
 
 def _log_inputs(new_frame, texts, prev_hidden_state, topk, config, device):
@@ -239,7 +239,7 @@ def _get_video_features(vlm, frames_tensor, prev_hidden_state,
     if log:
         print("Getting streaming video features...")
 
-    vid_feat, new_hidden_state, skipped_frame = vlm.get_streaming_vid_feat(
+    vid_feat, new_hidden_state, spfs_info = vlm.get_streaming_vid_feat(
         frames_tensor,
         prev_hidden_state=prev_hidden_state,
         confidence_threshold=confidence_threshold,
@@ -252,7 +252,7 @@ def _get_video_features(vlm, frames_tensor, prev_hidden_state,
         print(f"vid_feat shape: {vid_feat.shape}")
         print(f"new_hidden_state type: {type(new_hidden_state)}")
 
-    return vid_feat, new_hidden_state, skipped_frame
+    return vid_feat, new_hidden_state, spfs_info
 
 
 def _get_text_features(texts, vlm, device, log):
