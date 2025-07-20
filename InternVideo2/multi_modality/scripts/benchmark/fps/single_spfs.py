@@ -210,6 +210,7 @@ def main():
             end = time.time()
             total_time += end - start
             print(f"Confidence: {spfs_info.confidence}")
+            print(f"Actual: {spfs_info.gt_cos}\n")
             if spfs_info.skipped:
                 skipped_frames += 1
 

@@ -138,10 +138,14 @@ class StreamMamba(nn.Module):
             skipped = False,
             confidence = 0.0
         ))
+        frame_feature, _ = self.vit_lite.extract_features(single_frame_input) # testing
         if self.rnn_type == 'mamba_spfs':
             if self.rnn.last_hidden is not None and getattr(self, 'consecutive_skips', 0) < max_consecutive_skips:
                 predicted_feature, confidence = self.rnn.predict_next_feat()
-                spfs_info.confidence = torch.sigmoid(confidence)
+                spfs_info.confidence = torch.sigmoid(confidence).item()
+
+                spfs_info.gt_cos = torch.nn.functional.cosine_similarity(frame_feature, predicted_feature, dim=-1).mean().item()
+
                 if torch.sigmoid(confidence) > confidence_threshold:
                     frame_feature = predicted_feature
                     spfs_info.skipped = True
