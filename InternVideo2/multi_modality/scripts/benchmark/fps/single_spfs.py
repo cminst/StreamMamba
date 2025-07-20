@@ -134,7 +134,7 @@ def main():
     mamba_ckpt = torch.load(mamba_checkpoint_path, map_location=device)
     processed_mamba = process_state_dict(mamba_ckpt)
 
-    spfs_ckpt = torch.load(spfs_checkpoint_path, map_location=device)
+    spfs_ckpt = torch.load(spfs_checkpoint_path, map_location=device, weights_only = False)
     processed_spfs = process_state_dict(spfs_ckpt)
 
     merged_state_dict = merge_state_dicts([processed_mamba, processed_spfs], override=True)
