@@ -8,7 +8,9 @@ import time
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-
+from collections import OrderedDict
+import torch
+from utils.basic_utils import merge_state_dicts, process_state_dict
 
 def ensure_dependencies():
     try:
@@ -128,55 +130,31 @@ def main():
         spfs_checkpoint_path = hf_hub_download(repo_id=args.hf_repo, filename="spfs_ckpt.pt")
         print(f"Downloaded SPFS checkpoint to {spfs_checkpoint_path}")
 
-    # Load Mamba weights
+    # Load checkpoints
     mamba_ckpt = torch.load(mamba_checkpoint_path, map_location=device)
+    processed_mamba = process_state_dict(mamba_ckpt)
 
-    if "module" in mamba_ckpt:
-        state_dict_from_checkpoint = mamba_ckpt["module"]
-    elif "model" in mamba_ckpt:
-        state_dict_from_checkpoint = mamba_ckpt["model"]
-    elif "state_dict" in mamba_ckpt:
-        state_dict_from_checkpoint = mamba_ckpt["state_dict"]
-    else:
-        if all(isinstance(v, torch.Tensor) for v in mamba_ckpt.values()):
-            state_dict_from_checkpoint = mamba_ckpt
-        else:
-            raise KeyError(
-                f"Could not find model state_dict in mamba_ckpt. Available keys: {mamba_ckpt.keys()}"
-            )
+    spfs_ckpt = torch.load(spfs_checkpoint_path, map_location=device)
+    processed_spfs = process_state_dict(spfs_ckpt)
 
-    new_state_dict = OrderedDict()
-    is_ddp_inner = any(k.startswith("module.") for k in state_dict_from_checkpoint)
+    merged_state_dict = merge_state_dicts([processed_mamba, processed_spfs], override=True)
 
-    if is_ddp_inner:
-        for k, v in state_dict_from_checkpoint.items():
-            name = k[7:] if k.startswith("module.") else k
-            new_state_dict[name] = v
-        state_dict_to_load = new_state_dict
-    else:
-        state_dict_to_load = state_dict_from_checkpoint
-
-    missing_keys, unexpected_keys = intern_model.load_state_dict(
-        state_dict_to_load, strict=False
-    )
+    # Load the merged state dict into the model
+    missing_keys, unexpected_keys = intern_model.load_state_dict(merged_state_dict, strict=False)
 
     if unexpected_keys:
-        print("\nERROR: Unexpected keys in mamba state_dict:")
+        print("\nERROR: Unexpected keys in merged state_dict:")
         for k in unexpected_keys:
             print(f"  - {k}")
 
     if missing_keys:
-        print("\nINFO: Missing keys in mamba state_dict:")
+        print("\nINFO: Missing keys in merged state_dict:")
         for k in missing_keys[:5]:
             print(f"  - {k}")
         if len(missing_keys) > 5:
             print(f"  - ... and {len(missing_keys) - 5} more")
 
-    print("\nMamba state_dict loaded.")
-
-    # Load SPFS weights
-    spfs_ckpt = torch.load(spfs_checkpoint_path, map_location=device, weights_only = False)
-    intern_model.load_state_dict(spfs_ckpt, strict=False)
+    print("\nMerged state_dict loaded successfully.")
 
     intern_model.eval()
 

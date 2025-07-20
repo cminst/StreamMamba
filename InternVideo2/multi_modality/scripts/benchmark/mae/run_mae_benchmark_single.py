@@ -11,6 +11,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 from huggingface_hub import hf_hub_download
+from utils.basic_utils import merge_state_dicts, process_state_dict
 
 
 def ensure_dependencies():
@@ -171,13 +172,31 @@ def main():
     intern_model = InternVideo2_CLIP_small(config)
     intern_model.to(device)
 
-    # Load Mamba weights
+    # Load checkpoints
     mamba_ckpt = torch.load(args.mamba_weights, map_location=device)
-    intern_model.load_state_dict(mamba_ckpt, strict=False)
+    processed_mamba = process_state_dict(mamba_ckpt)
 
-    # Load SPFS weights
-    spfs_ckpt = torch.load(args.spfs_weights, map_location=device, weights_only = False)
-    intern_model.load_state_dict(spfs_ckpt, strict=False)
+    spfs_ckpt = torch.load(args.spfs_weights, map_location=device)
+    processed_spfs = process_state_dict(spfs_ckpt)
+
+    merged_state_dict = merge_state_dicts([processed_mamba, processed_spfs], override=True)
+
+    # Load the merged state dict into the model
+    missing_keys, unexpected_keys = intern_model.load_state_dict(merged_state_dict, strict=False)
+
+    if unexpected_keys:
+        print("\nERROR: Unexpected keys in merged state_dict:")
+        for k in unexpected_keys:
+            print(f"  - {k}")
+
+    if missing_keys:
+        print("\nINFO: Missing keys in merged state_dict:")
+        for k in missing_keys[:5]:
+            print(f"  - {k}")
+        if len(missing_keys) > 5:
+            print(f"  - ... and {len(missing_keys) - 5} more")
+
+    print("\nMerged state_dict loaded successfully.")
 
     intern_model.eval()
     print("Model set to evaluation mode.")
