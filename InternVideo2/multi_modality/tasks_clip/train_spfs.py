@@ -43,34 +43,6 @@ from utils.logger import log_dict_to_wandb, setup_wandb
 
 logger = logging.getLogger(__name__)
 
-
-def get_inference_transform(img_size):
-     return transforms.Compose(
-        [
-            transforms.Resize(
-                (img_size, img_size),
-                interpolation=InterpolationMode.BICUBIC,
-            ),
-            transforms.ToTensor(),
-            transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
-        ]
-    )
-
-# Preprocess single frame for model input
-def preprocess_frame(frame_bgr_np, transform, device):
-    """
-    Preprocesses a single frame (BGR numpy array) for model inference.
-    Output: [1, C, H, W] tensor on specified device, normalized [0, 1]
-    """
-    frame_rgb_np = cv2.cvtColor(frame_bgr_np, cv2.COLOR_BGR2RGB)
-    pil_image = Image.fromarray(frame_rgb_np)
-
-    transformed_tensor_chw = transform(pil_image)
-
-    frame_tensor_batch = transformed_tensor_chw.unsqueeze(0).to(device)
-
-    return frame_tensor_batch
-
 # Main training function
 def train(
     model,
@@ -187,11 +159,9 @@ def train(
                 mu_t, logvar = model.streaming_vision_encoder.rnn.predict_next_feat()
                 conf_logit = -logvar.squeeze(-1)
 
-                L_pred = cosine_loss_fn(mu_t, target_next)
-
                 if epoch == 0:
                     # Phase-1: only train predictor head (primary & other losses = 0)
-                    loss = L_pred
+                    loss = L_pred = cosine_loss_fn(mu_t, target_next)
                     L_calib = L_skip = torch.tensor(0.0, device=device) # Set others to 0
                 else:
                     # Phase-2: joint fine-tuning
@@ -207,9 +177,24 @@ def train(
                         L_calib = mse_loss_fn(
                             torch.sigmoid(conf_logit.squeeze(-1)), sim_score
                         )
+
+                    # Logging actual similarity and predicted confidence
+                    if i % config.log_freq == 0 and step == 0:  # Log once per batch, at first step
+                        sim_mean = sim_score.mean().item()
+                        conf_mean = torch.sigmoid(conf_logit).mean().item()
+                        if is_main_process() and config.wandb.enable:
+                            wandb.log({
+                                f"train/similarity_score": sim_mean,
+                                f"train/predicted_confidence": conf_mean,
+                            }, step=global_step)
+                            logger.info(
+                                f"similarity_score={sim_mean:.4f}, "
+                                f"predicted_confidence={conf_mean:.4f} @ step {global_step}"
+                            )
+
                     L_skip = -(torch.log(torch.sigmoid(conf_logit) + 1e-8)).mean()
 
-                    loss = L_pred + lambda_calib * L_calib + lambda_skip * L_skip
+                    loss = lambda_calib * L_calib + lambda_skip * L_skip
 
                 if hasattr(config, "deepspeed") and config.deepspeed.enable:
                     model.backward(loss)
@@ -425,8 +410,8 @@ def main(config):
             model.freeze_confidence_head()
             model.unfreeze_prediction_head()
         else:
+            model.freeze_prediction_head()
             model.unfreeze_confidence_head()
-            model.unfreeze_prediction_head()
 
         if not config.evaluate:
             global_step = train(
