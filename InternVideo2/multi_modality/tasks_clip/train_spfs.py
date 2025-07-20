@@ -159,6 +159,8 @@ def train(
                 mu_t, logvar = model.streaming_vision_encoder.rnn.predict_next_feat()
                 conf_logit = -logvar.squeeze(-1)
 
+                L_pred = 0
+
                 if epoch == 0:
                     # Phase-1: only train predictor head (primary & other losses = 0)
                     loss = L_pred = cosine_loss_fn(mu_t, target_next)
@@ -184,8 +186,8 @@ def train(
                         conf_mean = torch.sigmoid(conf_logit).mean().item()
                         if is_main_process() and config.wandb.enable:
                             wandb.log({
-                                f"train/similarity_score": sim_mean,
-                                f"train/predicted_confidence": conf_mean,
+                                "train/similarity_score": sim_mean,
+                                "train/predicted_confidence": conf_mean,
                             }, step=global_step)
                             logger.info(
                                 f"similarity_score={sim_mean:.4f}, "
