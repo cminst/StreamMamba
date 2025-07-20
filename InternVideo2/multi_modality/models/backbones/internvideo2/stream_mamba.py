@@ -135,7 +135,7 @@ class StreamMamba(nn.Module):
             single_frame_input = single_frame_input.squeeze(2)
 
         spfs_info = edict(dict(
-            skipped = True,
+            skipped = False,
             confidence = 0.0
         ))
         if self.rnn_type == 'mamba_spfs':
