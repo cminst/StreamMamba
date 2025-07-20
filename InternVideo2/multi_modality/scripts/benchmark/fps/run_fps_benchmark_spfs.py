@@ -118,7 +118,7 @@ def main():
     intern_model.load_state_dict(mamba_ckpt, strict=False)
 
     # Load SPFS weights
-    spfs_ckpt = torch.load(args.spfs_weights, map_location=device)
+    spfs_ckpt = torch.load(args.spfs_weights, map_location=device, weights_only = False)
     intern_model.load_state_dict(spfs_ckpt, strict=False)
 
     intern_model.eval()
