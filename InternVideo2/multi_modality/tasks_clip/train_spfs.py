@@ -159,7 +159,7 @@ def train(
                 mu_t, logvar = model.streaming_vision_encoder.rnn.predict_next_feat()
                 conf_logit = -logvar.squeeze(-1)
 
-                L_pred = 0
+                L_pred = torch.tensor(0.0, device=device)
 
                 if epoch == 0:
                     # Phase-1: only train predictor head (primary & other losses = 0)
