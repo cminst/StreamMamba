@@ -105,7 +105,7 @@ class StreamMamba(nn.Module):
             return (h0, c0)
         return h0
 
-    def forward(self, single_frame_input, prev_hidden_state, confidence_threshold=0.9, max_consecutive_skips=0, gamma=None, beta=None):
+    def forward(self, single_frame_input, prev_hidden_state, confidence_threshold=0.9, max_consecutive_skips=0, gamma=None, beta=None, teacher_frame_feature=None):
         """
         Processes a single frame (or a small chunk of frames) and updates the hidden state.
 
@@ -122,6 +122,8 @@ class StreamMamba(nn.Module):
             max_consecutive_skips (int): Maximum number of consecutive frames to skip. Default 0
             gamma (torch.Tensor): Used for FiLM
             beta (torch.Tensor): Used for FiLM
+            teacher_frame_feature (torch.Tensor, optional): Ground truth feature for the next frame.
+                If provided, used for calculating `gt_cos`. Defaults to None.
 
         Returns:
             student_embedding (torch.Tensor): The output embedding for the current step.
@@ -144,7 +146,10 @@ class StreamMamba(nn.Module):
                 predicted_feature, confidence = self.rnn.predict_next_feat()
                 spfs_info.confidence = torch.sigmoid(confidence).item()
 
-                spfs_info.gt_cos = torch.nn.functional.cosine_similarity(frame_feature, predicted_feature, dim=-1).mean().item()
+                if teacher_frame_feature is not None:
+                    spfs_info.gt_cos = torch.nn.functional.cosine_similarity(teacher_frame_feature, predicted_feature, dim=-1).mean().item()
+                else:
+                    spfs_info.gt_cos = torch.nn.functional.cosine_similarity(frame_feature, predicted_feature, dim=-1).mean().item()
 
                 if torch.sigmoid(confidence) > confidence_threshold:
                     frame_feature = predicted_feature
