@@ -131,7 +131,7 @@ def train(
             for t in range(MODEL_MAX_FRAMES - 1):
                 frame = image[:, :, t, :, :].unsqueeze(2) # [B, C, 1, H, W]
                 with torch.no_grad():
-                    _, h = model.streaming_vision_encoder(frame, h)
+                    _, h, _ = model.streaming_vision_encoder(frame, h)
 
             num_steps = T - (MODEL_MAX_FRAMES - 1)
             loss_pred_acc = loss_calib_acc = loss_skip_acc = 0.0
@@ -141,7 +141,7 @@ def train(
                 frame_curr = image[:, :, idx_curr, :, :].unsqueeze(2)
 
                 # Forward through Mamba
-                out_t, new_h = model.streaming_vision_encoder(frame_curr, h)
+                out_t, new_h, _ = model.streaming_vision_encoder(frame_curr, h)
                 out_t = model_without_ddp.vision_align(out_t)
 
                 # Teacher targets
