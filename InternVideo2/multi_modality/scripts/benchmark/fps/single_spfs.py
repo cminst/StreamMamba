@@ -175,7 +175,7 @@ def main():
     print("\nMamba state_dict loaded.")
 
     # Load SPFS weights
-    spfs_ckpt = torch.load(spfs_checkpoint_path, map_location=device)
+    spfs_ckpt = torch.load(spfs_checkpoint_path, map_location=device, weights_only = False)
     intern_model.load_state_dict(spfs_ckpt, strict=False)
 
     intern_model.eval()
