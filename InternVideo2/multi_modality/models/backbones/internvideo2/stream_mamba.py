@@ -21,7 +21,7 @@ class StreamMamba(nn.Module):
             fc_hidden_layers=[512],
             teacher_clip_embed_dim=768,
             text_embed_dim=None,
-            pred_rank=32,
+            pred_rank=64,
         ):
         super().__init__()
 
@@ -105,7 +105,7 @@ class StreamMamba(nn.Module):
             return (h0, c0)
         return h0
 
-    def forward(self, single_frame_input, prev_hidden_state, confidence_threshold=0.9, max_consecutive_skips=0, gamma=None, beta=None, teacher_frame_feature=None):
+    def forward(self, single_frame_input, prev_hidden_state, confidence_threshold=0.9, max_consecutive_skips=0, gamma=None, beta=None):
         """
         Processes a single frame (or a small chunk of frames) and updates the hidden state.
 
@@ -122,8 +122,6 @@ class StreamMamba(nn.Module):
             max_consecutive_skips (int): Maximum number of consecutive frames to skip. Default 0
             gamma (torch.Tensor): Used for FiLM
             beta (torch.Tensor): Used for FiLM
-            teacher_frame_feature (torch.Tensor, optional): Ground truth feature for the next frame.
-                If provided, used for calculating `gt_cos`. Defaults to None.
 
         Returns:
             student_embedding (torch.Tensor): The output embedding for the current step.
@@ -137,22 +135,15 @@ class StreamMamba(nn.Module):
             single_frame_input = single_frame_input.squeeze(2)
 
         spfs_info = edict(dict(
-            skipped = False,
-            confidence = 0.0
+            skipped=False,
+            confidence=0.0
         ))
-        frame_feature, _ = self.vit_lite.extract_features(single_frame_input) # testing
+
         if self.rnn_type == 'mamba_spfs':
             if self.rnn.last_hidden is not None and getattr(self, 'consecutive_skips', 0) < max_consecutive_skips:
                 predicted_feature, confidence_logit = self.rnn.predict_next_feat()
-
                 confidence = torch.sigmoid(-confidence_logit).item()
-
                 spfs_info.confidence = confidence
-
-                if teacher_frame_feature is not None:
-                    spfs_info.gt_cos = torch.nn.functional.cosine_similarity(teacher_frame_feature, predicted_feature, dim=-1).mean().item()
-                else:
-                    spfs_info.gt_cos = torch.nn.functional.cosine_similarity(frame_feature, predicted_feature, dim=-1).mean().item()
 
                 if confidence > confidence_threshold:
                     frame_feature = predicted_feature
@@ -171,7 +162,7 @@ class StreamMamba(nn.Module):
             student_embedding, current_hidden_state = self.rnn(frame_feature, prev_hidden_state)
         elif self.rnn_type == 'cross_mamba_film':
             student_embedding, current_hidden_state = self.rnn(frame_feature, prev_hidden_state, gamma, beta)
-        else: # LSTM, GRU
+        else:
             raise NotImplementedError("Assuming Mamba for this review.")
 
         return student_embedding, current_hidden_state, spfs_info
