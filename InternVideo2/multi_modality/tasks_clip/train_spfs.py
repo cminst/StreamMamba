@@ -505,6 +505,7 @@ def main(config):
     logger.info("Start training")
     logger.info(f"Epoch: {start_epoch}")
     start_time = time.time()
+    start_step = global_step
 
     for epoch in range(start_epoch, config.scheduler.epochs):
         if epoch == 0:
@@ -528,6 +529,7 @@ def main(config):
                 scaler,
                 config,
                 data_type,
+                skip_num = global_step - start_step,
                 test_video_path=config.get("test_video_path", None),
             )
 
@@ -562,6 +564,7 @@ def main(config):
             else:
                 torch.save(save_obj, join(config.output_dir, f"ckpt_{epoch:02d}.pth"))
 
+        start_step = global_step
         dist.barrier()
 
     total_time = time.time() - start_time
