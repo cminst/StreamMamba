@@ -472,7 +472,7 @@ def main(config):
         optimizer,
         scheduler,
         scaler,
-        _,  # tokenizer parameter not used
+        tokenizer,
         start_epoch,
         global_step,
     ) = setup_model(
