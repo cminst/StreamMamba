@@ -1,4 +1,5 @@
 import numpy as np
+from collections import OrderedDict
 import io
 import os
 import json
@@ -289,3 +290,30 @@ def merge_dicts(list_dicts):
     for i in range(1, len(list_dicts)):
         merged_dict.update(list_dicts[i])
     return merged_dict
+
+def process_state_dict(state_dict):
+    # Extract nested state_dict if present
+    if "module" in state_dict:
+        state_dict = state_dict["module"]
+    elif "model" in state_dict:
+        state_dict = state_dict["model"]
+    elif "state_dict" in state_dict:
+        state_dict = state_dict["state_dict"]
+    elif not all(isinstance(v, torch.Tensor) for v in state_dict.values()):
+        raise KeyError("Could not find valid state_dict in the checkpoint")
+
+    # Strip 'module.' prefix if present
+    new_state_dict = OrderedDict()
+    for key, value in state_dict.items():
+        new_key = key[7:] if key.startswith("module.") else key
+        new_state_dict[new_key] = value
+    return new_state_dict
+
+def merge_state_dicts(state_dicts, override=True):
+    merged = OrderedDict()
+    for sd in state_dicts:
+        for key, value in sd.items():
+            if key in merged and not override:
+                continue
+            merged[key] = value
+    return merged

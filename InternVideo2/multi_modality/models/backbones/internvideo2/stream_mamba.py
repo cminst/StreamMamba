@@ -1,4 +1,5 @@
 from .video_mamba_block import VideoMambaBlock, CrossMambaFiLM, MambaSPFS
+from easydict import EasyDict as edict
 
 import torch
 import timm
@@ -20,7 +21,7 @@ class StreamMamba(nn.Module):
             fc_hidden_layers=[512],
             teacher_clip_embed_dim=768,
             text_embed_dim=None,
-            pred_rank=32,
+            pred_rank=64,
         ):
         super().__init__()
 
@@ -104,9 +105,11 @@ class StreamMamba(nn.Module):
             return (h0, c0)
         return h0
 
-    def forward(self, single_frame_input, prev_hidden_state, gamma=None, beta=None):
+    def forward(self, single_frame_input, prev_hidden_state, confidence_threshold=0.9, max_consecutive_skips=0, gamma=None, beta=None):
         """
         Processes a single frame (or a small chunk of frames) and updates the hidden state.
+
+        Note: SPFS is disabled by default (max_consecutive_steps = 0)
 
         Args:
             single_frame_input (torch.Tensor): Input frame(s) for the ViT-Lite.
@@ -115,6 +118,8 @@ class StreamMamba(nn.Module):
             prev_hidden_state (tuple or torch.Tensor): Previous hidden state from the RNN.
                 For LSTM: (h_prev, c_prev)
                 For GRU: h_prev
+            confidence_threshold (float): Confidence threshold for SPFS. Default 0.9
+            max_consecutive_skips (int): Maximum number of consecutive frames to skip. Default 0
             gamma (torch.Tensor): Used for FiLM
             beta (torch.Tensor): Used for FiLM
 
@@ -122,17 +127,42 @@ class StreamMamba(nn.Module):
             student_embedding (torch.Tensor): The output embedding for the current step.
                                             Shape: (B, teacher_clip_embed_dim)
             current_hidden_state (tuple or torch.Tensor): The updated RNN hidden state.
+            spfs_info (dict): Info about SPFS
+                skipped (bool): whether the frame was skipped or not
+                confidence (float): the confidence level from the predictor
         """
         if len(single_frame_input.shape) == 5:
             single_frame_input = single_frame_input.squeeze(2)
 
-        frame_feature, _ = self.vit_lite.extract_features(single_frame_input)
+        spfs_info = edict(dict(
+            skipped=False,
+            confidence=0.0
+        ))
+
+        if self.rnn_type == 'mamba_spfs':
+            if self.rnn.last_hidden is not None and getattr(self, 'consecutive_skips', 0) < max_consecutive_skips:
+                predicted_feature, confidence_logit = self.rnn.predict_next_feat()
+                confidence = torch.sigmoid(-confidence_logit).item()
+                spfs_info.confidence = confidence
+
+                if confidence > confidence_threshold:
+                    frame_feature = predicted_feature
+                    spfs_info.skipped = True
+                    self.consecutive_skips = getattr(self, 'consecutive_skips', 0) + 1
+                else:
+                    frame_feature, _ = self.vit_lite.extract_features(single_frame_input)
+                    self.consecutive_skips = 0
+            else:
+                frame_feature, _ = self.vit_lite.extract_features(single_frame_input)
+                self.consecutive_skips = 0
+        else:
+            frame_feature, _ = self.vit_lite.extract_features(single_frame_input)
 
         if self.rnn_type in ['mamba', 'mamba_spfs']:
             student_embedding, current_hidden_state = self.rnn(frame_feature, prev_hidden_state)
         elif self.rnn_type == 'cross_mamba_film':
             student_embedding, current_hidden_state = self.rnn(frame_feature, prev_hidden_state, gamma, beta)
-        else: # LSTM, GRU
+        else:
             raise NotImplementedError("Assuming Mamba for this review.")
 
-        return student_embedding, current_hidden_state
+        return student_embedding, current_hidden_state, spfs_info

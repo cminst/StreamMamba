@@ -1,9 +1,12 @@
 import datetime
 import logging
 import os
+import sys
 import time
 import random
 import numpy as np
+import cv2
+import argparse
 
 from os.path import join
 
@@ -43,34 +46,6 @@ from utils.logger import log_dict_to_wandb, setup_wandb
 
 logger = logging.getLogger(__name__)
 
-
-def get_inference_transform(img_size):
-     return transforms.Compose(
-        [
-            transforms.Resize(
-                (img_size, img_size),
-                interpolation=InterpolationMode.BICUBIC,
-            ),
-            transforms.ToTensor(),
-            transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
-        ]
-    )
-
-# Preprocess single frame for model input
-def preprocess_frame(frame_bgr_np, transform, device):
-    """
-    Preprocesses a single frame (BGR numpy array) for model inference.
-    Output: [1, C, H, W] tensor on specified device, normalized [0, 1]
-    """
-    frame_rgb_np = cv2.cvtColor(frame_bgr_np, cv2.COLOR_BGR2RGB)
-    pil_image = Image.fromarray(frame_rgb_np)
-
-    transformed_tensor_chw = transform(pil_image)
-
-    frame_tensor_batch = transformed_tensor_chw.unsqueeze(0).to(device)
-
-    return frame_tensor_batch
-
 # Main training function
 def train(
     model,
@@ -85,6 +60,7 @@ def train(
     config,
     data_type,
     skip_num=0,
+    test_video_path=None,
 ):
     """
     Hybrid SPFS training loop.
@@ -121,6 +97,19 @@ def train(
         desc=f"Training: [Epoch {epoch}]",
         disable=not is_main_process(),
     )
+
+    # Load test video for SPFS testing (if provided)
+    test_frames = None
+    if is_main_process() and test_video_path is not None and os.path.exists(test_video_path):
+        try:
+            # Import utility functions
+            sys.path.append(os.getcwd())
+            from demo.utils import _frame_from_video, frames2tensor
+            test_cap = cv2.VideoCapture(test_video_path)
+            test_frames = [x for x in _frame_from_video(test_cap)]
+            logger.info(f"Loaded {len(test_frames)} frames from test video: {test_video_path}")
+        except Exception as e:
+            logger.error(f"Failed to load test video: {e}")
 
     # Loss fns and hyper-param
     cosine_loss_fn = lambda pred, target: 1 - torch.nn.functional.cosine_similarity(
@@ -159,7 +148,7 @@ def train(
             for t in range(MODEL_MAX_FRAMES - 1):
                 frame = image[:, :, t, :, :].unsqueeze(2) # [B, C, 1, H, W]
                 with torch.no_grad():
-                    _, h = model.streaming_vision_encoder(frame, h)
+                    _, h, _ = model.streaming_vision_encoder(frame, h)
 
             num_steps = T - (MODEL_MAX_FRAMES - 1)
             loss_pred_acc = loss_calib_acc = loss_skip_acc = 0.0
@@ -169,7 +158,7 @@ def train(
                 frame_curr = image[:, :, idx_curr, :, :].unsqueeze(2)
 
                 # Forward through Mamba
-                out_t, new_h = model.streaming_vision_encoder(frame_curr, h)
+                out_t, new_h, _ = model.streaming_vision_encoder(frame_curr, h)
                 out_t = model_without_ddp.vision_align(out_t)
 
                 # Teacher targets
@@ -187,11 +176,11 @@ def train(
                 mu_t, logvar = model.streaming_vision_encoder.rnn.predict_next_feat()
                 conf_logit = -logvar.squeeze(-1)
 
-                L_pred = cosine_loss_fn(mu_t, target_next)
+                L_pred = torch.tensor(0.0, device=device)
 
                 if epoch == 0:
                     # Phase-1: only train predictor head (primary & other losses = 0)
-                    loss = L_pred
+                    loss = L_pred = cosine_loss_fn(mu_t, target_next)
                     L_calib = L_skip = torch.tensor(0.0, device=device) # Set others to 0
                 else:
                     # Phase-2: joint fine-tuning
@@ -207,9 +196,24 @@ def train(
                         L_calib = mse_loss_fn(
                             torch.sigmoid(conf_logit.squeeze(-1)), sim_score
                         )
+
+                    # Logging actual similarity and predicted confidence
+                    if i % config.log_freq == 0 and step == 0:  # Log once per batch, at first step
+                        sim_mean = sim_score.mean().item()
+                        conf_mean = torch.sigmoid(conf_logit).mean().item()
+                        if is_main_process() and config.wandb.enable:
+                            wandb.log({
+                                "train/similarity_score": sim_mean,
+                                "train/predicted_confidence": conf_mean,
+                            }, step=global_step)
+                            logger.info(
+                                f"similarity_score={sim_mean:.4f}, "
+                                f"predicted_confidence={conf_mean:.4f} @ step {global_step}"
+                            )
+
                     L_skip = -(torch.log(torch.sigmoid(conf_logit) + 1e-8)).mean()
 
-                    loss = L_pred + lambda_calib * L_calib + lambda_skip * L_skip
+                    loss = lambda_calib * L_calib + lambda_skip * L_skip
 
                 if hasattr(config, "deepspeed") and config.deepspeed.enable:
                     model.backward(loss)
@@ -271,14 +275,12 @@ def train(
         # Save checkpoint
         global_iter = global_step // step_count
 
+        # Run test inference on test video every 100 iterations
+        if is_main_process() and test_frames is not None and global_iter % 100 == 0 and global_iter > 0:
+            run_test_inference(model_without_ddp, test_frames, device, global_iter, data_type)
+
         if is_main_process() and config.get("save_iter", False) and global_iter % config.save_iter == 0:
             state_dict = model_without_ddp.state_dict()
-            param_grad_dict = {
-                k: v.requires_grad for (k, v) in model_without_ddp.named_parameters()
-            }
-            for k in list(state_dict.keys()):
-                if k in param_grad_dict.keys() and not param_grad_dict[k]:
-                    del state_dict[k]
 
             save_obj = {
                 "model": state_dict,
@@ -289,7 +291,7 @@ def train(
                 "epoch": epoch,
                 "global_step": global_iter,
             }
-            torch.save(save_obj, join(config.output_dir, f"ckpt_step_{global_iter}.pth"))
+            torch.save(save_obj, join(config.output_dir, f"ckpt_step_{global_iter}.pt"))
 
     metric_logger.synchronize_between_processes()
     logger.info(f"Averaged stats for Epoch [{epoch}]: {metric_logger.global_avg()}")
@@ -301,6 +303,92 @@ def train(
         )
 
     return global_step
+
+def run_test_inference(model, frames, device, step, data_type):
+    """Run test inference on a video using the current model state"""
+    model.eval()
+    logger.info(f"Running test inference at step {step}")
+
+    # Import locally to avoid circular imports
+    from demo.utils import frames2tensor
+
+    # Use a fixed number of frames to test
+    num_frames = min(100, len(frames))
+
+    # Determine if autocasting is needed based on the 'data_type' used in training
+    # 'data_type' will be torch.bfloat16 or torch.float16 if half-precision is enabled.
+    use_autocast = (data_type != torch.float32)
+
+    # First warm up the model with 8 frames
+    hidden = model.streaming_vision_encoder.init_hidden(batch_size=1, device=device)
+
+    for i in range(8):
+        frame_tensor = frames2tensor([frames[i]], fnum=1, target_size=(224, 224), device=device)
+        with torch.no_grad():
+            with torch.amp.autocast('cuda', enabled=use_autocast, dtype=data_type):
+                _, hidden, _ = model.streaming_vision_encoder(
+                    frame_tensor.permute(0, 2, 1, 3, 4),
+                    prev_hidden_state=hidden,
+                    confidence_threshold=1.0,  # Force no skip during warm-up
+                    max_consecutive_skips=0
+                )
+
+    logger.info("Warm-up complete, running inference with SPFS")
+
+    # Track skipped frames and confidence
+    total_skipped = 0
+    confidence_values = []
+    similarity_values = []
+
+    # Process remaining frames with SPFS enabled
+    for i in range(8, num_frames - 1):  # -1 to leave room for next frame
+        frame_tensor = frames2tensor([frames[i]], fnum=1, target_size=(224, 224), device=device)
+        next_frame_tensor = frames2tensor([frames[i+1]], fnum=1, target_size=(224, 224), device=device)
+
+        with torch.no_grad():
+            with torch.amp.autocast('cuda', enabled=use_autocast, dtype=data_type):
+                # Get feature for next frame (for gt comparison)
+                next_feat, _ = model.streaming_vision_encoder.vit_lite.extract_features(next_frame_tensor.squeeze(1))
+
+                # Process current frame
+                _, hidden, spfs_info = model.streaming_vision_encoder(
+                    frame_tensor.permute(0, 2, 1, 3, 4),
+                    prev_hidden_state=hidden,
+                    confidence_threshold=0.5,  # Lower threshold to see if skipping works
+                    max_consecutive_skips=6,
+                    teacher_frame_feature=next_feat
+                )
+
+            # Track metrics (spfs_info might contain tensors, ensure they are moved to CPU or converted to float before logging/appending)
+            if spfs_info.skipped:
+                total_skipped += 1
+
+            # Detach and convert to float for storage/logging if they are tensors
+            confidence_values.append(spfs_info.confidence.item() if torch.is_tensor(spfs_info.confidence) else spfs_info.confidence)
+
+            # Check if 'gt_cos' exists in spfs_info, otherwise default to 0
+            gt_cos_val = getattr(spfs_info, 'gt_cos', 0)
+            similarity_values.append(gt_cos_val.item() if torch.is_tensor(gt_cos_val) else gt_cos_val)
+
+
+            # Log every 10 frames
+            if i % 10 == 8:  # Start at frame 8, then every 10th
+                logger.info(f"Frame {i}: skipped={spfs_info.skipped}, "
+                           f"confidence={spfs_info.confidence:.4f}, "
+                           f"similarity={gt_cos_val:.4f}")
+
+    # Log summary statistics
+    if confidence_values:
+        avg_conf = sum(confidence_values) / len(confidence_values)
+        avg_sim = sum(similarity_values) / len(similarity_values) if similarity_values else 0.0 # Handle case where similarity_values might be empty
+        logger.info(f"Test inference summary: "
+                   f"frames={num_frames-8}, "
+                   f"skipped={total_skipped}, "
+                   f"skip_rate={total_skipped/(num_frames-8):.2f}, "
+                   f"avg_conf={avg_conf:.4f}, "
+                   f"avg_sim={avg_sim:.4f}")
+
+    model.train()
 
 def clone_collate_fn(batch):
     def clone_item(x):
@@ -425,8 +513,8 @@ def main(config):
             model.freeze_confidence_head()
             model.unfreeze_prediction_head()
         else:
+            model.freeze_prediction_head()
             model.unfreeze_confidence_head()
-            model.unfreeze_prediction_head()
 
         if not config.evaluate:
             global_step = train(
@@ -442,6 +530,7 @@ def main(config):
                 config,
                 data_type,
                 skip_num = global_step - start_step,
+                test_video_path=config.get("test_video_path", None),
             )
 
         # Save checkpoint before next epoch
@@ -489,5 +578,12 @@ def main(config):
 
 if __name__ == "__main__":
     cfg = setup_main()
+
+    test_video_path = os.path.join(os.environ['DATASET_ROOT'], 'testing_spfs_video.mp4')
+
+    # Add test video path to config
+    if test_video_path:
+        cfg.test_video_path = test_video_path
+        logger.info(f"Will test SPFS on video: {cfg.test_video_path}")
     local_broadcast_process_authkey()
     main(cfg)

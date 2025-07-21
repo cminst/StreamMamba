@@ -170,7 +170,7 @@ def main():
 
     if "delta" not in args.config_name:
         config.model.text_ckpt_path = config.model.mobileclip_ckpt_path
-        
+
     streaming_vit_paths = find_streaming_checkpoints(args.config_dir, model_name)
 
     from models.internvideo2_clip_small import InternVideo2_CLIP_small
@@ -212,7 +212,7 @@ def main():
         intern_model = InternVideo2_CLIP_small(config)
         intern_model.to(device)
 
-        checkpoint = torch.load(checkpoint_path, map_location=device)
+        checkpoint = torch.load(checkpoint_path, map_location=device, weights_only = False)
         print(f"Loaded checkpoint from {checkpoint_path}. Keys: {checkpoint.keys()}")
 
         if "module" in checkpoint:
@@ -314,7 +314,7 @@ def main():
                 )
 
             for j in pbar:
-                texts, probs, curr_hidden_state = retrieve_text_streaming(
+                _, probs, curr_hidden_state, _ = retrieve_text_streaming(
                     frames[j+8],
                     [phrase],
                     intern_model,
