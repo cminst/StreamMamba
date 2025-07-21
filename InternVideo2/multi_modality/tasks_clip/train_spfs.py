@@ -505,7 +505,7 @@ def main(config):
     logger.info("Start training")
     logger.info(f"Epoch: {start_epoch}")
     start_time = time.time()
-    start_step = global_step
+    start_step = start_epoch * num_steps_per_epoch
 
     for epoch in range(start_epoch, config.scheduler.epochs):
         if epoch == 0:
