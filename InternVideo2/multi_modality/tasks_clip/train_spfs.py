@@ -277,7 +277,7 @@ def train(
 
         # Run test inference on test video every 100 iterations
         if is_main_process() and test_frames is not None and global_iter % 100 == 0 and global_iter > 0:
-            run_test_inference(model_without_ddp, test_frames, device, global_iter)
+            run_test_inference(model_without_ddp, test_frames, device, global_iter, data_type)
 
         if is_main_process() and config.get("save_iter", False) and global_iter % config.save_iter == 0:
             state_dict = model_without_ddp.state_dict()
@@ -304,7 +304,7 @@ def train(
 
     return global_step
 
-def run_test_inference(model, frames, device, step):
+def run_test_inference(model, frames, device, step, data_type):
     """Run test inference on a video using the current model state"""
     model.eval()
     logger.info(f"Running test inference at step {step}")
@@ -315,18 +315,23 @@ def run_test_inference(model, frames, device, step):
     # Use a fixed number of frames to test
     num_frames = min(100, len(frames))
 
+    # Determine if autocasting is needed based on the 'data_type' used in training
+    # 'data_type' will be torch.bfloat16 or torch.float16 if half-precision is enabled.
+    use_autocast = (data_type != torch.float32)
+
     # First warm up the model with 8 frames
     hidden = model.streaming_vision_encoder.init_hidden(batch_size=1, device=device)
 
     for i in range(8):
         frame_tensor = frames2tensor([frames[i]], fnum=1, target_size=(224, 224), device=device)
         with torch.no_grad():
-            _, hidden, _ = model.streaming_vision_encoder(
-                frame_tensor.permute(0, 2, 1, 3, 4),
-                prev_hidden_state=hidden,
-                confidence_threshold=1.0,  # Force no skip during warm-up
-                max_consecutive_skips=0
-            )
+            with torch.amp.autocast('cuda', enabled=use_autocast, dtype=data_type):
+                _, hidden, _ = model.streaming_vision_encoder(
+                    frame_tensor.permute(0, 2, 1, 3, 4),
+                    prev_hidden_state=hidden,
+                    confidence_threshold=1.0,  # Force no skip during warm-up
+                    max_consecutive_skips=0
+                )
 
     logger.info("Warm-up complete, running inference with SPFS")
 
@@ -341,24 +346,27 @@ def run_test_inference(model, frames, device, step):
         next_frame_tensor = frames2tensor([frames[i+1]], fnum=1, target_size=(224, 224), device=device)
 
         with torch.no_grad():
-            # Get feature for next frame (for gt comparison)
-            next_feat, _ = model.streaming_vision_encoder.vit_lite.extract_features(next_frame_tensor.squeeze(1))
+            with torch.amp.autocast('cuda', enabled=use_autocast, dtype=data_type):
+                # Get feature for next frame (for gt comparison)
+                next_feat, _ = model.streaming_vision_encoder.vit_lite.extract_features(next_frame_tensor.squeeze(1))
 
-            # Process current frame
-            _, hidden, spfs_info = model.streaming_vision_encoder(
-                frame_tensor.permute(0, 2, 1, 3, 4),
-                prev_hidden_state=hidden,
-                confidence_threshold=0.5,  # Lower threshold to see if skipping works
-                max_consecutive_skips=6,
-                teacher_frame_feature=next_feat
-            )
+                # Process current frame
+                _, hidden, spfs_info = model.streaming_vision_encoder(
+                    frame_tensor.permute(0, 2, 1, 3, 4),
+                    prev_hidden_state=hidden,
+                    confidence_threshold=0.5,  # Lower threshold to see if skipping works
+                    max_consecutive_skips=6,
+                    teacher_frame_feature=next_feat
+                )
 
-            # Track metrics
+            # Track metrics (spfs_info might contain tensors, ensure they are moved to CPU or converted to float before logging/appending)
             if spfs_info.skipped:
                 total_skipped += 1
 
-            confidence_values.append(spfs_info.confidence)
-            similarity_values.append(spfs_info.gt_cos)
+            # Detach and convert to float for storage/logging if they are tensors
+            confidence_values.append(spfs_info.confidence.item() if torch.is_tensor(spfs_info.confidence) else spfs_info.confidence)
+            similarity_values.append(spfs_info.gt_cos.item() if torch.is_tensor(spfs_info.gt_cos) else spfs_info.gt_cos)
+
 
             # Log every 10 frames
             if i % 10 == 8:  # Start at frame 8, then every 10th
