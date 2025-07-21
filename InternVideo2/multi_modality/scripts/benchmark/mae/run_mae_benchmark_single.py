@@ -1,16 +1,13 @@
 import argparse
-import logging
 import os
-import subprocess
 import sys
-import re
+import subprocess
 
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 from huggingface_hub import hf_hub_download
-
 
 def ensure_dependencies():
     try:
@@ -34,18 +31,16 @@ def ensure_dependencies():
         ])
     print("Installed packages")
 
-
 def parse_args():
     parser = argparse.ArgumentParser(description="Run streaming benchmarks for a single model")
+    parser.add_argument(
+        "config_dir",
+        help="Path to training config directory, e.g. scripts/pretraining/clip/B14",
+    )
     parser.add_argument(
         "--config-name",
         default="delta",
         help="Configuration name",
-    )
-    parser.add_argument(
-        "--use-film",
-        action="store_true",
-        help="Indicate that the model uses FiLM conditioning",
     )
     parser.add_argument(
         "--output-graph",
@@ -79,13 +74,11 @@ def parse_args():
     )
     return parser.parse_args()
 
-
 def find_closest(pred, truths):
     """Return the truth value closest to ``pred``."""
     if not truths:
         return pred
     return min(truths, key=lambda x: abs(x - pred))
-
 
 def calculate_mse(preds_with_offset, data):
     """Calculate mean squared error for a list of predictions."""
@@ -97,7 +90,6 @@ def calculate_mse(preds_with_offset, data):
         closest_t = find_closest(p, truth_peaks)
         errors.append((p - closest_t) ** 2)
     return np.mean(errors) if errors else float("inf")
-
 
 def find_best_offset(preds, data, search_range=(-30, 30)):
     """Find the integer offset that minimises MSE."""
@@ -111,11 +103,9 @@ def find_best_offset(preds, data, search_range=(-30, 30)):
             best_offset = off
     return best_offset
 
-
 def offset_predictions(preds, data):
     best = find_best_offset(preds, data)
     return [p + best for p in preds]
-
 
 def compute_accuracy(preds: list[int], dataset: list) -> dict:
     """Return MAE percentages within various frame offsets using global offset."""
@@ -137,37 +127,49 @@ def compute_accuracy(preds: list[int], dataset: list) -> dict:
     percentages["average"] = sum(percentages.values()) / len(thresholds)
     return percentages
 
-
 def main():
     ensure_dependencies()
     args = parse_args()
+
+    # ---------- Setup ----------
 
     sys.path.append(os.getcwd())
 
     from demo.config import Config, eval_dict_leaf
     from demo.utils import _frame_from_video
     from demo.utils import retrieve_text_streaming, frames2tensor
-
-    config_path = os.path.join(os.getcwd(), "InternVideo2/multi_modality/configs", "med_config_fusion.json") # Assuming a default config for single model
-    config = Config.from_file(config_path)
-    config = eval_dict_leaf(config)
-
-    config.model.streaming_vision_encoder.rnn_type = "mamba" if args.no_spfs else "mamba_spfs"
-    config.model.text_ckpt_path = config.model.mobileclip_ckpt_path
-
+    from tqdm import tqdm
     from models.internvideo2_clip_small import InternVideo2_CLIP_small
     import torch
     import numpy as np
     import cv2
+    from iv2_utils.iv2 import json_read, json_write
+
+    # ---------- Configuration ----------
+
+    config_path = os.path.join(args.config_dir, "config.py")
+    config = Config.from_file(config_path)
+    config = eval_dict_leaf(config)
+
+    expected_rnn_type = "mamba" if args.no_spfs else "mamba_spfs"
+    current_rnn_type = config.model.streaming_vision_encoder.rnn_type
+
+    if current_rnn_type != expected_rnn_type:
+        print(f"Error: Expected RNN type to be '{expected_rnn_type}', but found '{current_rnn_type}'.")
+        sys.exit(1)
+
+    config.model.text_ckpt_path = config.model.mobileclip_ckpt_path
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    from iv2_utils.iv2 import json_read, json_write
+    # ---------- Data Preparation ----------
 
     if "photography-model" not in os.listdir('.'):
         subprocess.check_call(["git", "clone", "https://github.com/ruo2019/photography-model.git"])
 
     act75_data = json_read('photography-model/data/ACT75.json')
+
+    # ---------- Model Loading ----------
 
     intern_model = InternVideo2_CLIP_small(config)
     intern_model.to(device)
@@ -199,19 +201,12 @@ def main():
     intern_model.eval()
     print("Model set to evaluation mode.")
 
-    logging.basicConfig(
-        format='%(asctime)s %(levelname)s: %(message)s',
-        level=logging.DEBUG,
-        datefmt='%I:%M:%S'
-    )
-    logging.debug("Logging working!")
-
-    from tqdm import tqdm
+    # ---------- Prediction ----------
 
     logits = []
     preds = []
 
-    size_t = 224
+    size_t = config.get('size_t', 224)
 
     intern_model.to(device)
 
@@ -220,19 +215,6 @@ def main():
 
         logit_curr = []
         pbar = tqdm(range(len(frames) - 8))
-
-        gamma = beta = None
-        if args.use_film and getattr(intern_model.streaming_vision_encoder, "rnn_type", "") == "cross_mamba_film":
-            text_input = intern_model.tokenizer(
-                phrase,
-                padding="max_length",
-                truncation=True,
-                max_length=config.max_txt_l,
-                return_tensors="pt",
-            ).to(device)
-            with torch.no_grad():
-                prompt_vec = intern_model.encode_text(text_input)
-            gamma, beta = intern_model.streaming_vision_encoder.rnn.prepare_prompt(prompt_vec)
 
         curr_hidden_state = intern_model.streaming_vision_encoder.init_hidden(batch_size=1, device=device)
 
@@ -247,20 +229,16 @@ def main():
             _, curr_hidden_state = intern_model.streaming_vision_encoder(
                 initial_frame_mc,
                 curr_hidden_state,
-                gamma,
-                beta,
             )
 
         for j in pbar:
             _, probs, curr_hidden_state, _ = retrieve_text_streaming(
-                frames[j+8],
+                frames[j + 8],
                 [phrase],
                 intern_model,
                 curr_hidden_state,
                 topk=1,
                 config=config,
-                gamma=gamma,
-                beta=beta,
             )
             logit_curr.append(probs.item())
             if len(logit_curr) > 0:
@@ -280,7 +258,6 @@ def main():
     print(f"Saved MAE metrics to {args.output_json.replace('.json', '_metrics.json')}")
 
     print(f"Average MAE accuracy: {metrics['average']:.2f}")
-
 
 if __name__ == "__main__":
     main()
