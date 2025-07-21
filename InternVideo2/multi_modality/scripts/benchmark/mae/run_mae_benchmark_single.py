@@ -7,6 +7,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
+import torch
 from huggingface_hub import hf_hub_download
 
 def ensure_dependencies():
@@ -68,6 +69,18 @@ def parse_args():
         help="HuggingFace repo to download checkpoint from",
     )
     parser.add_argument(
+        "--confidence-threshold",
+        type=float,
+        default=0.9,
+        help="Confidence threshold for SPFS frame skipping",
+    )
+    parser.add_argument(
+        "--max-consecutive-skips",
+        type=int,
+        default=0,
+        help="Maximum number of consecutive frames to skip",
+    )
+    parser.add_argument(
         "--no-spfs",
         action="store_true",
         help="Disable SPFS (use plain model)",
@@ -127,6 +140,43 @@ def compute_accuracy(preds: list[int], dataset: list) -> dict:
     percentages["average"] = sum(percentages.values()) / len(thresholds)
     return percentages
 
+
+def retrieve_text_streaming_spfs(
+    new_frame,
+    texts,
+    model,
+    prev_hidden_state=None,
+    *,
+    topk: int = 5,
+    config: dict,
+    device,
+    confidence_threshold: float,
+    max_consecutive_skips: int,
+):
+    """Lightweight inline implementation of ``retrieve_text_streaming`` with SPFS support."""
+
+    size_t = config.get("size_t", 224)
+
+    frame_tensor = frames2tensor(
+        [new_frame], fnum=1, target_size=(size_t, size_t), device=device
+    )
+    if frame_tensor.ndim == 5:
+        frame_tensor = frame_tensor.squeeze(1)
+
+    vid_feat, new_hidden_state, spfs_info = model.get_streaming_vid_feat(
+        frame_tensor,
+        prev_hidden_state,
+        confidence_threshold=confidence_threshold,
+        max_consecutive_skips=max_consecutive_skips,
+    )
+
+    text_feats = torch.cat([model.get_txt_feat(t) for t in texts], dim=0)
+
+    probs, idxs = model.predict_label(vid_feat, text_feats, top=topk)
+
+    ret_texts = [texts[i] for i in idxs.long().cpu().numpy()[0].tolist()]
+    return ret_texts, probs.float().cpu().numpy()[0], new_hidden_state, spfs_info
+
 def main():
     ensure_dependencies()
     args = parse_args()
@@ -137,11 +187,10 @@ def main():
 
     from demo.config import Config, eval_dict_leaf
     from demo.utils import _frame_from_video
-    from demo.utils import retrieve_text_streaming, frames2tensor
+    from demo.utils import frames2tensor
     from tqdm import tqdm
     from models.internvideo2_clip_small import InternVideo2_CLIP_small
     import torch
-    import numpy as np
     import cv2
     from iv2_utils.iv2 import json_read, json_write
 
@@ -226,19 +275,24 @@ def main():
                 device=device
             ).squeeze(0).to(device)
 
-            _, curr_hidden_state = intern_model.streaming_vision_encoder(
+            _, curr_hidden_state, _ = intern_model.streaming_vision_encoder(
                 initial_frame_mc,
                 curr_hidden_state,
+                confidence_threshold=1.0,
+                max_consecutive_skips=0,
             )
 
         for j in pbar:
-            _, probs, curr_hidden_state, _ = retrieve_text_streaming(
+            _, probs, curr_hidden_state, _ = retrieve_text_streaming_spfs(
                 frames[j + 8],
                 [phrase],
                 intern_model,
                 curr_hidden_state,
                 topk=1,
                 config=config,
+                device=device,
+                confidence_threshold=args.confidence_threshold,
+                max_consecutive_skips=(0 if args.no_spfs else args.max_consecutive_skips),
             )
             logit_curr.append(probs.item())
             if len(logit_curr) > 0:
