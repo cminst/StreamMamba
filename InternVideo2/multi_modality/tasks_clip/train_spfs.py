@@ -365,19 +365,22 @@ def run_test_inference(model, frames, device, step, data_type):
 
             # Detach and convert to float for storage/logging if they are tensors
             confidence_values.append(spfs_info.confidence.item() if torch.is_tensor(spfs_info.confidence) else spfs_info.confidence)
-            similarity_values.append(spfs_info.gt_cos.item() if torch.is_tensor(spfs_info.gt_cos) else spfs_info.gt_cos)
+
+            # Check if 'gt_cos' exists in spfs_info, otherwise default to 0
+            gt_cos_val = getattr(spfs_info, 'gt_cos', 0)
+            similarity_values.append(gt_cos_val.item() if torch.is_tensor(gt_cos_val) else gt_cos_val)
 
 
             # Log every 10 frames
             if i % 10 == 8:  # Start at frame 8, then every 10th
                 logger.info(f"Frame {i}: skipped={spfs_info.skipped}, "
                            f"confidence={spfs_info.confidence:.4f}, "
-                           f"similarity={spfs_info.gt_cos:.4f}")
+                           f"similarity={gt_cos_val:.4f}")
 
     # Log summary statistics
     if confidence_values:
         avg_conf = sum(confidence_values) / len(confidence_values)
-        avg_sim = sum(similarity_values) / len(similarity_values)
+        avg_sim = sum(similarity_values) / len(similarity_values) if similarity_values else 0.0 # Handle case where similarity_values might be empty
         logger.info(f"Test inference summary: "
                    f"frames={num_frames-8}, "
                    f"skipped={total_skipped}, "
