@@ -1,5 +1,4 @@
 import argparse
-import glob
 import logging
 import os
 import subprocess
@@ -11,7 +10,6 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 from huggingface_hub import hf_hub_download
-from utils.basic_utils import merge_state_dicts, process_state_dict
 
 
 def ensure_dependencies():
@@ -60,14 +58,24 @@ def parse_args():
         help="Path to output JSON with MAE results",
     )
     parser.add_argument(
-        "--mamba-weights",
+        "--checkpoint",
         default=None,
-        help="Path to mamba_mobileclip_ckpt.pt. If not provided, will download from HF.",
+        help="Path to a checkpoint file. If not provided, will download from HF.",
     )
     parser.add_argument(
-        "--spfs-weights",
-        default=None,
-        help="Path to spfs_ckpt.pt. If not provided, will download from HF.",
+        "--checkpoint-file",
+        default="spfs_r64/ckpt_step_14500.pt",
+        help="Checkpoint filename within the HF repo",
+    )
+    parser.add_argument(
+        "--hf-repo",
+        default="qingy2024/InternVideo2-B14",
+        help="HuggingFace repo to download checkpoint from",
+    )
+    parser.add_argument(
+        "--no-spfs",
+        action="store_true",
+        help="Disable SPFS (use plain model)",
     )
     return parser.parse_args()
 
@@ -144,11 +152,10 @@ def main():
     config = Config.from_file(config_path)
     config = eval_dict_leaf(config)
 
-    if "delta" not in args.config_name:
-        config.model.text_ckpt_path = config.model.mobileclip_ckpt_path
+    config.model.streaming_vision_encoder.rnn_type = "mamba" if args.no_spfs else "mamba_spfs"
+    config.model.text_ckpt_path = config.model.mobileclip_ckpt_path
 
     from models.internvideo2_clip_small import InternVideo2_CLIP_small
-    from collections import OrderedDict
     import torch
     import numpy as np
     import cv2
@@ -162,41 +169,32 @@ def main():
 
     act75_data = json_read('photography-model/data/ACT75.json')
 
-    if args.mamba_weights is None:
-        print("Downloading mamba_mobileclip_ckpt.pt from Hugging Face...")
-        args.mamba_weights = hf_hub_download(repo_id="qingy2024/InternVideo2-B14", filename="mamba_mobileclip_ckpt.pt")
-    if args.spfs_weights is None:
-        print("Downloading spfs_ckpt.pt from Hugging Face...")
-        args.spfs_weights = hf_hub_download(repo_id="qingy2024/InternVideo2-B14", filename="spfs_ckpt.pt")
-
     intern_model = InternVideo2_CLIP_small(config)
     intern_model.to(device)
 
-    # Load checkpoints
-    mamba_ckpt = torch.load(args.mamba_weights, map_location=device)
-    processed_mamba = process_state_dict(mamba_ckpt)
+    ckpt_path = args.checkpoint
+    if ckpt_path is None:
+        print(f"Downloading {args.checkpoint_file} from Hugging Face...")
+        ckpt_path = hf_hub_download(repo_id=args.hf_repo, filename=args.checkpoint_file)
 
-    spfs_ckpt = torch.load(args.spfs_weights, map_location=device, weights_only = False)
-    processed_spfs = process_state_dict(spfs_ckpt)
+    ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
+    state_dict = ckpt.get("model", ckpt)
 
-    merged_state_dict = merge_state_dicts([processed_mamba, processed_spfs], override=True)
-
-    # Load the merged state dict into the model
-    missing_keys, unexpected_keys = intern_model.load_state_dict(merged_state_dict, strict=False)
+    missing_keys, unexpected_keys = intern_model.load_state_dict(state_dict, strict=False)
 
     if unexpected_keys:
-        print("\nERROR: Unexpected keys in merged state_dict:")
+        print("\nERROR: Unexpected keys in checkpoint state_dict:")
         for k in unexpected_keys:
             print(f"  - {k}")
 
     if missing_keys:
-        print("\nINFO: Missing keys in merged state_dict:")
+        print("\nINFO: Missing keys in checkpoint state_dict:")
         for k in missing_keys[:5]:
             print(f"  - {k}")
         if len(missing_keys) > 5:
             print(f"  - ... and {len(missing_keys) - 5} more")
 
-    print("\nMerged state_dict loaded successfully.")
+    print("\nCheckpoint loaded successfully.")
 
     intern_model.eval()
     print("Model set to evaluation mode.")

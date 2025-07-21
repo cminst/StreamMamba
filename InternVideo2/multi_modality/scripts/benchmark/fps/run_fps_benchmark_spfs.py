@@ -1,5 +1,4 @@
 import argparse
-import glob
 import os
 import subprocess
 import sys
@@ -9,7 +8,6 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from huggingface_hub import hf_hub_download
-from utils.basic_utils import merge_state_dicts, process_state_dict
 
 
 def ensure_dependencies():
@@ -46,14 +44,19 @@ def parse_args():
         help="Configuration name",
     )
     parser.add_argument(
-        "--mamba-weights",
+        "--checkpoint",
         default=None,
-        help="Path to the Mamba weights checkpoint file. If not provided, will download from HF.",
+        help="Path to a full SPFS checkpoint. If not provided, will download from HF.",
     )
     parser.add_argument(
-        "--spfs-weights",
-        default=None,
-        help="Path to the SPFS prediction/confidence head weights checkpoint file. If not provided, will download from HF.",
+        "--hf-repo",
+        default="qingy2024/InternVideo2-B14",
+        help="HuggingFace repo from which to download the checkpoint",
+    )
+    parser.add_argument(
+        "--checkpoint-file",
+        default="spfs_r64/ckpt_step_14500.pt",
+        help="Checkpoint filename within the HF repo",
     )
     parser.add_argument(
         "--confidence-threshold",
@@ -107,24 +110,14 @@ def main():
     intern_model = InternVideo2_CLIP_small(config)
     intern_model.to(device)
 
-    if args.mamba_weights is None:
-        print("Downloading mamba_mobileclip_ckpt.pt from Hugging Face...")
-        args.mamba_weights = hf_hub_download(repo_id="qingy2024/InternVideo2-B14", filename="mamba_mobileclip_ckpt.pt")
-    if args.spfs_weights is None:
-        print("Downloading spfs_ckpt.pt from Hugging Face...")
-        args.spfs_weights = hf_hub_download(repo_id="qingy2024/InternVideo2-B14", filename="spfs_ckpt.pt")
+    ckpt_path = args.checkpoint
+    if ckpt_path is None:
+        print(f"Downloading {args.checkpoint_file} from Hugging Face...")
+        ckpt_path = hf_hub_download(repo_id=args.hf_repo, filename=args.checkpoint_file)
 
-    # Load checkpoints
-    mamba_ckpt = torch.load(args.mamba_weights, map_location=device)
-    processed_mamba = process_state_dict(mamba_ckpt)
-
-    spfs_ckpt = torch.load(args.spfs_weights, map_location=device, weights_only = False)
-    processed_spfs = process_state_dict(spfs_ckpt)
-
-    merged_state_dict = merge_state_dicts([processed_mamba, processed_spfs], override=True)
-
-    # Load the merged state dict into the model
-    missing_keys, unexpected_keys = intern_model.load_state_dict(merged_state_dict, strict=False)
+    ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
+    state_dict = ckpt["model"] if "model" in ckpt else ckpt
+    missing_keys, unexpected_keys = intern_model.load_state_dict(state_dict, strict=False)
 
     if unexpected_keys:
         print("\nERROR: Unexpected keys in merged state_dict:")
@@ -138,7 +131,7 @@ def main():
         if len(missing_keys) > 5:
             print(f"  - ... and {len(missing_keys) - 5} more")
 
-    print("\nMerged state_dict loaded successfully.")
+    print("\nCheckpoint loaded successfully.")
 
     intern_model.eval()
 

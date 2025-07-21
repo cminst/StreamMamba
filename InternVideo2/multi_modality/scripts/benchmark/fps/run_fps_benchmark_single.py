@@ -1,5 +1,4 @@
 import argparse
-import glob
 import os
 import subprocess
 import sys
@@ -8,9 +7,7 @@ import time
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from collections import OrderedDict
 import torch
-from utils.basic_utils import merge_state_dicts, process_state_dict
 
 def ensure_dependencies():
     try:
@@ -52,14 +49,14 @@ def parse_args():
         help="HuggingFace repository name to load checkpoint from",
     )
     parser.add_argument(
-        "--mamba-weights",
+        "--checkpoint",
         default=None,
-        help="Path to the Mamba weights checkpoint file. If not specified, downloads from Hugging Face.",
+        help="Path to a full SPFS checkpoint. If not specified, downloads from Hugging Face.",
     )
     parser.add_argument(
-        "--spfs-weights",
-        default=None,
-        help="Path to the SPFS prediction/confidence head weights checkpoint file. If not specified, downloads from Hugging Face.",
+        "--checkpoint-file",
+        default="spfs_r64/ckpt_step_14500.pt",
+        help="Checkpoint filename within the HF repo",
     )
     parser.add_argument(
         "--confidence-threshold",
@@ -97,6 +94,7 @@ def main():
     from models.internvideo2_clip_small import InternVideo2_CLIP_small
     from iv2_utils.iv2 import json_read, json_write
     import torch
+    from huggingface_hub import hf_hub_download
     import cv2
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -108,53 +106,37 @@ def main():
     config = eval_dict_leaf(config)
 
     # Set rnn_type to mamba_spfs
+    if config.model.streaming_vision_encoder.rnn_type != 'mamba_spfs':
+        print(f"WARNING: RNN type in streaming vision encoder is {config.model.streaming_vision_encoder.rnn_type}, setting to mamba_spfs")
+
     config.model.streaming_vision_encoder.rnn_type = 'mamba_spfs'
 
     intern_model = InternVideo2_CLIP_small(config)
     intern_model.to(device)
 
-    from huggingface_hub import hf_hub_download
-    from collections import OrderedDict
+    ckpt_path = args.checkpoint
+    if ckpt_path is None:
+        print(f"Downloading {args.checkpoint_file} from Hugging Face Hub...")
+        ckpt_path = hf_hub_download(repo_id=args.hf_repo, filename=args.checkpoint_file)
 
-    if args.mamba_weights:
-        mamba_checkpoint_path = args.mamba_weights
-    else:
-        print("Downloading Mamba checkpoint from Hugging Face Hub...")
-        mamba_checkpoint_path = hf_hub_download(repo_id=args.hf_repo, filename="mamba_mobileclip_ckpt.pt")
-        print(f"Downloaded Mamba checkpoint to {mamba_checkpoint_path}")
+    ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
+    state_dict = ckpt["model"] if "model" in ckpt else ckpt
 
-    if args.spfs_weights:
-        spfs_checkpoint_path = args.spfs_weights
-    else:
-        print("Downloading SPFS checkpoint from Hugging Face Hub...")
-        spfs_checkpoint_path = hf_hub_download(repo_id=args.hf_repo, filename="spfs_ckpt.pt")
-        print(f"Downloaded SPFS checkpoint to {spfs_checkpoint_path}")
-
-    # Load checkpoints
-    mamba_ckpt = torch.load(mamba_checkpoint_path, map_location=device)
-    processed_mamba = process_state_dict(mamba_ckpt)
-
-    spfs_ckpt = torch.load(spfs_checkpoint_path, map_location=device, weights_only = False)
-    processed_spfs = process_state_dict(spfs_ckpt)
-
-    merged_state_dict = merge_state_dicts([processed_mamba, processed_spfs], override=True)
-
-    # Load the merged state dict into the model
-    missing_keys, unexpected_keys = intern_model.load_state_dict(merged_state_dict, strict=False)
+    missing_keys, unexpected_keys = intern_model.load_state_dict(state_dict, strict=False)
 
     if unexpected_keys:
-        print("\nERROR: Unexpected keys in merged state_dict:")
+        print("\nERROR: Unexpected keys in checkpoint state_dict:")
         for k in unexpected_keys:
             print(f"  - {k}")
 
     if missing_keys:
-        print("\nINFO: Missing keys in merged state_dict:")
+        print("\nINFO: Missing keys in checkpoint state_dict:")
         for k in missing_keys[:5]:
             print(f"  - {k}")
         if len(missing_keys) > 5:
             print(f"  - ... and {len(missing_keys) - 5} more")
 
-    print("\nMerged state_dict loaded successfully.")
+    print("\nCheckpoint loaded successfully.")
 
     intern_model.eval()
 
