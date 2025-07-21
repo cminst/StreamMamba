@@ -260,12 +260,6 @@ def train(
 
         if is_main_process() and config.get("save_iter", False) and global_iter % config.save_iter == 0:
             state_dict = model_without_ddp.state_dict()
-            param_grad_dict = {
-                k: v.requires_grad for (k, v) in model_without_ddp.named_parameters()
-            }
-            for k in list(state_dict.keys()):
-                if k in param_grad_dict.keys() and not param_grad_dict[k]:
-                    del state_dict[k]
 
             save_obj = {
                 "model": state_dict,
@@ -276,7 +270,7 @@ def train(
                 "epoch": epoch,
                 "global_step": global_iter,
             }
-            torch.save(save_obj, join(config.output_dir, f"ckpt_step_{global_iter}.pth"))
+            torch.save(save_obj, join(config.output_dir, f"ckpt_step_{global_iter}.pt"))
 
     metric_logger.synchronize_between_processes()
     logger.info(f"Averaged stats for Epoch [{epoch}]: {metric_logger.global_avg()}")
