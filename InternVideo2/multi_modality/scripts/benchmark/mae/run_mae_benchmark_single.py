@@ -140,7 +140,6 @@ def compute_accuracy(preds: list[int], dataset: list) -> dict:
     percentages["average"] = sum(percentages.values()) / len(thresholds)
     return percentages
 
-
 def retrieve_text_streaming_spfs(
     new_frame,
     texts,
@@ -152,12 +151,13 @@ def retrieve_text_streaming_spfs(
     device,
     confidence_threshold: float,
     max_consecutive_skips: int,
+    frames2tensor_func,
 ):
     """Lightweight inline implementation of ``retrieve_text_streaming`` with SPFS support."""
 
     size_t = config.get("size_t", 224)
 
-    frame_tensor = frames2tensor(
+    frame_tensor = frames2tensor_func(
         [new_frame], fnum=1, target_size=(size_t, size_t), device=device
     )
     if frame_tensor.ndim == 5:
@@ -293,6 +293,7 @@ def main():
                 device=device,
                 confidence_threshold=args.confidence_threshold,
                 max_consecutive_skips=(0 if args.no_spfs else args.max_consecutive_skips),
+                frames2tensor_func=frames2tensor,
             )
             logit_curr.append(probs.item())
             if len(logit_curr) > 0:
