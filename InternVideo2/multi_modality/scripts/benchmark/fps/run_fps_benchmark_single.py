@@ -7,7 +7,8 @@ import time
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import torch
+from huggingface_hub import hf_hub_download
+
 
 def ensure_dependencies():
     try:
@@ -27,7 +28,6 @@ def ensure_dependencies():
             "sentencepiece",
             "iv2-utils",
             "matplotlib",
-            "huggingface_hub",
         ])
     print("Installed packages")
 
@@ -44,14 +44,14 @@ def parse_args():
         help="Configuration name",
     )
     parser.add_argument(
-        "--hf-repo",
-        default="qingy2024/InternVideo2-B14",
-        help="HuggingFace repository name to load checkpoint from",
-    )
-    parser.add_argument(
         "--checkpoint",
         default=None,
-        help="Path to a full SPFS checkpoint. If not specified, downloads from Hugging Face.",
+        help="Path to a full SPFS checkpoint. If not provided, will download from HF.",
+    )
+    parser.add_argument(
+        "--hf-repo",
+        default="qingy2024/InternVideo2-B14",
+        help="HuggingFace repo from which to download the checkpoint",
     )
     parser.add_argument(
         "--checkpoint-file",
@@ -87,6 +87,13 @@ def main():
     ensure_dependencies()
     args = parse_args()
 
+    rnn_type = 'mamba_spfs'
+    folder_name = f"results_{rnn_type}_ct_{args.confidence_threshold}_mcs_{args.max_consecutive_skips}"
+    os.makedirs(folder_name, exist_ok=True)
+
+    fps_json_path = os.path.join(folder_name, os.path.basename(args.output_json))
+    fps_graph_path = os.path.join(folder_name, os.path.basename(args.output_graph))
+
     sys.path.append(os.getcwd())
 
     from demo.config import Config, eval_dict_leaf
@@ -94,7 +101,6 @@ def main():
     from models.internvideo2_clip_small import InternVideo2_CLIP_small
     from iv2_utils.iv2 import json_read, json_write
     import torch
-    from huggingface_hub import hf_hub_download
     import cv2
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -106,9 +112,6 @@ def main():
     config = eval_dict_leaf(config)
 
     # Set rnn_type to mamba_spfs
-    if config.model.streaming_vision_encoder.rnn_type != 'mamba_spfs':
-        print(f"WARNING: RNN type in streaming vision encoder is {config.model.streaming_vision_encoder.rnn_type}, setting to mamba_spfs")
-
     config.model.streaming_vision_encoder.rnn_type = 'mamba_spfs'
 
     intern_model = InternVideo2_CLIP_small(config)
@@ -116,21 +119,20 @@ def main():
 
     ckpt_path = args.checkpoint
     if ckpt_path is None:
-        print(f"Downloading {args.checkpoint_file} from Hugging Face Hub...")
+        print(f"Downloading {args.checkpoint_file} from Hugging Face...")
         ckpt_path = hf_hub_download(repo_id=args.hf_repo, filename=args.checkpoint_file)
 
     ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
     state_dict = ckpt["model"] if "model" in ckpt else ckpt
-
     missing_keys, unexpected_keys = intern_model.load_state_dict(state_dict, strict=False)
 
     if unexpected_keys:
-        print("\nERROR: Unexpected keys in checkpoint state_dict:")
+        print("\nERROR: Unexpected keys in merged state_dict:")
         for k in unexpected_keys:
             print(f"  - {k}")
 
     if missing_keys:
-        print("\nINFO: Missing keys in checkpoint state_dict:")
+        print("\nINFO: Missing keys in merged state_dict:")
         for k in missing_keys[:5]:
             print(f"  - {k}")
         if len(missing_keys) > 5:
@@ -191,8 +193,6 @@ def main():
                 torch.cuda.synchronize()
             end = time.time()
             total_time += end - start
-            print(f"Confidence: {spfs_info.confidence}")
-            print(f"Actual: {spfs_info.gt_cos}\n")
             if spfs_info.skipped:
                 skipped_frames += 1
 
@@ -200,8 +200,6 @@ def main():
         total_skipped_frames += skipped_frames
         fps = len(frames) / total_time if total_time > 0 else 0.0
         results.append({"video": video_path, "resolution": f"{w}x{h}", "pixels": pixels, "fps": fps, "skipped_frames": skipped_frames})
-
-    json_write(results, args.output_json)
 
     results_sorted = sorted(results, key=lambda r: r["pixels"])
     x = [r["pixels"] for r in results_sorted]
@@ -213,9 +211,12 @@ def main():
     plt.ylabel("fps")
     plt.title("Streaming FPS vs image size (with SPFS)")
     plt.grid(True)
-    plt.savefig(args.output_graph)
-    print(f"Saved FPS results to {args.output_json}")
-    print(f"Saved FPS graph to {args.output_graph}")
+
+    json_write(results, fps_json_path)
+    plt.savefig(fps_graph_path)
+
+    print(f"Saved FPS results to {fps_json_path}")
+    print(f"Saved FPS graph to {fps_graph_path}")
 
     skip_percentage = (total_skipped_frames / total_frames) * 100 if total_frames > 0 else 0
     avg_fps = sum(r['fps'] for r in results) / len(results) if results else 0
