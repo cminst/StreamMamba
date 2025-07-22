@@ -121,5 +121,8 @@ def main():
         return
     _plot_performance(performance_data, args.output_prefix)
 
+    for ct, perf in performance_data:
+        print(f"Confidence Threshold = {ct}, Performance within ±4 frames = {perf:.4f}%")
+
 if __name__ == "__main__":
     main()
