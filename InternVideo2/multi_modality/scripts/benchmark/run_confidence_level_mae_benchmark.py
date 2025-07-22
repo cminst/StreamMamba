@@ -122,3 +122,6 @@ def main():
     plt.savefig(f'{args.output_prefix}.svg')
 
     print(f"Performance plot saved as '{args.output_prefix}.png' and '{args.output_prefix}.svg'")
+
+if __name__ == "__main__":
+    main()
