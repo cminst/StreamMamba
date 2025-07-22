@@ -69,7 +69,7 @@ def _plot_performance(performance_data, output_prefix):
     plt.plot(x, y, marker='o', linestyle='-', color='g', label='SPFS Model Performance (±8 Frame Tolerance)')
 
     # Add InternVideo2 B14 performance line
-    plt.axhline(y=0.88, color='b', linestyle='--', label='InternVideo2-B14 performance (88.00%)')
+    plt.axhline(y=88, color='b', linestyle='--', label='InternVideo2-B14 performance (88.00%)')
 
     plt.title('SPFS Performance vs. Confidence Threshold')
     plt.xlabel('Confidence Threshold')
