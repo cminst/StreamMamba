@@ -21,7 +21,7 @@ def _generate_thresholds():
 def _run_single_benchmark(ct, benchmark_script, config_dir, config_name, max_consecutive_skips):
     """
     Runs a single benchmark instance with a given confidence threshold and returns
-    the 'within_8' performance metric.
+    the 'within_4' performance metric.
     """
     print(f"Running benchmark with confidence threshold = {ct}")
 
@@ -53,7 +53,7 @@ def _run_single_benchmark(ct, benchmark_script, config_dir, config_name, max_con
     with open(metrics_path, 'r') as f:
         metrics = json.load(f)
 
-    return metrics['performance']['within_8']
+    return metrics['performance']['within_4']
 
 def _plot_performance(performance_data, output_prefix):
     """
@@ -66,14 +66,14 @@ def _plot_performance(performance_data, output_prefix):
     plt.figure(figsize=(10, 6))
 
     # Using a different color (red) for the main plot to contrast with the new blue line
-    plt.plot(x, y, marker='o', linestyle='-', color='g', label='SPFS Model Performance (±8 Frame Tolerance)')
+    plt.plot(x, y, marker='o', linestyle='-', color='g', label='SPFS Model Performance (±4 Frame Tolerance)')
 
     # Add InternVideo2 B14 performance line
-    plt.axhline(y=88, color='b', linestyle='--', label='InternVideo2-B14 performance (88.00%)')
+    plt.axhline(y=(74 + 2/3), color='b', linestyle='--', label='InternVideo2-B14 performance (74.67%)')
 
     plt.title('SPFS Performance vs. Confidence Threshold')
     plt.xlabel('Confidence Threshold')
-    plt.ylabel('Performance (Accuracy within ±8 frames)')
+    plt.ylabel('Performance (Accuracy within ±4 frames)')
     plt.grid(True)
     plt.tight_layout()
     plt.legend() # This will now display both labels
@@ -128,22 +128,22 @@ def main():
         if os.path.exists(metrics_path):
             with open(metrics_path, 'r') as f:
                 metrics = json.load(f)
-            performance_data.append((float(ct_str), metrics['performance']['within_8']))
+            performance_data.append((float(ct_str), metrics['performance']['within_4']))
         else:
             existing_folders = False
             missing_thresholds.append(ct_str)
 
     if not existing_folders:
         for ct_str in missing_thresholds:
-            within_8 = _run_single_benchmark(
+            within_4 = _run_single_benchmark(
                 ct_str,
                 benchmark_script,
                 args.config_dir,
                 args.config_name,
                 args.max_consecutive_skips
             )
-            if within_8 is not None:
-                performance_data.append((float(ct_str), within_8))
+            if within_4 is not None:
+                performance_data.append((float(ct_str), within_4))
 
     if not performance_data:
         print("No performance data collected. Exiting.")
