@@ -87,6 +87,13 @@ def main():
     ensure_dependencies()
     args = parse_args()
 
+    rnn_type = 'mamba_spfs'
+    folder_name = f"results_{rnn_type}_ct_{args.confidence_threshold}_mcs_{args.max_consecutive_skips}"
+    os.makedirs(folder_name, exist_ok=True)
+
+    fps_json_path = os.path.join(folder_name, os.path.basename(args.output_json))
+    fps_graph_path = os.path.join(folder_name, os.path.basename(args.output_graph))
+
     sys.path.append(os.getcwd())
 
     from demo.config import Config, eval_dict_leaf
@@ -194,8 +201,6 @@ def main():
         fps = len(frames) / total_time if total_time > 0 else 0.0
         results.append({"video": video_path, "resolution": f"{w}x{h}", "pixels": pixels, "fps": fps, "skipped_frames": skipped_frames})
 
-    json_write(results, args.output_json)
-
     results_sorted = sorted(results, key=lambda r: r["pixels"])
     x = [r["pixels"] for r in results_sorted]
     y = [r["fps"] for r in results_sorted]
@@ -206,9 +211,12 @@ def main():
     plt.ylabel("fps")
     plt.title("Streaming FPS vs image size (with SPFS)")
     plt.grid(True)
-    plt.savefig(args.output_graph)
-    print(f"Saved FPS results to {args.output_json}")
-    print(f"Saved FPS graph to {args.output_graph}")
+
+    json_write(results, fps_json_path)
+    plt.savefig(fps_graph_path)
+
+    print(f"Saved FPS results to {fps_json_path}")
+    print(f"Saved FPS graph to {fps_graph_path}")
 
     skip_percentage = (total_skipped_frames / total_frames) * 100 if total_frames > 0 else 0
     avg_fps = sum(r['fps'] for r in results) / len(results) if results else 0
