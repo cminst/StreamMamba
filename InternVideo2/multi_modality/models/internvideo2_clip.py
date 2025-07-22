@@ -3,8 +3,6 @@ import logging
 import torch
 from torch import nn
 import pickle
-import numpy as np
-from PIL import Image
 import torchvision.transforms as transforms
 from torchvision.transforms import InterpolationMode
 
