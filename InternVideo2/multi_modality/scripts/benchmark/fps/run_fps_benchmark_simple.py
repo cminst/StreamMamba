@@ -3,13 +3,13 @@ import os
 import subprocess
 import sys
 import time
-import json  # Standard JSON library
+import json
 from huggingface_hub import hf_hub_download
 
 
 def ensure_dependencies():
     try:
-        import einops  # noqa: F401
+        import einops
     except Exception:
         print("Installing dependencies...")
         subprocess.check_call([
@@ -82,12 +82,10 @@ def main():
     ensure_dependencies()
     args = parse_args()
 
-    # Determine mode
     rnn_type = 'mamba' if args.no_spfs else 'mamba_spfs'
     mode = "non-SPFS" if args.no_spfs else "SPFS"
     print(f"Running in {mode} mode.")
 
-    # Folder setup
     if args.no_spfs:
         folder_name = f"results_{rnn_type}"
     else:
@@ -112,7 +110,6 @@ def main():
     config = Config.from_file(os.path.join(args.config_dir, "config.py"))
     config = eval_dict_leaf(config)
 
-    # Set rnn_type dynamically
     config.model.streaming_vision_encoder.rnn_type = rnn_type
 
     intern_model = InternVideo2_CLIP_small(config)
@@ -163,7 +160,6 @@ def main():
 
         hidden = intern_model.streaming_vision_encoder.init_hidden(batch_size=1, device=device)
 
-        # Warm-up with first seven frames
         for i in range(7):
             f = frames[i]
             tensor = frames2tensor([f], fnum=1, target_size=(size_t, size_t), device=device).squeeze(0)
@@ -181,7 +177,6 @@ def main():
             end = time.time()
             total_time += end - start
 
-        # Process remaining frames
         for f in frames[7:]:
             tensor = frames2tensor([f], fnum=1, target_size=(size_t, size_t), device=device).squeeze(0)
             if device.type == 'cuda':
@@ -221,7 +216,6 @@ def main():
             "skipped_frames": skipped_frames
         })
 
-    # Save results to JSON
     with open(fps_json_path, 'w') as f:
         json.dump(results, f)
 
