@@ -75,7 +75,6 @@ def _plot_performance(performance_data, output_prefix):
     plt.xlabel('Confidence Threshold')
     plt.ylabel('Performance (Accuracy within ±8 frames)')
     plt.grid(True)
-    plt.ylim(bottom=min(y) - 0.05 if y else 0, top=1.0) # Ensure y-axis covers the full range
     plt.tight_layout()
     plt.legend() # This will now display both labels
 
