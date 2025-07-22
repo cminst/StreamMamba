@@ -61,7 +61,7 @@ def _plot_performance(performance_data, output_prefix):
     y = [d[1] for d in performance_data]
 
     plt.figure(figsize=(10, 6))
-    plt.plot(x, y, marker='o', linestyle='-', color='b', label='within_8')
+    plt.plot(x, y, marker='o', linestyle='-', color='b', label='Peak Frame Prediction Accuracy (±8 Frame Tolerance)')
     plt.title('SPFS Performance vs Confidence Threshold')
     plt.xlabel('Confidence Threshold')
     plt.ylabel('Performance (MAE <= 8 frames)')
