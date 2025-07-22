@@ -1,0 +1,16 @@
+{
+    "confidence_threshold": 0.25,
+    "max_consecutive_skips": 8,
+    "no_spfs": false,
+    "rnn_type": "mamba_spfs",
+    "model_config_path": "scripts/spfs/clip/B14/",
+    "command": "scripts/benchmark/mae/run_mae_benchmark_single.py scripts/spfs/clip/B14/ --config-name delta --confidence-threshold 0.25 --max-consecutive-skips 8",
+    "performance": {
+        "within_2": 41.333333333333336,
+        "within_4": 49.333333333333336,
+        "within_8": 60.0,
+        "within_16": 72.0,
+        "within_32": 84.0,
+        "average": 61.333333333333336
+    }
+}
