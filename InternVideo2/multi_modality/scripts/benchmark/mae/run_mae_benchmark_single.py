@@ -259,8 +259,7 @@ def main():
 
     # ---------- Prediction ----------
 
-    logits = []
-    preds = []
+    logits = preds = []
 
     size_t = config.get('size_t', 224)
 
