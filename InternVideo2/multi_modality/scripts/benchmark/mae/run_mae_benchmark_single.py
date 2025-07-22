@@ -311,13 +311,39 @@ def main():
 
     preds = [int(x) for x in preds]
 
-    json_write(preds, args.output_json)
+    reformatted_logits = [[(float(l[0]), l[1]) for l in x] for x in logits]
+
+    rnn_type = "mamba_spfs" if not args.no_spfs else "mamba"
+    folder_name = f"results_{rnn_type}_ct_{args.confidence_threshold}_mcs_{args.max_consecutive_skips}"
+
+    if not os.path.exists(folder_name):
+        os.makedirs(folder_name)
+
+    if not os.path.exists(os.path.join(folder_name, "logits")):
+        os.makedirs(os.path.join(folder_name, "logits"))
+
+    if not os.path.exists(os.path.join(folder_name, "predictions")):
+        os.makedirs(os.path.join(folder_name, "predictions"))
+
+    json_write(reformatted_logits, os.path.join(folder_name, "logits", "act75.json"))
+    json_write(preds, os.path.join(folder_name, "predictions", "act75", "8.json"))
 
     metrics = compute_accuracy(preds, act75_data)
-    json_write(metrics, args.output_json.replace(".json", "_metrics.json"))
+    run_details = {
+        "confidence_threshold": args.confidence_threshold,
+        "max_consecutive_skips": args.max_consecutive_skips,
+        "no_spfs": args.no_spfs,
+        "rnn_type": "mamba_spfs" if not args.no_spfs else "mamba",
+        "model_config_path": args.config_dir,
+        "command": " ".join(sys.argv),
+        "performance": metrics
+    }
+    metrics_file = os.path.join(folder_name, "metrics.json")
+    json_write(run_details, metrics_file)
 
-    print(f"Saved MAE results to {args.output_json}")
-    print(f"Saved MAE metrics to {args.output_json.replace('.json', '_metrics.json')}")
+    print(f"Saved MAE results to {os.path.join(folder_name, 'predictions', 'act75', '8.json')}")
+    print(f"Saved logits to {os.path.join(folder_name, 'logits', 'act75.json')}")
+    print(f"Saved MAE metrics to {metrics_file}")
 
     print(f"Average MAE accuracy: {metrics['average']:.2f}")
 
