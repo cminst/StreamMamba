@@ -55,6 +55,25 @@ def _run_single_benchmark(ct, benchmark_script, config_dir, config_name, max_con
 
     return metrics['performance']['within_8']
 
+def _plot_performance(performance_data, output_prefix):
+    performance_data.sort()
+    x = [d[0] for d in performance_data]
+    y = [d[1] for d in performance_data]
+
+    plt.figure(figsize=(10, 6))
+    plt.plot(x, y, marker='o', linestyle='-', color='b', label='within_8')
+    plt.title('SPFS Performance vs Confidence Threshold')
+    plt.xlabel('Confidence Threshold')
+    plt.ylabel('Performance (MAE <= 8 frames)')
+    plt.grid(True)
+    plt.tight_layout()
+    plt.legend()
+
+    plt.savefig(f'{output_prefix}.png')
+    plt.savefig(f'{output_prefix}.svg')
+
+    print(f"Performance plot saved as '{output_prefix}.png' and '{output_prefix}.svg'")
+
 def main():
     parser = argparse.ArgumentParser(
         description="Run SPFS benchmark across various confidence thresholds and plot performance."
@@ -89,39 +108,38 @@ def main():
     thresholds = _generate_thresholds()
     performance_data = []
 
+    existing_folders = True
+    missing_thresholds = []
+
     for ct_str in thresholds:
-        within_8 = _run_single_benchmark(
-            ct_str,
-            benchmark_script,
-            args.config_dir,
-            args.config_name,
-            args.max_consecutive_skips
-        )
-        if within_8 is not None:
-            performance_data.append((float(ct_str), within_8))
+        folder_name = f'results_mamba_spfs_ct_{ct_str}_mcs_{args.max_consecutive_skips}'
+        metrics_path = os.path.join(folder_name, 'metrics.json')
+
+        if os.path.exists(metrics_path):
+            with open(metrics_path, 'r') as f:
+                metrics = json.load(f)
+            performance_data.append((float(ct_str), metrics['performance']['within_8']))
+        else:
+            existing_folders = False
+            missing_thresholds.append(ct_str)
+
+    if not existing_folders:
+        for ct_str in missing_thresholds:
+            within_8 = _run_single_benchmark(
+                ct_str,
+                benchmark_script,
+                args.config_dir,
+                args.config_name,
+                args.max_consecutive_skips
+            )
+            if within_8 is not None:
+                performance_data.append((float(ct_str), within_8))
 
     if not performance_data:
         print("No performance data collected. Exiting.")
         return
 
-    performance_data.sort()
-
-    x = [d[0] for d in performance_data]
-    y = [d[1] for d in performance_data]
-
-    plt.figure(figsize=(10, 6))
-    plt.plot(x, y, marker='o', linestyle='-', color='b', label='within_8')
-    plt.title('SPFS Performance vs Confidence Threshold')
-    plt.xlabel('Confidence Threshold')
-    plt.ylabel('Performance (within_8)')
-    plt.grid(True)
-    plt.tight_layout()
-    plt.legend()
-
-    plt.savefig(f'{args.output_prefix}.png')
-    plt.savefig(f'{args.output_prefix}.svg')
-
-    print(f"Performance plot saved as '{args.output_prefix}.png' and '{args.output_prefix}.svg'")
+    _plot_performance(performance_data, args.output_prefix)
 
 if __name__ == "__main__":
     main()
