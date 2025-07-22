@@ -22,16 +22,16 @@ class InternVideo2_CLIP(nn.Module):
         self.tokenizer = tokenizer
         self.is_pretrain = is_pretrain
 
-        # create modules.
+        # Initialize tokenizer and model components based on configuration settings
         if tokenizer is None:
             self.tokenizer = Tokenizer(config.model.tokenizer_path)
         self.vision_encoder = self.build_vision_encoder()
         self.text_encoder = self.build_text_encoder()
-        # adopt 1 / 100. as in ViCLIP
+        # Initialize temperature parameter with value 1/100 as used in ViCLIP implementation
         self.temp = nn.parameter.Parameter(torch.ones([]) * config.model.temp)
         self.temp_min = config.model.temp_min
 
-        # freeze model
+        # Model freezing logic to control which parameters are trainable based on configuration
         if self.config.model.freeze_vision:
             for name, p in self.vision_encoder.named_parameters():
                 if self.config.model.open_vision_clip_projector and name.startswith('clip_projector'):
@@ -200,7 +200,7 @@ class InternVideo2_CLIP(nn.Module):
 
         new_ckpt = {}
 
-        # load vision_encoder
+        # Load vision encoder checkpoint and handle different checkpoint formats
         logger.info(f"Load vision_encoder checkpoint from {vision_ckpt_path}")
         vision_ckpt = torch.load(vision_ckpt_path, map_location='cpu')
         print("Vision Encoder Loaded")
@@ -232,7 +232,7 @@ class InternVideo2_CLIP(nn.Module):
                     new_k = 'vision_encoder.' + k
                     new_ckpt[new_k] = v
 
-        # load text_encoder
+        # Load text encoder checkpoint and convert keys to match model's expected format
         logger.info(f"Load text_encoder checkpoint from {text_ckpt_path}")
         test_ckpt = torch.load(text_ckpt_path, map_location='cpu')
         print("Text Encoder Loaded")
@@ -245,7 +245,7 @@ class InternVideo2_CLIP(nn.Module):
                 continue
             new_ckpt[new_k] = v
 
-        # load extra checkpoint
+        # Load additional checkpoint for post-pretraining scenarios where previous weights exist
         # often when post-pretrain after previous pretraining, thus the keys are same
         if extra_ckpt_path is not None:
             print("Loading Extra CKPT")
