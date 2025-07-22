@@ -52,7 +52,7 @@ class VideoMambaBlock(nn.Module):
         conv_state, ssm_state = state
         x = self.pre_norm(frame_feat)
         gated = self.input_proj(x) * torch.sigmoid(self.in_gate(x))
-        out, conv_state, ssm_state = self.ssm.step(gated.unsqueeze(1), conv_state, ssm_state, A_scale=None)
+        out, conv_state, ssm_state = self.ssm.step(gated.unsqueeze(1), conv_state, ssm_state)
         out = out.squeeze(1)
         out = out + gated
         out = out * torch.sigmoid(self.out_gate(out))
