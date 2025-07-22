@@ -3,10 +3,7 @@ import os
 import subprocess
 import sys
 import time
-
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
+import json  # Standard JSON library
 from huggingface_hub import hf_hub_download
 
 
@@ -14,7 +11,7 @@ def ensure_dependencies():
     try:
         import einops  # noqa: F401
     except Exception:
-        print("Installing...")
+        print("Installing dependencies...")
         subprocess.check_call([
             sys.executable,
             "-m",
@@ -26,8 +23,6 @@ def ensure_dependencies():
             "open_clip_torch",
             "protobuf",
             "sentencepiece",
-            "iv2-utils",
-            "matplotlib",
         ])
     print("Installed packages")
 
@@ -76,11 +71,6 @@ def parse_args():
         help="Path to output JSON with FPS results",
     )
     parser.add_argument(
-        "--output-graph",
-        default="fps_graph_spfs.png",
-        help="Path to output PNG graph of FPS",
-    )
-    parser.add_argument(
         "--no-spfs",
         action="store_true",
         help="Disable SPFS (use plain model)",
@@ -105,14 +95,12 @@ def main():
     os.makedirs(folder_name, exist_ok=True)
 
     fps_json_path = os.path.join(folder_name, os.path.basename(args.output_json))
-    fps_graph_path = os.path.join(folder_name, os.path.basename(args.output_graph))
 
     sys.path.append(os.getcwd())
 
     from demo.config import Config, eval_dict_leaf
     from demo.utils import _frame_from_video, frames2tensor
     from models.internvideo2_clip_small import InternVideo2_CLIP_small
-    from iv2_utils.iv2 import json_read, json_write
     import torch
     import cv2
 
@@ -155,7 +143,8 @@ def main():
 
     intern_model.eval()
 
-    act75_data = json_read('photography-model/data/ACT75.json')
+    with open('photography-model/data/ACT75.json', 'r') as f:
+        act75_data = json.load(f)
 
     results = []
     total_skipped_frames = 0
@@ -232,26 +221,13 @@ def main():
             "skipped_frames": skipped_frames
         })
 
-    results_sorted = sorted(results, key=lambda r: r["pixels"])
-    x = [r["pixels"] for r in results_sorted]
-    y = [r["fps"] for r in results_sorted]
-
-    plt.figure()
-    plt.plot(x, y, marker="o")
-    plt.xlabel("pixels (w*h)")
-    plt.ylabel("fps")
-    plt.title("Streaming FPS vs image size (with SPFS)" if not args.no_spfs else "Streaming FPS vs image size")
-    plt.grid(True)
-
-    from iv2_utils.iv2 import json_write
-    json_write(results, fps_json_path)
-    plt.savefig(fps_graph_path)
-
-    print(f"Saved FPS results to {fps_json_path}")
-    print(f"Saved FPS graph to {fps_graph_path}")
+    # Save results to JSON
+    with open(fps_json_path, 'w') as f:
+        json.dump(results, f)
 
     skip_percentage = (total_skipped_frames / total_frames) * 100 if total_frames > 0 else 0
     avg_fps = sum(r['fps'] for r in results) / len(results) if results else 0
+    print(f"Saved FPS results to {fps_json_path}")
     print(f"Total frames skipped: {total_skipped_frames}")
     print(f"Percentage of frames skipped: {skip_percentage:.2f}%")
     print(f"Average FPS: {avg_fps:.2f}")
