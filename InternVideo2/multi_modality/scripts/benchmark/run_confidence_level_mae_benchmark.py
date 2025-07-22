@@ -34,7 +34,7 @@ def _run_single_benchmark(ct, benchmark_script, config_dir, config_name, max_con
         print(f"Stdout: {e.stdout}")
         print(f"Stderr: {e.stderr}")
         return None
-    folder_name = f'results_mamba_spfs_ct_{ct}_mcs_{max_consecutive_skips}'
+    folder_name = f'results/results_mamba_spfs_ct_{ct_str}_mcs_{args.max_consecutive_skips}'
     metrics_path = os.path.join(folder_name, 'metrics.json')
     if not os.path.exists(metrics_path):
         print(f"Metrics file not found for threshold {ct} at {metrics_path}")
@@ -96,7 +96,8 @@ def main():
     existing_folders = True
     missing_thresholds = []
     for ct_str in thresholds:
-        folder_name = f'results_mamba_spfs_ct_{ct_str}_mcs_{args.max_consecutive_skips}'
+        os.makedirs('results', exist_ok=True)
+        folder_name = f'results/results_mamba_spfs_ct_{ct_str}_mcs_{args.max_consecutive_skips}'
         metrics_path = os.path.join(folder_name, 'metrics.json')
         if os.path.exists(metrics_path):
             with open(metrics_path, 'r') as f:
