@@ -313,38 +313,36 @@ def main():
 
     reformatted_logits = [[(float(l[0]), l[1]) for l in x] for x in logits]
 
+    # Determine RNN type
     rnn_type = "mamba_spfs" if not args.no_spfs else "mamba"
     folder_name = f"results_{rnn_type}_ct_{args.confidence_threshold}_mcs_{args.max_consecutive_skips}"
 
-    if not os.path.exists(folder_name):
-        os.makedirs(folder_name)
+    logits_dir = os.path.join(folder_name, "logits")
+    preds_dir = os.path.join(folder_name, "predictions", "act75")
+    metrics_file = os.path.join(folder_name, "metrics.json")
 
-    if not os.path.exists(os.path.join(folder_name, "logits")):
-        os.makedirs(os.path.join(folder_name, "logits"))
+    os.makedirs(logits_dir, exist_ok=True)
+    os.makedirs(preds_dir, exist_ok=True)
 
-    if not os.path.exists(os.path.join(folder_name, "predictions")):
-        os.makedirs(os.path.join(folder_name, "predictions"))
-
-    json_write(reformatted_logits, os.path.join(folder_name, "logits", "act75.json"))
-    json_write(preds, os.path.join(folder_name, "predictions", "act75", "8.json"))
+    json_write(reformatted_logits, os.path.join(logits_dir, "act75.json"))
+    json_write(preds, os.path.join(preds_dir, "8.json"))
 
     metrics = compute_accuracy(preds, act75_data)
+
     run_details = {
         "confidence_threshold": args.confidence_threshold,
         "max_consecutive_skips": args.max_consecutive_skips,
         "no_spfs": args.no_spfs,
-        "rnn_type": "mamba_spfs" if not args.no_spfs else "mamba",
+        "rnn_type": rnn_type,
         "model_config_path": args.config_dir,
         "command": " ".join(sys.argv),
         "performance": metrics
     }
-    metrics_file = os.path.join(folder_name, "metrics.json")
     json_write(run_details, metrics_file)
 
-    print(f"Saved MAE results to {os.path.join(folder_name, 'predictions', 'act75', '8.json')}")
-    print(f"Saved logits to {os.path.join(folder_name, 'logits', 'act75.json')}")
+    print(f"Saved MAE results to {os.path.join(preds_dir, '8.json')}")
+    print(f"Saved logits to {os.path.join(logits_dir, 'act75.json')}")
     print(f"Saved MAE metrics to {metrics_file}")
-
     print(f"Average MAE accuracy: {metrics['average']:.2f}")
 
 if __name__ == "__main__":
