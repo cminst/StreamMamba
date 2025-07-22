@@ -60,7 +60,7 @@ def parse_args():
     )
     parser.add_argument(
         "--checkpoint-file",
-        default="spfs_r64/ckpt_step_14500.pt",
+        default="spfs_r64/ckpt_step_24500.pt",
         help="Checkpoint filename within the HF repo",
     )
     parser.add_argument(

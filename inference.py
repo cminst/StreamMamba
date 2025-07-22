@@ -67,7 +67,7 @@ def load_video_frames(video_path: str):
 # ------------------------------------------------------------------
 def main(confidence_threshold = 0.9, max_consecutive_skips = 6,):
     # 1. download single checkpoint
-    ckpt_path = hf_hub_download(repo_id=args.hf_repo, filename="spfs_r64/ckpt_step_14500.pt")
+    ckpt_path = hf_hub_download(repo_id=args.hf_repo, filename="spfs_r64/ckpt_step_24500.pt")
     print(f"Downloaded checkpoint to {ckpt_path}")
 
     # 2. build model
