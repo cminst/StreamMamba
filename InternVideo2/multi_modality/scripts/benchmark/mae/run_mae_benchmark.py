@@ -51,11 +51,6 @@ def parse_args():
         help="Git branch to checkout before evaluation",
     )
     parser.add_argument(
-        "--use-film",
-        action="store_true",
-        help="Indicate that the model uses FiLM conditioning",
-    )
-    parser.add_argument(
         "--output-graph",
         default="accuracy_graph.png",
         help="Path to output PNG graph of accuracy",
@@ -281,20 +276,7 @@ def main():
             frames = [x for x in _frame_from_video(cv2.VideoCapture('photography-model/' + video_path))]
 
             logit_curr = []
-            pbar = tqdm(range(len(frames) - 8))
-
-            gamma = beta = None
-            if args.use_film and getattr(intern_model.streaming_vision_encoder, "rnn_type", "") == "cross_mamba_film":
-                text_input = intern_model.tokenizer(
-                    phrase,
-                    padding="max_length",
-                    truncation=True,
-                    max_length=config.max_txt_l,
-                    return_tensors="pt",
-                ).to(device)
-                with torch.no_grad():
-                    prompt_vec = intern_model.encode_text(text_input)
-                gamma, beta = intern_model.streaming_vision_encoder.rnn.prepare_prompt(prompt_vec)
+            pbar = tqdm(range(7, len(frames)))
 
             curr_hidden_state = intern_model.streaming_vision_encoder.init_hidden(batch_size=1, device=device)
 
@@ -309,20 +291,17 @@ def main():
                 _, curr_hidden_state = intern_model.streaming_vision_encoder(
                     initial_frame_mc,
                     curr_hidden_state,
-                    gamma,
-                    beta,
                 )
+                logit_curr.append(0.0)
 
             for j in pbar:
                 _, probs, curr_hidden_state, _ = retrieve_text_streaming(
-                    frames[j+8],
+                    frames[j],
                     [phrase],
                     intern_model,
                     curr_hidden_state,
                     topk=1,
                     config=config,
-                    gamma=gamma,
-                    beta=beta,
                 )
                 logit_curr.append(probs.item())
                 if len(logit_curr) > 0:
@@ -332,11 +311,11 @@ def main():
             logits.append(list(zip(logit_curr, range(1, len(logit_curr) + 1))))
 
         preds = [int(x) for x in preds]
-        logits_v2 = [[(float(l[0]), l[1]) for l in x] for x in logits]
+        reformatted_logits = [[(float(l[0]), l[1]) for l in x] for x in logits]
 
         out_dir = os.path.dirname(checkpoint_path)
         json_write(preds, os.path.join(out_dir, 't8.json'))
-        json_write(logits_v2, os.path.join(out_dir, 'logits-act75.json'))
+        json_write(reformatted_logits, os.path.join(out_dir, 'logits-act75.json'))
 
         metrics = compute_accuracy(preds, dataset)
         json_write(metrics, os.path.join(out_dir, 'accuracy.json'))

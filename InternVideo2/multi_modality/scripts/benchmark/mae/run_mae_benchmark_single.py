@@ -270,7 +270,7 @@ def main():
         frames = [x for x in _frame_from_video(cv2.VideoCapture('photography-model/' + video_path))]
 
         logit_curr = []
-        pbar = tqdm(range(len(frames) - 8))
+        pbar = tqdm(range(7, len(frames)))
 
         curr_hidden_state = intern_model.streaming_vision_encoder.init_hidden(batch_size=1, device=device)
 
@@ -288,10 +288,11 @@ def main():
                 confidence_threshold=1.0,
                 max_consecutive_skips=0,
             )
+            logit_curr.append(0.0)
 
         for j in pbar:
             _, probs, curr_hidden_state, _ = retrieve_text_streaming_spfs(
-                frames[j + 8],
+                frames[j],
                 [phrase],
                 intern_model,
                 curr_hidden_state,

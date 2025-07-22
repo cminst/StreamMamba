@@ -80,6 +80,11 @@ def parse_args():
         default="fps_graph_spfs.png",
         help="Path to output PNG graph of FPS",
     )
+    parser.add_argument(
+        "--no-spfs",
+        action="store_true",
+        help="Disable SPFS (use plain model)",
+    )
     return parser.parse_args()
 
 
@@ -87,8 +92,16 @@ def main():
     ensure_dependencies()
     args = parse_args()
 
-    rnn_type = 'mamba_spfs'
-    folder_name = f"results_{rnn_type}_ct_{args.confidence_threshold}_mcs_{args.max_consecutive_skips}"
+    # Determine mode
+    rnn_type = 'mamba' if args.no_spfs else 'mamba_spfs'
+    mode = "non-SPFS" if args.no_spfs else "SPFS"
+    print(f"Running in {mode} mode.")
+
+    # Folder setup
+    if args.no_spfs:
+        folder_name = f"results_{rnn_type}"
+    else:
+        folder_name = f"results_{rnn_type}_ct_{args.confidence_threshold}_mcs_{args.max_consecutive_skips}"
     os.makedirs(folder_name, exist_ok=True)
 
     fps_json_path = os.path.join(folder_name, os.path.basename(args.output_json))
@@ -111,8 +124,8 @@ def main():
     config = Config.from_file(os.path.join(args.config_dir, "config.py"))
     config = eval_dict_leaf(config)
 
-    # Set rnn_type to mamba_spfs
-    config.model.streaming_vision_encoder.rnn_type = 'mamba_spfs'
+    # Set rnn_type dynamically
+    config.model.streaming_vision_encoder.rnn_type = rnn_type
 
     intern_model = InternVideo2_CLIP_small(config)
     intern_model.to(device)
@@ -160,8 +173,9 @@ def main():
         skipped_frames = 0
 
         hidden = intern_model.streaming_vision_encoder.init_hidden(batch_size=1, device=device)
-        # Don't use SPFS for the first 2 frames
-        for i in range(2):
+
+        # Warm-up with first seven frames
+        for i in range(7):
             f = frames[i]
             tensor = frames2tensor([f], fnum=1, target_size=(size_t, size_t), device=device).squeeze(0)
             if device.type == 'cuda':
@@ -170,7 +184,7 @@ def main():
             _, hidden, _ = intern_model.encode_streaming_vision(
                 tensor,
                 hidden,
-                confidence_threshold=1.0,  # Force no skip
+                confidence_threshold=1.0,
                 max_consecutive_skips=0
             )
             if device.type == 'cuda':
@@ -178,28 +192,45 @@ def main():
             end = time.time()
             total_time += end - start
 
-        for f in frames[2:]:
+        # Process remaining frames
+        for f in frames[7:]:
             tensor = frames2tensor([f], fnum=1, target_size=(size_t, size_t), device=device).squeeze(0)
             if device.type == 'cuda':
                 torch.cuda.synchronize()
             start = time.time()
-            _, hidden, spfs_info = intern_model.encode_streaming_vision(
-                tensor,
-                hidden,
-                confidence_threshold=args.confidence_threshold,
-                max_consecutive_skips=args.max_consecutive_skips
-            )
+
+            if args.no_spfs:
+                _, hidden, _ = intern_model.encode_streaming_vision(
+                    tensor,
+                    hidden,
+                    confidence_threshold=1.0,
+                    max_consecutive_skips=0
+                )
+            else:
+                _, hidden, spfs_info = intern_model.encode_streaming_vision(
+                    tensor,
+                    hidden,
+                    confidence_threshold=args.confidence_threshold,
+                    max_consecutive_skips=args.max_consecutive_skips
+                )
+                if spfs_info.skipped:
+                    skipped_frames += 1
+
             if device.type == 'cuda':
                 torch.cuda.synchronize()
             end = time.time()
             total_time += end - start
-            if spfs_info.skipped:
-                skipped_frames += 1
 
         total_frames += len(frames)
         total_skipped_frames += skipped_frames
         fps = len(frames) / total_time if total_time > 0 else 0.0
-        results.append({"video": video_path, "resolution": f"{w}x{h}", "pixels": pixels, "fps": fps, "skipped_frames": skipped_frames})
+        results.append({
+            "video": video_path,
+            "resolution": f"{w}x{h}",
+            "pixels": pixels,
+            "fps": fps,
+            "skipped_frames": skipped_frames
+        })
 
     results_sorted = sorted(results, key=lambda r: r["pixels"])
     x = [r["pixels"] for r in results_sorted]
@@ -209,9 +240,10 @@ def main():
     plt.plot(x, y, marker="o")
     plt.xlabel("pixels (w*h)")
     plt.ylabel("fps")
-    plt.title("Streaming FPS vs image size (with SPFS)")
+    plt.title("Streaming FPS vs image size (with SPFS)" if not args.no_spfs else "Streaming FPS vs image size")
     plt.grid(True)
 
+    from iv2_utils.iv2 import json_write
     json_write(results, fps_json_path)
     plt.savefig(fps_graph_path)
 
