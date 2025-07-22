@@ -56,23 +56,34 @@ def _run_single_benchmark(ct, benchmark_script, config_dir, config_name, max_con
     return metrics['performance']['within_8']
 
 def _plot_performance(performance_data, output_prefix):
+    """
+    Plots performance data and adds a horizontal line for a benchmark.
+    """
     performance_data.sort()
     x = [d[0] for d in performance_data]
     y = [d[1] for d in performance_data]
 
     plt.figure(figsize=(10, 6))
-    plt.plot(x, y, marker='o', linestyle='-', color='b', label='Peak Frame Prediction Accuracy (±8 Frame Tolerance)')
-    plt.title('SPFS Performance vs Confidence Threshold')
+
+    # Using a different color (red) for the main plot to contrast with the new blue line
+    plt.plot(x, y, marker='o', linestyle='-', color='g', label='SPFS Model Performance (±8 Frame Tolerance)')
+
+    # Add InternVideo2 B14 performance line
+    plt.axhline(y=0.88, color='b', linestyle='--', label='InternVideo2-B14 performance (88.00%)')
+
+    plt.title('SPFS Performance vs. Confidence Threshold')
     plt.xlabel('Confidence Threshold')
-    plt.ylabel('Performance (MAE <= 8 frames)')
+    plt.ylabel('Performance (Accuracy within ±8 frames)')
     plt.grid(True)
+    plt.ylim(bottom=min(y) - 0.05 if y else 0, top=1.0) # Ensure y-axis covers the full range
     plt.tight_layout()
-    plt.legend()
+    plt.legend() # This will now display both labels
 
     plt.savefig(f'{output_prefix}.png')
     plt.savefig(f'{output_prefix}.svg')
 
     print(f"Performance plot saved as '{output_prefix}.png' and '{output_prefix}.svg'")
+
 
 def main():
     parser = argparse.ArgumentParser(
