@@ -58,9 +58,9 @@ def _plot_performance(performance_data, output_prefix):
     plt.grid(True)
     plt.tight_layout()
     plt.legend()
-    plt.savefig(f'{output_prefix}.png')
-    plt.savefig(f'{output_prefix}.svg')
-    print(f"Performance plot saved as '{output_prefix}.png' and '{output_prefix}.svg'")
+    plt.savefig(os.path.join('results', f'{output_prefix}.png'))
+    plt.savefig(os.path.join('results', f'{output_prefix}.svg'))
+    print(f"Performance plot saved as 'results/{output_prefix}.png' and 'results/{output_prefix}.svg'")
 
 def main():
     parser = argparse.ArgumentParser(
