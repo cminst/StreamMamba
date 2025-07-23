@@ -75,24 +75,23 @@ def main(results_root):
     spfs_acc = []
 
     for fps, acc, is_dense, is_optimal in data:
+        spfs_fps.append(fps)
+        spfs_acc.append(acc)
         if is_dense:
             dense_fps = fps
             dense_acc = acc
-        else:
-            spfs_fps.append(fps)
-            spfs_acc.append(acc)
-            if is_optimal:
-                optimal_fps = fps
-                optimal_acc = acc
+        if is_optimal:
+            optimal_fps = fps
+            optimal_acc = acc
 
     plt.figure(figsize=(10, 6))
 
     # Plot all SPFS line (including Dense and Optimal)
-    plt.plot(spfs_fps, spfs_acc, 'g-', alpha=0.5, linewidth=2, marker='o', markerfacecolor='none', markersize=6, label='StreamMamba (SPFS)')
+    plt.plot(spfs_fps, spfs_acc, 'g-', alpha=0.5, linewidth=2, marker='o', markerfacecolor='green', markersize=4, label='StreamMamba (SPFS)')
 
-    # Plot Dense StreamMamba
+    # Plot Dense StreamMamba as filled circle
     if dense_fps is not None and dense_acc is not None:
-        plt.scatter(dense_fps, dense_acc, color='blueviolet', marker='D', s=60, label='StreamMamba (Dense)')
+        plt.scatter(dense_fps, dense_acc, color='blueviolet', marker='D', facecolor='blueviolet', s=45, label='StreamMamba (Dense)', zorder=9)
 
     # Plot Optimal SPFS with visual separation
     if optimal_fps is not None and optimal_acc is not None:
