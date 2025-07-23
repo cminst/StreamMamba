@@ -52,9 +52,9 @@ def _plot_performance(performance_data, output_prefix):
     plt.plot(x, y, marker='o', linestyle='-', color='g', label='SPFS Model Performance (±4 Frame Tolerance)')
     plt.axhline(y=(74 + 2/3), color='b', linestyle='--', label='InternVideo2-B14 performance (74.67%)')
 
-    plt.title('SPFS Performance vs. Confidence Threshold')
+    plt.title('SPFS Accuracy vs. Confidence Threshold')
     plt.xlabel('Confidence Threshold')
-    plt.ylabel('Performance (Accuracy within ±4 frames)')
+    plt.ylabel('Accuracy within ±4 frames')
     plt.grid(True)
     plt.tight_layout()
     plt.legend()

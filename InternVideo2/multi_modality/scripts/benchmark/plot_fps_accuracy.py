@@ -88,11 +88,11 @@ def main(results_root):
     plt.figure(figsize=(10, 6))
 
     # Plot all SPFS line (including Dense and Optimal)
-    plt.plot(spfs_fps, spfs_acc, 'g-', alpha=0.5, linewidth=2, marker='o', markersize=6, label='StreamMamba (SPFS)')
+    plt.plot(spfs_fps, spfs_acc, 'g-', alpha=0.5, linewidth=2, marker='o', markerfacecolor='none', markersize=6, label='StreamMamba (SPFS)')
 
     # Plot Dense StreamMamba
     if dense_fps is not None and dense_acc is not None:
-        plt.scatter(dense_fps, dense_acc, color='darkviolet', marker='^', s=90, label='StreamMamba (Dense)')
+        plt.scatter(dense_fps, dense_acc, color='blueviolet', marker='D', s=60, label='StreamMamba (Dense)')
 
     # Plot Optimal SPFS with visual separation
     if optimal_fps is not None and optimal_acc is not None:
