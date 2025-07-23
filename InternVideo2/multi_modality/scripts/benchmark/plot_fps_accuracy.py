@@ -57,6 +57,7 @@ def main(results_root):
     plt.scatter(1.4059, 74.67, color='blue', marker='*', s=150, label='InternVideo2-B14')
     plt.legend()
     plt.savefig(os.path.join(results_root, 'fps_accuracy_plot.png'))
+    plt.savefig(os.path.join(results_root, 'fps_accuracy_plot.svg'))
     plt.close()
 
 if __name__ == '__main__':
