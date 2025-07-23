@@ -78,32 +78,46 @@ def main(results_root):
         if is_dense:
             dense_fps = fps
             dense_acc = acc
-        elif is_optimal:
-            optimal_fps = fps
-            optimal_acc = acc
         else:
             spfs_fps.append(fps)
             spfs_acc.append(acc)
+            if is_optimal:
+                optimal_fps = fps
+                optimal_acc = acc
 
     plt.figure(figsize=(10, 6))
-    # Plot SPFS variants line (excluding Dense and Optimal)
-    plt.plot(spfs_fps, spfs_acc, 'g-', alpha=0.5, linewidth=2, marker='o', markersize=6, label='StreamMamba (SPFS variants)')
 
-    # Plot Dense as magenta star if available
+    # Plot all SPFS line (including Dense and Optimal)
+    plt.plot(spfs_fps, spfs_acc, 'g-', alpha=0.5, linewidth=2, marker='o', markersize=6, label='StreamMamba (SPFS)')
+
+    # Plot Dense StreamMamba
     if dense_fps is not None and dense_acc is not None:
         plt.scatter(dense_fps, dense_acc, color='darkviolet', marker='^', s=90, label='StreamMamba (Dense)')
 
-    # Plot Optimal SPFS as green square if available
+    # Plot Optimal SPFS with visual separation
     if optimal_fps is not None and optimal_acc is not None:
-        plt.scatter(optimal_fps, optimal_acc, color='green', marker='*', s=180, label='StreamMamba (SPFS optimal)')
+        # Padding
+        plt.scatter(optimal_fps, optimal_acc, color='white', marker='o', s=250,
+                    linewidth=3, zorder=5)
+
+        plt.scatter(optimal_fps, optimal_acc, color='green', marker='*', s=160, zorder=9,
+                    label='StreamMamba (SPFS optimal)')
 
     # Plot InternVideo2-B14 baseline
     plt.scatter(1.4059, 74.67, color='blue', marker='x', s=100, label='InternVideo2-B14')
 
+    plt.axvline(x=30, color='black', linestyle='--', label='Real-time Threshold', alpha=0.4, zorder=8)
+
+    max_fps = max([x[0] for x in data]) + 5
+
+    xmin_current = plt.xlim()[0]
+    plt.xlim(xmin_current, max_fps)
+    plt.axvspan(xmin=30, xmax=max_fps, color='lightgreen', alpha=0.1, zorder=8)
+
     plt.xlabel('Average FPS')
     plt.ylabel('Accuracy within ±4 frames')
     plt.title('FPS vs Accuracy Tradeoff')
-    plt.grid(True)
+    plt.grid(False)
     plt.legend()
     plt.tight_layout()
 
