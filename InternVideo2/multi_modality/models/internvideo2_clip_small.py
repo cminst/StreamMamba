@@ -1,16 +1,13 @@
 import logging
 import os
 import json
-import timm
 
 import torch
 from torch import nn
-import numpy as np
-from PIL import Image
 import torchvision.transforms as transforms
 from torchvision.transforms import InterpolationMode
 
-from .backbones.internvideo2 import InternVideo2, TextTransformer, ClipTokenizer, VisionTransformer, StreamingInternVideo2Student
+from .backbones.internvideo2 import InternVideo2, TextTransformer, ClipTokenizer, StreamMamba
 from .criterions import VTC_VTM_Loss
 from .utils import unwrap_state_dict
 
@@ -34,7 +31,7 @@ class InternVideo2_CLIP_small(nn.Module):
         self.is_pretrain = is_pretrain
 
         # Load MobileCLIP encoder configuration
-        self.mobileclip_cfg = mobileclip_cfg = json.load(
+        self.mobileclip_cfg = json.load(
             open(os.path.join(
                 "./models/backbones/internvideo2/mobileclip/configs/" +
                 f"{self.config.model.mobileclip_type.name}.json"))
@@ -63,7 +60,7 @@ class InternVideo2_CLIP_small(nn.Module):
                 )
             )
 
-        # Build StreamingInternVideo2Student for distillation
+        # Build StreamMamba for distillation
         self.streaming_vision_encoder = self.build_streaming_vision_encoder()
 
         # Build text encoder
@@ -79,28 +76,22 @@ class InternVideo2_CLIP_small(nn.Module):
 
         # Freeze model parameters if specified in the config
         if self.config.model.freeze_vision:
-            for name, p in self.vision_encoder.named_parameters():
-                if self.config.model.open_vision_clip_projector and name.startswith('clip_projector'):
-                    p.requires_grad = False
-                else:
-                    p.requires_grad = False
-
-            for name, p in self.vision_align.named_parameters():
-                if self.config.model.open_vision_clip_projector and name.startswith('clip_projector'):
-                    p.requires_grad = False
-                else:
-                    p.requires_grad = False
+            self.freeze_vision()
 
         if self.config.model.freeze_mobileclip_vision:
-            for name, p in self.streaming_vision_encoder.vit_lite.named_parameters():
-                p.requires_grad = False
+            self.freeze_mobileclip_vision()
 
         if self.config.model.freeze_mobileclip_text:
-            for name, p in self.text_encoder.named_parameters():
-                if self.config.model.open_text_projection and name.startswith('projection_layer'):
-                    p.requires_grad = False
-                else:
-                    p.requires_grad = False
+            self.freeze_mobileclip_text()
+
+        if getattr(self.config.model, "freeze_mamba", False):
+            self.freeze_mamba()
+
+        if getattr(self.config.model, "freeze_prediction_head", False):
+            self.freeze_prediction_head()
+
+        if getattr(self.config.model, "freeze_confidence_head", False):
+            self.freeze_confidence_head()
 
         # Define image transformation pipeline
         img_size = self.config.model.vision_encoder.img_size
@@ -195,14 +186,18 @@ class InternVideo2_CLIP_small(nn.Module):
 
         return vfeat
 
-    def encode_streaming_vision(self, image, prev_hidden_state, gamma=None, beta=None):
+    def encode_streaming_vision(self, image, prev_hidden_state, confidence_threshold=0.9, max_consecutive_skips=0, gamma=None, beta=None):
         """Encode image/video frames using the streaming ViT.
+
+        Note: SPFS is disabled by default (max_consecutive_steps = 0)
 
         Args:
             image (torch.Tensor): The input images.
             prev_hidden_state (tuple or torch.Tensor): Previous hidden state from the RNN.
                 For LSTM: (h_prev, c_prev)
                 For GRU: h_prev
+            confidence_threshold (float): Confidence threshold for SPFS. Default 0.9
+            max_consecutive_skips (int): Maximum number of consecutive frames to skip. Default 0
             gamma (torch.Tensor, optional): FiLM scale parameters for conditioning the
                 streaming encoder. ``None`` if FiLM is not used.
             beta (torch.Tensor, optional): FiLM shift parameters for conditioning the
@@ -216,9 +211,11 @@ class InternVideo2_CLIP_small(nn.Module):
 
         assert len(image.shape) in [4, 5], f"Invalid dimension: {image.shape}"
 
-        vision_embeds, new_hidden_state = self.streaming_vision_encoder(
+        vision_embeds, new_hidden_state, spfs_info = self.streaming_vision_encoder(
             image,
             prev_hidden_state=prev_hidden_state,
+            confidence_threshold=confidence_threshold,
+            max_consecutive_skips=max_consecutive_skips,
             gamma=gamma,
             beta=beta,
         )
@@ -228,10 +225,12 @@ class InternVideo2_CLIP_small(nn.Module):
         else:
             vision_embeds_aligned = self.vision_align(vision_embeds)
 
-        return vision_embeds_aligned, new_hidden_state
+        return vision_embeds_aligned, new_hidden_state, spfs_info
 
-    def get_streaming_vid_feat(self, frames: torch.Tensor, prev_hidden_state, gamma=None, beta=None):
+    def get_streaming_vid_feat(self, frames: torch.Tensor, prev_hidden_state, confidence_threshold=0.9, max_consecutive_skips=0, gamma=None, beta=None):
         """Return features for a single frame using the streaming ViT.
+
+        Note: SPFS is disabled by default (max_consecutive_steps = 0)
 
         Args:
             frames (torch.Tensor): Input frame(s) for the ViT-Lite.
@@ -239,6 +238,8 @@ class InternVideo2_CLIP_small(nn.Module):
                 ``(B, C, T_chunk, H, W)`` when processing multiple frames at once.
             prev_hidden_state (tuple or torch.Tensor): Previous hidden state from the RNN.
                 For LSTM: ``(h_prev, c_prev)``; for GRU: ``h_prev``.
+            confidence_threshold (float): Confidence threshold for SPFS. Default 0.9
+            max_consecutive_skips (int): Maximum number of consecutive frames to skip. Default 0
             gamma (torch.Tensor, optional): FiLM scale parameters for conditioning the
                 streaming encoder. ``None`` if FiLM is not used.
             beta (torch.Tensor, optional): FiLM shift parameters for conditioning the
@@ -249,9 +250,11 @@ class InternVideo2_CLIP_small(nn.Module):
             video feature embedding and ``new_hidden_state`` is the updated RNN state.
         """
         with torch.no_grad():
-            vfeat, new_hidden_state = self.encode_streaming_vision(
+            vfeat, new_hidden_state, spfs_info = self.encode_streaming_vision(
                 frames,
                 prev_hidden_state=prev_hidden_state,
+                confidence_threshold=confidence_threshold,
+                max_consecutive_skips=max_consecutive_skips,
                 gamma=gamma,
                 beta=beta,
             )
@@ -259,7 +262,7 @@ class InternVideo2_CLIP_small(nn.Module):
             # vfeat = self.vision_proj(vfeat)
             vfeat /= vfeat.norm(dim=-1, keepdim=True)
 
-        return vfeat, new_hidden_state
+        return vfeat, new_hidden_state, spfs_info
 
     def encode_text(self, text):
         """encode text.
@@ -315,9 +318,9 @@ class InternVideo2_CLIP_small(nn.Module):
             init_values=config.init_values,
             qk_normalization=config.qk_normalization,
             depth=config.depth,
-            use_flash_attn=False, # ENABLE FOR INCREASED PERFORMANCE
-            use_fused_rmsnorm=False, # ENABLE FOR INCREASED PERFORMANCE
-            use_fused_mlp=False, # ENABLE FOR INCREASED PERFORMANCE
+            use_flash_attn=False,
+            use_fused_rmsnorm=False,
+            use_fused_mlp=False,
             fused_mlp_heuristic=config.fused_mlp_heuristic,
             attn_pool_num_heads=config.attn_pool_num_heads,
             clip_embed_dim=config.clip_embed_dim,
@@ -341,14 +344,14 @@ class InternVideo2_CLIP_small(nn.Module):
 
     def build_streaming_vision_encoder(self):
         """
-        Build the StreamingInternVideo2Student model.
+        Build the StreamMamba model.
 
         Returns: (vision_encoder, vision_layernorm). Each is a `nn.Module`.
         """
 
         config = self.config.model.streaming_vision_encoder
 
-        streaming_vision_encoder = StreamingInternVideo2Student(
+        streaming_vision_encoder = StreamMamba(
             vit_lite_model_name=self.mobileclip_cfg["image_cfg"]["model_name"],
             vit_lite_proj_dim=self.mobileclip_cfg["embed_dim"], # Projection dimension
             vit_lite_embed_dim=config.vit_lite_embed_dim, # Output dimension
@@ -359,6 +362,7 @@ class InternVideo2_CLIP_small(nn.Module):
             fc_hidden_layers = config.fc_hidden_layers,
             teacher_clip_embed_dim = config.teacher_clip_embed_dim,
             text_embed_dim = self.mobileclip_cfg["embed_dim"],
+            pred_rank = config.get('pred_rank', None), # Rank for SPFS
         )
 
         return streaming_vision_encoder
@@ -405,16 +409,12 @@ class InternVideo2_CLIP_small(nn.Module):
 
         for k, v in mobileclip_ckpt.items():
             if k.startswith('text_encoder.'):
-                # print(f"    - Loading parameter {k} for the MobileCLIP text encoder.")
                 new_ckpt[k] = v
             elif k.startswith('image_encoder.'):
-                # print(f"    - Loading parameter {k} for the MobileCLIP vision encoder.")
-                # Map MobileCLIP's image_encoder keys to the streaming_vision_encoder.vit_lite module
                 new_k = 'streaming_vision_encoder.vit_lite.' + k[len('image_encoder.model.'):]
                 new_ckpt[new_k] = v
 
         # load extra checkpoint
-        # often when post-pretrain after previous pretraining, thus the keys are same
         if extra_ckpt_path is not None:
             logger.info(f"Load extra checkpoint from {extra_ckpt_path}")
             extra_ckpt = unwrap_state_dict(torch.load(extra_ckpt_path, map_location='cpu'))
@@ -432,3 +432,76 @@ class InternVideo2_CLIP_small(nn.Module):
         label_probs = (100.0 * vid_feat @ txt_feat.T)
         top_probs, top_labels = label_probs.float().cpu().topk(top, dim=-1)
         return top_probs, top_labels
+
+    # ========== Parameter Freezing Utilities ==========
+
+    def _set_requires_grad(self, module, flag: bool):
+        for p in module.parameters():
+            p.requires_grad = flag
+
+    def freeze_vision(self):
+        for name, p in self.vision_encoder.named_parameters():
+            if self.config.model.open_vision_clip_projector and name.startswith('clip_projector'):
+                continue
+            p.requires_grad = False
+        for name, p in self.vision_align.named_parameters():
+            if self.config.model.open_vision_clip_projector and name.startswith('clip_projector'):
+                continue
+            p.requires_grad = False
+
+    def unfreeze_vision(self):
+        self._set_requires_grad(self.vision_encoder, True)
+        self._set_requires_grad(self.vision_align, True)
+
+    def freeze_mobileclip_vision(self):
+        self._set_requires_grad(self.streaming_vision_encoder.vit_lite, False)
+
+    def unfreeze_mobileclip_vision(self):
+        self._set_requires_grad(self.streaming_vision_encoder.vit_lite, True)
+
+    def freeze_mobileclip_text(self):
+        for name, p in self.text_encoder.named_parameters():
+            if self.config.model.open_text_projection and name.startswith('projection_layer'):
+                continue
+            p.requires_grad = False
+
+    def unfreeze_mobileclip_text(self):
+        self._set_requires_grad(self.text_encoder, True)
+
+    def freeze_mamba(self):
+        for name, p in self.streaming_vision_encoder.rnn.named_parameters():
+            # Skip predictor and confidence heads
+            if name.startswith('pred_') or name.startswith('logvar'):
+                continue
+            p.requires_grad = False
+
+    def unfreeze_mamba(self):
+        for name, p in self.streaming_vision_encoder.rnn.named_parameters():
+            # Skip predictor and confidence heads
+            if name.startswith('pred_') or name.startswith('logvar'):
+                continue
+            p.requires_grad = True
+
+    def freeze_prediction_head(self):
+        if hasattr(self.streaming_vision_encoder.rnn, 'pred_U'):
+            self.streaming_vision_encoder.rnn.pred_U.requires_grad = False
+        if hasattr(self.streaming_vision_encoder.rnn, 'pred_V'):
+            self._set_requires_grad(self.streaming_vision_encoder.rnn.pred_V, False)
+        if hasattr(self.streaming_vision_encoder.rnn, 'pred_head'):
+            self._set_requires_grad(self.streaming_vision_encoder.rnn.pred_head, False)
+
+    def unfreeze_prediction_head(self):
+        if hasattr(self.streaming_vision_encoder.rnn, 'pred_U'):
+            self.streaming_vision_encoder.rnn.pred_U.requires_grad = True
+        if hasattr(self.streaming_vision_encoder.rnn, 'pred_V'):
+            self._set_requires_grad(self.streaming_vision_encoder.rnn.pred_V, True)
+        if hasattr(self.streaming_vision_encoder.rnn, 'pred_head'):
+            self._set_requires_grad(self.streaming_vision_encoder.rnn.pred_head, True)
+
+    def freeze_confidence_head(self):
+        if hasattr(self.streaming_vision_encoder.rnn, 'logvar'):
+            self._set_requires_grad(self.streaming_vision_encoder.rnn.logvar, False)
+
+    def unfreeze_confidence_head(self):
+        if hasattr(self.streaming_vision_encoder.rnn, 'logvar'):
+            self._set_requires_grad(self.streaming_vision_encoder.rnn.logvar, True)

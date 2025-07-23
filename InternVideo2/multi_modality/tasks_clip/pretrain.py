@@ -9,14 +9,12 @@ import numpy as np
 
 from os.path import join
 
-# Early check for dataset path
 if not os.environ.get("DATASET_ROOT"):
     raise RuntimeError(
         "DATASET_ROOT environment variable is not set. "
         "Please export DATASET_ROOT to point to your dataset root before running this script."
     )
 
-# Third-party imports
 import cv2
 import matplotlib.pyplot as plt
 import torch
@@ -31,8 +29,13 @@ from torchvision import transforms
 from torchvision.transforms.functional import InterpolationMode
 from tqdm import tqdm
 
-# Local application imports
-from dataset import MetaLoader_rs, create_dataset, create_loader, create_stateful_sampler
+from dataset import (
+    MetaLoader_rs,
+    create_dataset,
+    create_loader,
+    create_stateful_sampler,
+    add_precomputed_embeddings,
+)
 from dataset.serialize import local_broadcast_process_authkey
 from models import *
 from tasks_clip.shared_utils import get_media_types, setup_model
@@ -144,13 +147,12 @@ def save_debug_step_data(output_dir, global_step, frame_idx,
 
     print(f"Saved debug data for global_step {global_step}, frame_idx {frame_idx} to {step_dir}")
 
-# Helper to read frames from video
 def _frame_from_video(video_cap):
     while video_cap.isOpened():
         ret, frame = video_cap.read()
         if not ret:
             break
-        yield frame # BGR numpy array
+        yield frame
 
 def get_inference_transform(img_size):
      return transforms.Compose(
@@ -173,11 +175,8 @@ def preprocess_frame(frame_bgr_np, transform, device):
     frame_rgb_np = cv2.cvtColor(frame_bgr_np, cv2.COLOR_BGR2RGB)
     pil_image = Image.fromarray(frame_rgb_np)
 
-    # Apply the transform pipeline
-    # Output shape: [C, H, W]
     transformed_tensor_chw = transform(pil_image)
 
-    # Add batch dimension and move to device
     frame_tensor_batch = transformed_tensor_chw.unsqueeze(0).to(device) # [1, C, H, W]
 
     return frame_tensor_batch
@@ -186,11 +185,11 @@ def preprocess_frame(frame_bgr_np, transform, device):
 def evaluate_streaming_similarity(
     model,
     device,
-    streaming_transform, # The preprocessing transform
+    streaming_transform,
     video_path,
     model_max_frames,
     output_dir,
-    global_step, # Current training step for filename
+    global_step,
     config
 ):
     """
@@ -211,27 +210,26 @@ def evaluate_streaming_similarity(
         ]
     )
 
-    # Ensure model is in evaluation mode and on the correct device
     model.eval()
-    model.to(device) # Ensure model is on device, though it should be already
+    model.to(device)
 
     cosine_similarities = []
     frame_indices_for_plot = []
-    avg_similarity = -1.0 # Default value if no frames processed
+    avg_similarity = -1.0
 
     logger.info(f"Starting evaluation on video: {video_path}")
 
     video_cap = cv2.VideoCapture(video_path)
     if not video_cap.isOpened():
         logger.error(f"Error: Could not open video {video_path} for evaluation.")
-        return avg_similarity # Return default if video can't be opened
+        return avg_similarity
 
-    all_frames_raw = list(_frame_from_video(video_cap)) # List of numpy arrays (H, W, C, BGR)
+    all_frames_raw = list(_frame_from_video(video_cap))
     video_cap.release()
 
     if len(all_frames_raw) < model_max_frames:
         logger.warning(f"Evaluation video {video_path} has {len(all_frames_raw)} frames, less than MODEL_MAX_FRAMES ({model_max_frames}). Skipping evaluation.")
-        return avg_similarity # Return default if video is too short
+        return avg_similarity
 
     with torch.autocast("cuda", dtype=torch.bfloat16), torch.no_grad():
         curr_hidden_state_streaming = model.streaming_vision_encoder.init_hidden(batch_size=1, device=device)
@@ -242,7 +240,7 @@ def evaluate_streaming_similarity(
             frame_data = all_frames_raw[i]
             frame_tensor_batch = preprocess_frame(frame_data, streaming_transform, device)
             frame_tensor_streaming_input = frame_tensor_batch.unsqueeze(2)
-            raw_stream_embedding_dummy, curr_hidden_state_streaming = model.streaming_vision_encoder(
+            _, curr_hidden_state_streaming = model.streaming_vision_encoder(
                 frame_tensor_streaming_input,
                 curr_hidden_state_streaming
             )
@@ -262,33 +260,26 @@ def evaluate_streaming_similarity(
                 curr_hidden_state_streaming
             )
 
-            # Align and Normalize the raw streaming embedding
             if config.model.use_streaming_vision_align:
                 aligned_stream_embedding = model.streaming_vision_align(raw_stream_embedding)
             else:
                 aligned_stream_embedding = model.vision_align(raw_stream_embedding)
             stream_embedding = aligned_stream_embedding / (aligned_stream_embedding.norm(dim=-1, keepdim=True) + 1e-9)
 
-            # Update the hidden state for the next frame
             curr_hidden_state_streaming = new_hidden_state
 
-            # Full Model Feature for the corresponding window
             window_start_idx = frame_idx - model_max_frames + 1
-            window_end_idx = frame_idx + 1 # Slicing is exclusive at the end
+            window_end_idx = frame_idx + 1
             current_window_frames_data = all_frames_raw[window_start_idx : window_end_idx] # List of BGR numpy arrays
 
-            # Preprocess all frames in the window and stack them
             list_of_frame_tensors = [preprocess_frame(f, regular_transform, device) for f in current_window_frames_data]
             window_tensor_full = torch.stack(list_of_frame_tensors, dim=2) # Shape: [B=1, C, T, H, W]
 
-            # Pass the full window tensor to the full vision encoder
             raw_target_embedding = model.vision_encoder(window_tensor_full)
 
-            # Align and Normalize the raw target embedding
             aligned_target_embedding = model.vision_align(raw_target_embedding)
             target_embedding = aligned_target_embedding / (aligned_target_embedding.norm(dim=-1, keepdim=True) + 1e-9)
 
-            # Cosine sim
             similarity = torch.nn.functional.cosine_similarity(stream_embedding, target_embedding, dim=1)
 
             sim_value = similarity.item()
@@ -355,21 +346,13 @@ def train(
 
     model.train()
 
-    try:
-        inference_transform = model_without_ddp.transform
-        IMG_SIZE = model_without_ddp.config.model.vision_encoder.img_size
-    except AttributeError:
-        logger.warning("Model does not have 'transform' or 'config.model.vision_encoder.img_size'. Using default.")
-        IMG_SIZE = config.get('size_t', 224)
-        inference_transform = get_inference_transform(IMG_SIZE)
-
     mobileclip_transform = transforms.Compose(
         [
             transforms.Resize(
-                config.inputs.image_res, # Use the provided image_size
+                config.inputs.image_res,
                 interpolation=transforms.InterpolationMode.BILINEAR,
             ),
-            transforms.CenterCrop(config.inputs.image_res), # Use the provided image_size
+            transforms.CenterCrop(config.inputs.image_res),
             transforms.ToTensor(),
         ]
     )
@@ -460,7 +443,12 @@ def train(
                 model_without_ddp, optimizer, scheduler, config
             )
 
-        media_type_orig_data, (image, text, idx) = data_pair # Renamed for clarity
+        batch = data_pair[1]
+        if len(batch) == 4:
+            image, text, _, teacher_emb = batch
+        else:
+            image, text, _ = batch
+            teacher_emb = None
 
         image = image.to(device, non_blocking=True)
 
@@ -477,7 +465,6 @@ def train(
         if log_debug and i == 0 :
             logger.info(f"Original data: image shape: {image.shape}, text: {text}")
 
-        # Autocast context covers the per-window forward and backward passes
         with torch.cuda.amp.autocast(enabled=config.use_half_precision, dtype=data_type):
             gamma = beta = None
             if getattr(model.streaming_vision_encoder, "rnn_type", "") == "cross_mamba_film":
@@ -494,7 +481,7 @@ def train(
             image = image.permute(0, 2, 1, 3, 4)
             B, C, T, H, W = image.shape
 
-            mc_image = image # <----- Change this later ==================================================++++++++++++++++++++++++==
+            mc_image = image
 
             assert T >= MODEL_MAX_FRAMES, f"Video (orig) has {T} frames, needs {MODEL_MAX_FRAMES}."
 
@@ -518,7 +505,7 @@ def train(
                 # Store hidden state that was input to the streaming_vision_encoder for this step (for debug saving)
                 hidden_state_fed_to_encoder_this_step = curr_hidden_state
 
-                # --- Stream Embedding Calculation (using mc_image and streaming encoder) ---
+                # Stream Embedding Calculation (using mc_image and streaming encoder)
                 current_streaming_frame_mc = mc_image[:, :, current_frame_in_video_idx, :, :].unsqueeze(2)
                 raw_stream_emb_mc, new_hidden_state_mc_updated = model.streaming_vision_encoder(
                     current_streaming_frame_mc, hidden_state_fed_to_encoder_this_step, gamma, beta
@@ -529,21 +516,24 @@ def train(
                     aligned_stream_emb_mc = model_without_ddp.vision_align(raw_stream_emb_mc)
                 stream_embedding = aligned_stream_emb_mc / (aligned_stream_emb_mc.norm(dim=-1, keepdim=True) + 1e-9)
 
-                # --- Target Embedding Calculation (using original image and full encoder) ---
+                # Target Embedding Calculation (using original image and full encoder)
                 window_start_idx = current_frame_in_video_idx - MODEL_MAX_FRAMES + 1
                 window_end_idx = current_frame_in_video_idx + 1
                 current_window_frames_orig = image[:, :, window_start_idx:window_end_idx, :, :]
 
-                with torch.no_grad(): # Target computation should not contribute to gradients
-                    raw_target_emb_orig = model_without_ddp.vision_encoder(current_window_frames_orig)
-                    aligned_target_emb_orig = model_without_ddp.vision_align(raw_target_emb_orig)
-                    target_embedding = aligned_target_emb_orig / (aligned_target_emb_orig.norm(dim=-1, keepdim=True) + 1e-9)
+                if teacher_emb is not None:
+                    target_embedding = teacher_emb[:, frame_window_step_idx, :].to(device)
+                else:
+                    with torch.no_grad():
+                        raw_target_emb_orig = model_without_ddp.vision_encoder(current_window_frames_orig)
+                        aligned_target_emb_orig = model_without_ddp.vision_align(raw_target_emb_orig)
+                        target_embedding = aligned_target_emb_orig / (aligned_target_emb_orig.norm(dim=-1, keepdim=True) + 1e-9)
 
-                # Calculating the loss for this sliding window step
+                # Loss for this sliding window step
                 cosine_loss_val = cosine_sim_loss(stream_embedding, target_embedding)
                 info_nce_val = info_nce_loss(
                     stream_embedding,
-                    stream_embedding.detach(), # Stop gradient for the key side.
+                    stream_embedding.detach(),
                     text,
                     temperature=getattr(config, 'contrastive_temperature', 0.07),
                 ) if nce_lambda > 0 else torch.tensor(0.0, device=device)
@@ -565,19 +555,19 @@ def train(
                 else:
                     optimizer.zero_grad()
                     if config.use_half_precision:
-                        scaler.scale(loss).backward() # Use per-window loss
+                        scaler.scale(loss).backward()
                         if config.optimizer.max_grad_norm > 0:
                             scaler.unscale_(optimizer)
                             torch.nn.utils.clip_grad_norm_(model.parameters(), config.optimizer.max_grad_norm)
                         scaler.step(optimizer)
                         scaler.update()
                     else:
-                        loss.backward() # Use per-window loss
+                        loss.backward()
                         if config.optimizer.max_grad_norm > 0:
                             torch.nn.utils.clip_grad_norm_(model.parameters(), config.optimizer.max_grad_norm)
                         optimizer.step()
 
-                    scheduler.step() # Step scheduler after each optimizer.step()
+                    scheduler.step()
 
                 curr_hidden_state = tuple(h.detach().clone() for h in new_hidden_state_mc_updated)
                 if log_debug and i == 0 and frame_window_step_idx == 0 :
@@ -593,35 +583,30 @@ def train(
                         model_state_dict=model_without_ddp.state_dict()
                     )
 
-        # Calculate averages for logging (these are Python floats now)
+        # Averages for logging
         final_batch_cosine_loss_for_logging = batch_total_loss_for_logging / num_sliding_windows
         final_batch_nce_loss_for_logging = batch_total_nce_for_logging / num_sliding_windows
         average_cosine_sim_for_logging = batch_total_sim_for_logging / num_sliding_windows
 
-        # --- Logging Metrics (after all windows in a batch item are processed) ---
         metric_logger.update(**{'video-stream-target-loss': final_batch_cosine_loss_for_logging})
         metric_logger.update(**{'video-stream-nce-loss': final_batch_nce_loss_for_logging})
         metric_logger.update(**{'video-stream-target-sim': average_cosine_sim_for_logging})
-        metric_logger.update(lr=optimizer.param_groups[0]["lr"]) # LR after the last window's update in this batch
+        metric_logger.update(lr=optimizer.param_groups[0]["lr"])
 
-        # Find parameter group with different_lr flag and log it
         different_lr_value = None
         for pg in optimizer.param_groups:
             if pg.get("different_lr", False):
                 different_lr_value = pg["lr"]
                 break
 
-        # If found a different learning rate, log it, otherwise use default
         if different_lr_value is not None:
             metric_logger.update(different_lr=different_lr_value)
         else:
-            # No different learning rate found, log the default one
             metric_logger.update(different_lr=optimizer.param_groups[0]["lr"])
 
         if hasattr(model_without_ddp, 'temp'):
             metric_logger.update(temperature=model_without_ddp.temp.item())
 
-        # Increment global_step once per batch item (outer loop iteration)
         global_step += 1
         if global_step % EVAL_FREQ_STEPS == 0 and is_main_process():
             logger.info(f"Performing periodic evaluation at global step {global_step}...")
@@ -654,7 +639,7 @@ def train(
                 logger.info(f"{header} [Step {i}] {metric_logger}")
 
             if is_main_process() and config.wandb.enable:
-                averaged_logs_for_wandb = metric_logger.get_global_avg_dict()
+                averaged_logs_for_wandb = metric_logger.get_value_dict()
                 log_dict_to_wandb(averaged_logs_for_wandb, step=global_step, prefix="train/")
 
 
@@ -691,7 +676,7 @@ def train(
     metric_logger.synchronize_between_processes()
     logger.info(f"Averaged stats for Epoch [{epoch}]: {metric_logger.global_avg()}")
     if is_main_process() and config.wandb.enable:
-        log_dict_to_wandb(metric_logger.get_global_avg_dict(), step=global_step, prefix=f"epoch_{epoch}/")
+        log_dict_to_wandb(metric_logger.get_value_dict(), step=global_step, prefix=f"epoch_{epoch}/")
 
     return global_step
 
@@ -714,6 +699,7 @@ def clone_collate_fn(batch):
 def setup_dataloaders(config, mode="pt"):
     logger.info(f"Creating dataset for {mode}")
     train_datasets = create_dataset(f"{mode}_train", config)
+    train_datasets = add_precomputed_embeddings(train_datasets, getattr(config, "teacher_embedding_dir", None))
     media_types = get_media_types(train_datasets)
 
     if not config.distributed:
@@ -734,11 +720,10 @@ def setup_dataloaders(config, mode="pt"):
 
     # =============================================================
 
-    # eval side stays the same
     test_datasets, test_dataset_names = create_dataset(f"{mode}_eval", config)
     test_loaders = create_loader(
         test_datasets,
-        [None] * len(test_datasets), # Eval loaders typically don't need samplers in DDP if evaluating on all data
+        [None] * len(test_datasets),
         batch_size   = [config.inputs.batch_size_test[d.media_type] for d in test_datasets],
         num_workers  = [config.num_workers] * len(test_datasets),
         is_trains    = [False] * len(test_datasets),
@@ -786,7 +771,6 @@ def main(config):
         num_steps_per_epoch=num_steps_per_epoch,
     )
 
-    # restore RNG state from checkpoint if available
     if config.resume and os.path.isfile(config.pretrained_path):
         try:
             ckpt = torch.load(config.pretrained_path, map_location="cpu")
@@ -856,7 +840,6 @@ def main(config):
             else:
                 torch.save(save_obj, join(config.output_dir, f"ckpt_{epoch:02d}.pth"))
 
-        # -- End of Epoch --
         start_step = global_step
         dist.barrier()
 

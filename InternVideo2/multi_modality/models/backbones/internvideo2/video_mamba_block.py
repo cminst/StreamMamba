@@ -56,6 +56,7 @@ class VideoMambaBlock(nn.Module):
         out = out.squeeze(1)
         out = out + gated
         out = out * torch.sigmoid(self.out_gate(out))
+        self._hidden = out
         clip_emb = self.proj(out)
         return clip_emb, (conv_state, ssm_state)
 
@@ -75,7 +76,46 @@ class CrossMambaFiLM(VideoMambaBlock):
         gamma, beta = self.film(prompt_vec).chunk(2, dim=-1)
         return gamma.sigmoid(), beta
 
-    def forward(self, frame_feat, state, gamma=None, beta=None):
+    def forward(self, frame_feat, state, gamma=None, beta=None, tau=None):
         if gamma is not None and beta is not None:
             frame_feat = gamma * frame_feat + beta
         return super().forward(frame_feat, state)
+
+
+class MambaSPFS(VideoMambaBlock):
+    """VideoMambaBlock with a feature predictor for Self-Predictive Feature Skipping (SPFS)."""
+
+    def __init__(self, *args, pred_rank=32, **kw):
+        super().__init__(*args, **kw)
+        d = self.proj.out_features
+        self.r = r = pred_rank
+
+        # if pred_rank is None, use a simple Linear instead.
+        if r:
+            self.pred_U = nn.Parameter(torch.randn(d, r))
+            self.pred_V = nn.Linear(self.ssm.d_model, r, bias=False)
+        else:
+            self.pred_head = nn.Linear(self.ssm.d_model, d)
+
+        self.logvar = nn.Linear(self.ssm.d_model, 1)
+        self.last_hidden = None
+
+    def forward(self, frame_feat, state):
+        clip_emb, state = super().forward(frame_feat, state)
+        # Store hidden representation for next-step prediction
+        self.last_hidden = self._hidden
+        return clip_emb, state
+
+    def predict_next_feat(self, h=None):
+        if h is None:
+            if self.last_hidden is None:
+                raise RuntimeError("No hidden state available for prediction")
+            h = self.last_hidden
+
+        if self.r:
+            mu = self.pred_V(h) @ self.pred_U.T
+        else:
+            mu = self.pred_head(h)
+
+        unc = self.logvar(h)
+        return mu, unc

@@ -1,7 +1,6 @@
 from configs.data import *
 from configs.model import *
-import os as __os
-from huggingface_hub import hf_hub_download
+from huggingface_hub import hf_hub_download as __hf_hub_download
 
 # ========================= data ==========================
 train_corpus = "slim_kinetics"
@@ -15,8 +14,8 @@ stop_key = None
 # ========================= input ==========================
 num_frames = 8
 num_frames_test = 8
-batch_size = 8      # Use 16 for 5090
-batch_size_test = 8 # Use 16 for 5090
+batch_size = 8
+batch_size_test = 8
 max_txt_l = 32
 
 size_t = 224
@@ -36,7 +35,7 @@ inputs = dict(
 )
 
 # ========================= model ==========================
-HF_REPO = "qingy2024/InternVideo2-B14"
+model_repo = "qingy2024/InternVideo2-B14"
 
 model = dict(
     model_cls="InternVideo2_CLIP_small",
@@ -71,7 +70,7 @@ model = dict(
     ),
     streaming_vision_encoder = dict(
         vit_lite_embed_dim = 768,
-        rnn_type = 'cross_mamba_film',
+        rnn_type = 'mamba',
         rnn_hidden_size = 1024,
         rnn_num_layers = 3,
         rnn_dropout = 0.0,
@@ -79,9 +78,7 @@ model = dict(
         teacher_clip_embed_dim = 768,
         text_embed_dim = 512,
     ),
-    mobileclip_type=dict(
-        name="mobileclip_b"
-    ),
+    mobileclip_type=dict(name="mobileclip_b"),
     temp=1 / 100.0,
     temp_min=1 / 100.0,
     use_streaming_vision_align = False,
@@ -91,10 +88,10 @@ model = dict(
     freeze_mobileclip_text=True,
     open_text_projection=False,
     open_text_lora=False,
-    vision_ckpt_path=hf_hub_download(repo_id=HF_REPO, filename="internvideo2_vision.pt"),
+    vision_ckpt_path=__hf_hub_download(repo_id=model_repo, filename="internvideo2_vision.pt"),
     load_vision_ckpt_from_internvideo2_stage2=False,
-    mobileclip_ckpt_path=hf_hub_download(repo_id=HF_REPO, filename="mobileclip_blt.pt"),
-    extra_ckpt_path=hf_hub_download(repo_id=HF_REPO, filename="internvideo2_clip.pt")
+    mobileclip_ckpt_path=__hf_hub_download(repo_id=model_repo, filename="mobileclip_blt.pt"),
+    extra_ckpt_path=__hf_hub_download(repo_id=model_repo, filename="internvideo2_clip.pt")
 )
 
 criterion = dict(
@@ -139,7 +136,7 @@ device = "cuda"
 mode = "pt"
 
 # ========================= others ==========================
-output_dir = './training_outputs_window/'  # output dir
+output_dir = './train_outputs_pretrain/'  # output dir
 resume = True  # if True, load optimizer and scheduler states as well
 debug = False
 log_freq = 1

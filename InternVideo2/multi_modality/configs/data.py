@@ -24,7 +24,13 @@ available_corpus = dict(
     ),
     slim_kinetics=dict(
         anno_path=f"{root_path}/k600/train/train/kinetics_v2.json",
-        data_root=f"{root_path}/k600/train/train",
+        data_root=f"{root_path}/k600/train/train/",
+        media_type="video",
+        min_caption_length=1
+    ),
+    activitynet_captions=dict(
+        anno_path=f"{root_path}/activitynet/activitynet.json",
+        data_root=f"{root_path}/activitynet/",
         media_type="video",
         min_caption_length=1
     )
