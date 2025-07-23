@@ -4,16 +4,40 @@ import argparse
 import matplotlib.pyplot as plt
 
 def load_metrics(results_path):
+    """Load metrics from a JSON file.
+
+    Args:
+        results_path (str): Path to directory containing metrics.json
+
+    Returns:
+        dict: Loaded metrics data
+    """
     metrics_path = os.path.join(results_path, 'metrics.json')
     with open(metrics_path, 'r') as f:
         return json.load(f)
 
 def load_fps_results(results_path):
+    """Load FPS results from a JSON file.
+
+    Args:
+        results_path (str): Path to directory containing fps_results_spfs.json
+
+    Returns:
+        dict: Loaded FPS results data
+    """
     fps_path = os.path.join(results_path, 'fps_results_spfs.json')
     with open(fps_path, 'r') as f:
         return json.load(f)
 
 def main(results_root):
+    """Main function to generate FPS vs accuracy plot.
+
+    Args:
+        results_root (str): Path to root directory containing experiment subdirectories
+
+    Returns:
+        None: Generates and saves plot files (png/svg)
+    """
     result_dirs = [d for d in os.listdir(results_root)
                    if os.path.isdir(os.path.join(results_root, d))]
 
