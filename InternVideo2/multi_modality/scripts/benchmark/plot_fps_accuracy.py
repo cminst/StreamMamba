@@ -84,7 +84,7 @@ def main(results_root):
             optimal_fps = fps
             optimal_acc = acc
 
-    plt.figure(figsize=(10, 6))
+    plt.figure(figsize=(8, 6))
 
     # Plot all SPFS line (including Dense and Optimal)
     plt.plot(spfs_fps, spfs_acc, 'g-', alpha=0.5, linewidth=2, marker='o', markerfacecolor='green', markersize=4, label='StreamMamba (SPFS)')
@@ -107,7 +107,7 @@ def main(results_root):
 
     plt.axvline(x=30, color='black', linestyle='--', label='Real-time Threshold', alpha=0.4, zorder=8)
 
-    max_fps = max([x[0] for x in data]) + 5
+    max_fps = max([x[0] for x in data]) + 1
 
     xmin_current = plt.xlim()[0]
     plt.xlim(xmin_current, max_fps)
