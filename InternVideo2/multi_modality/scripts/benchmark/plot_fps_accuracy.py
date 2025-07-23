@@ -41,8 +41,9 @@ def main(results_root):
     result_dirs = [d for d in os.listdir(results_root)
                    if os.path.isdir(os.path.join(results_root, d))]
 
-    fps_values = []
-    accuracy_values = []
+    data = []
+    dense_dir = 'results_mamba_spfs_ct_1.0_mcs_8'
+    optimal_dir = 'results_mamba_spfs_ct_0.7_mcs_8'
 
     for dir_name in result_dirs:
         dir_path = os.path.join(results_root, dir_name)
@@ -58,28 +59,54 @@ def main(results_root):
 
         print(f"Directory: {dir_path[16:]}, Average FPS: {avg_fps:.4f}, Accuracy: {accuracy:.4f}")
 
-        fps_values.append(avg_fps)
-        accuracy_values.append(accuracy)
+        is_dense = (dir_name == dense_dir)
+        is_optimal = (dir_name == optimal_dir)
+        data.append( (avg_fps, accuracy, is_dense, is_optimal) )
+
+    # Sort data by FPS
+    data.sort(key=lambda x: x[0])
+
+    # Separate data
+    dense_fps = None
+    dense_acc = None
+    optimal_fps = None
+    optimal_acc = None
+    spfs_fps = []
+    spfs_acc = []
+
+    for fps, acc, is_dense, is_optimal in data:
+        if is_dense:
+            dense_fps = fps
+            dense_acc = acc
+        elif is_optimal:
+            optimal_fps = fps
+            optimal_acc = acc
+        else:
+            spfs_fps.append(fps)
+            spfs_acc.append(acc)
 
     plt.figure(figsize=(10, 6))
-    plt.scatter(fps_values, accuracy_values)
+    # Plot SPFS variants line (excluding Dense and Optimal)
+    plt.plot(spfs_fps, spfs_acc, 'g-', alpha=0.5, linewidth=2, marker='o', markersize=6, label='StreamMamba (SPFS variants)')
+
+    # Plot Dense as magenta star if available
+    if dense_fps is not None and dense_acc is not None:
+        plt.scatter(dense_fps, dense_acc, color='darkviolet', marker='^', s=90, label='StreamMamba (Dense)')
+
+    # Plot Optimal SPFS as green square if available
+    if optimal_fps is not None and optimal_acc is not None:
+        plt.scatter(optimal_fps, optimal_acc, color='green', marker='*', s=180, label='StreamMamba (SPFS optimal)')
+
+    # Plot InternVideo2-B14 baseline
+    plt.scatter(1.4059, 74.67, color='blue', marker='x', s=100, label='InternVideo2-B14')
 
     plt.xlabel('Average FPS')
     plt.ylabel('Accuracy within ±4 frames')
     plt.title('FPS vs Accuracy Tradeoff')
-
-    sorted_indices = sorted(range(len(fps_values)), key=lambda k: fps_values[k])
-    sorted_fps = [fps_values[i] for i in sorted_indices]
-    sorted_accuracy = [accuracy_values[i] for i in sorted_indices]
-
-    plt.plot(sorted_fps, sorted_accuracy, 'g-', alpha=0.5, linewidth=2, marker='o', markersize=6, label='StreamMamba (SPFS)')
-
     plt.grid(True)
+    plt.legend()
     plt.tight_layout()
 
-    # Add InternVideo2-B14 baseline point
-    plt.scatter(1.4059, 74.67, color='blue', marker='x', s=100, label='InternVideo2-B14')
-    plt.legend()
     plt.savefig(os.path.join(results_root, 'fps_accuracy_plot.png'))
     plt.savefig(os.path.join(results_root, 'fps_accuracy_plot.svg'))
     plt.close()
