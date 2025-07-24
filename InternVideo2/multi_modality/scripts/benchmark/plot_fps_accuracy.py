@@ -62,7 +62,7 @@ def main(results_root):
         is_dense = (dir_name == dense_dir)
         is_optimal = (dir_name == optimal_dir)
 
-        if avg_fps > 40:
+        if avg_fps > 40 or '0.75' in dir_name:
             continue
         data.append( (avg_fps, accuracy, is_dense, is_optimal) )
 
@@ -108,9 +108,20 @@ def main(results_root):
     # Plot InternVideo2-B14 baseline
     plt.scatter(1.4059, 74.67, color='blue', marker='x', s=100, label='InternVideo2-B14')
 
+    uniform_points = [
+        data[0],
+        (40.10, 77.33),
+        (56.52, 66.67),
+        (71.43, 77.33),
+        (84.37, 78.67),
+        (96.59, 69.33),
+    ]
+
+    plt.plot([x[0] for x in uniform_points], [x[1] for x in uniform_points], 'red', label = 'Uniform Sampling', marker = 'o', markersize=4)
+
     plt.axvline(x=24, color='black', linestyle='--', label='Real-time Threshold', alpha=0.4, zorder=8)
 
-    max_fps = max([x[0] for x in data]) + 1
+    max_fps = 100#max([x[0] for x in data]) + 1
 
     xmin_current = plt.xlim()[0]
     plt.xlim(xmin_current, max_fps)
