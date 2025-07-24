@@ -420,6 +420,10 @@ def main():
     rnn_type = "mamba_spfs" if use_spfs else "mamba"
     folder_name = f"results_{rnn_type}_ct_{args.confidence_threshold}_mcs_{args.max_consecutive_skips}"
 
+    # Add sampling rate to folder name if using uniform mode
+    if "uniform" in args.mode:
+        folder_name += f"_sr_{args.sampling_rate}"
+
     logits_dir = os.path.join(folder_name, "logits")
     preds_dir = os.path.join(folder_name, "predictions", "act75")
     metrics_file = os.path.join(folder_name, "metrics.json")

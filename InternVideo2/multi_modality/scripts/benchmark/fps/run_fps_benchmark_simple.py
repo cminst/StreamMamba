@@ -110,6 +110,11 @@ def main():
         folder_name = f"results_{rnn_type}_ct_{args.confidence_threshold}_mcs_{args.max_consecutive_skips}"
     else:
         folder_name = f"results_{rnn_type}"
+
+    # Add sampling rate to folder name if using uniform mode
+    if "uniform" in args.mode:
+        folder_name += f"_sr_{args.sampling_rate}"
+
     os.makedirs(folder_name, exist_ok=True)
 
     fps_json_path = os.path.join(folder_name, os.path.basename(args.output_json))
