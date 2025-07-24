@@ -4,36 +4,43 @@ import sys
 import subprocess
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from huggingface_hub import hf_hub_download
 
+
 def ensure_dependencies():
     try:
         import einops  # noqa: F401
     except Exception:
         print("Installing...")
-        subprocess.check_call([
-            sys.executable,
-            "-m",
-            "pip",
-            "install",
-            "-q",
-            "einops",
-            "peft",
-            "open_clip_torch",
-            "protobuf",
-            "sentencepiece",
-            "iv2-utils",
-            "matplotlib",
-            "huggingface_hub",
-        ])
+        subprocess.check_call(
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "-q",
+                "einops",
+                "peft",
+                "open_clip_torch",
+                "protobuf",
+                "sentencepiece",
+                "iv2-utils",
+                "matplotlib",
+                "huggingface_hub",
+            ]
+        )
     print("Installed packages")
 
+
 def parse_args():
-    parser = argparse.ArgumentParser(description="Run streaming benchmarks for a single model")
+    parser = argparse.ArgumentParser(
+        description="Run streaming benchmarks for a single model"
+    )
     parser.add_argument(
         "config_dir",
         help="Path to training config directory, e.g. scripts/pretraining/clip/B14",
@@ -77,17 +84,36 @@ def parse_args():
         help="Maximum number of consecutive frames to skip",
     )
     parser.add_argument(
+        "--mode",
+        default="streammamba_spfs",
+        choices=[
+            "streammamba_dense",
+            "streammamba_uniform",
+            "streammamba_spfs",
+            "streammamba_spfs_uniform",
+        ],
+        help="Streaming configuration variant",
+    )
+    parser.add_argument(
+        "--sampling-rate",
+        type=int,
+        default=2,
+        help="Sampling rate for *_uniform modes",
+    )
+    parser.add_argument(
         "--no-spfs",
         action="store_true",
-        help="Disable SPFS (use plain model)",
+        help="(Deprecated) Disable SPFS; equivalent to --mode streammamba_dense",
     )
     return parser.parse_args()
+
 
 def find_closest(pred, truths):
     """Return the truth value closest to ``pred``."""
     if not truths:
         return pred
     return min(truths, key=lambda x: abs(x - pred))
+
 
 def calculate_mse(preds_with_offset, data):
     """Calculate mean squared error for a list of predictions."""
@@ -99,6 +125,7 @@ def calculate_mse(preds_with_offset, data):
         closest_t = find_closest(p, truth_peaks)
         errors.append((p - closest_t) ** 2)
     return np.mean(errors) if errors else float("inf")
+
 
 def find_best_offset(preds, data, search_range=(-30, 30)):
     """Find the integer offset that minimises MSE."""
@@ -112,9 +139,11 @@ def find_best_offset(preds, data, search_range=(-30, 30)):
             best_offset = off
     return best_offset
 
+
 def offset_predictions(preds, data):
     best = find_best_offset(preds, data)
     return [p + best for p in preds]
+
 
 def compute_accuracy(preds: list[int], dataset: list) -> dict:
     """Return MAE percentages within various frame offsets using global offset."""
@@ -135,6 +164,7 @@ def compute_accuracy(preds: list[int], dataset: list) -> dict:
     percentages = {f"within_{t}": totals[t] * 100.0 / n for t in thresholds}
     percentages["average"] = sum(percentages.values()) / len(thresholds)
     return percentages
+
 
 def retrieve_text_streaming_spfs(
     new_frame,
@@ -173,6 +203,7 @@ def retrieve_text_streaming_spfs(
     ret_texts = [texts[i] for i in idxs.long().cpu().numpy()[0].tolist()]
     return ret_texts, probs.float().cpu().numpy()[0], new_hidden_state, spfs_info
 
+
 def main():
     ensure_dependencies()
     args = parse_args()
@@ -196,21 +227,29 @@ def main():
     config = Config.from_file(config_path)
     config = eval_dict_leaf(config)
 
-    expected_rnn_type = "mamba" if args.no_spfs else "mamba_spfs"
+    if args.no_spfs:
+        args.mode = "streammamba_dense"
+
+    use_spfs = args.mode in ["streammamba_spfs", "streammamba_spfs_uniform"]
+    expected_rnn_type = "mamba_spfs" if use_spfs else "mamba"
     current_rnn_type = config.model.streaming_vision_encoder.rnn_type
 
     if current_rnn_type != expected_rnn_type:
-        print(f"Error: Expected RNN type to be '{expected_rnn_type}', but found '{current_rnn_type}'.")
+        print(
+            f"Error: Expected RNN type to be '{expected_rnn_type}', but found '{current_rnn_type}'."
+        )
         sys.exit(1)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # ---------- Data Preparation ----------
 
-    if "photography-model" not in os.listdir('.'):
-        subprocess.check_call(["git", "clone", "https://github.com/ruo2019/photography-model.git"])
+    if "photography-model" not in os.listdir("."):
+        subprocess.check_call(
+            ["git", "clone", "https://github.com/ruo2019/photography-model.git"]
+        )
 
-    act75_data = json_read('photography-model/data/ACT75.json')
+    act75_data = json_read("photography-model/data/ACT75.json")
 
     # ---------- Model Loading ----------
 
@@ -225,14 +264,16 @@ def main():
     ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
 
     if "model" in ckpt.keys():
-        state_dict = ckpt['model']
+        state_dict = ckpt["model"]
     elif "module" in ckpt.keys():
-        state_dict = ckpt['module']
+        state_dict = ckpt["module"]
     else:
         print("ERROR: Checkpoint state_dict does not contain 'model' or 'module' keys.")
         sys.exit(1)
 
-    missing_keys, unexpected_keys = intern_model.load_state_dict(state_dict, strict=False)
+    missing_keys, unexpected_keys = intern_model.load_state_dict(
+        state_dict, strict=False
+    )
 
     if unexpected_keys:
         print("\nERROR: Unexpected keys in checkpoint state_dict:")
@@ -255,25 +296,36 @@ def main():
 
     logits = preds = []
 
-    size_t = config.get('size_t', 224)
+    size_t = config.get("size_t", 224)
 
     intern_model.to(device)
 
     for video_path, phrase, frames in act75_data:
-        frames = [x for x in _frame_from_video(cv2.VideoCapture('photography-model/' + video_path))]
+        frames = [
+            x
+            for x in _frame_from_video(
+                cv2.VideoCapture("photography-model/" + video_path)
+            )
+        ]
 
         logit_curr = []
         pbar = tqdm(range(7, len(frames)))
 
-        curr_hidden_state = intern_model.streaming_vision_encoder.init_hidden(batch_size=1, device=device)
+        curr_hidden_state = intern_model.streaming_vision_encoder.init_hidden(
+            batch_size=1, device=device
+        )
 
         for frame_idx in range(7):
-            initial_frame_mc = frames2tensor(
-                [frames[frame_idx]],
-                fnum=1,
-                target_size=(size_t, size_t),
-                device=device
-            ).squeeze(0).to(device)
+            initial_frame_mc = (
+                frames2tensor(
+                    [frames[frame_idx]],
+                    fnum=1,
+                    target_size=(size_t, size_t),
+                    device=device,
+                )
+                .squeeze(0)
+                .to(device)
+            )
 
             _, curr_hidden_state, _ = intern_model.streaming_vision_encoder(
                 initial_frame_mc,
@@ -283,22 +335,80 @@ def main():
             )
             logit_curr.append(0.0)
 
-        for j in pbar:
-            _, probs, curr_hidden_state, _ = retrieve_text_streaming_spfs(
-                frames[j],
-                [phrase],
-                intern_model,
-                curr_hidden_state,
-                topk=1,
-                config=config,
-                device=device,
-                confidence_threshold=args.confidence_threshold,
-                max_consecutive_skips=(0 if args.no_spfs else args.max_consecutive_skips),
-                frames2tensor_func=frames2tensor,
-            )
-            logit_curr.append(probs.item())
-            if len(logit_curr) > 0:
-                pbar.set_description(str(np.argmax(logit_curr) + 1))
+        if args.mode == "streammamba_uniform":
+            processed = list(range(7, len(frames), args.sampling_rate))
+            if (len(frames) - 1) not in processed:
+                processed.append(len(frames) - 1)
+
+            feats = [None] * len(frames)
+            prev_idx = 6
+            prev_feat = None
+            for idx in processed:
+                frame_tensor = frames2tensor(
+                    [frames[idx]],
+                    fnum=1,
+                    target_size=(size_t, size_t),
+                    device=device,
+                ).squeeze(0)
+                vfeat, curr_hidden_state, _ = intern_model.encode_streaming_vision(
+                    frame_tensor,
+                    curr_hidden_state,
+                    confidence_threshold=1.0,
+                    max_consecutive_skips=0,
+                )
+                feats[idx] = vfeat.squeeze(0)
+                if prev_feat is not None:
+                    gap = idx - prev_idx
+                    if gap > 1:
+                        for k in range(1, gap):
+                            alpha = k / gap
+                            feats[prev_idx + k] = (
+                                prev_feat * (1 - alpha) + feats[idx] * alpha
+                            )
+                prev_feat = feats[idx]
+                prev_idx = idx
+
+            text_feat = intern_model.get_txt_feat(phrase)
+            for j in pbar:
+                vfeat = feats[j].unsqueeze(0)
+                probs, _ = intern_model.predict_label(vfeat, text_feat, top=1)
+                logit_curr.append(probs.item())
+                if len(logit_curr) > 0:
+                    pbar.set_description(str(np.argmax(logit_curr) + 1))
+        else:
+            for j in pbar:
+                force_skip = (
+                    args.mode == "streammamba_spfs_uniform"
+                    and (j - 7) % args.sampling_rate == 0
+                )
+                threshold = (
+                    -1e6
+                    if force_skip
+                    else (
+                        args.confidence_threshold
+                        if args.mode == "streammamba_spfs"
+                        else 1.0
+                    )
+                )
+                max_skip = (
+                    1 if force_skip else (args.max_consecutive_skips if use_spfs else 0)
+                )
+
+                _, probs, curr_hidden_state, _ = retrieve_text_streaming_spfs(
+                    frames[j],
+                    [phrase],
+                    intern_model,
+                    curr_hidden_state,
+                    topk=1,
+                    config=config,
+                    device=device,
+                    confidence_threshold=threshold,
+                    max_consecutive_skips=max_skip,
+                    frames2tensor_func=frames2tensor,
+                )
+                logit_curr.append(probs.item())
+                if len(logit_curr) > 0:
+                    pbar.set_description(str(np.argmax(logit_curr) + 1))
 
         preds.append(np.argmax(logit_curr) + 1)
         logits.append(list(zip(logit_curr, range(1, len(logit_curr) + 1))))
@@ -307,8 +417,7 @@ def main():
 
     reformatted_logits = [[(float(l[0]), l[1]) for l in x] for x in logits]
 
-    # Determine RNN type
-    rnn_type = "mamba_spfs" if not args.no_spfs else "mamba"
+    rnn_type = "mamba_spfs" if use_spfs else "mamba"
     folder_name = f"results_{rnn_type}_ct_{args.confidence_threshold}_mcs_{args.max_consecutive_skips}"
 
     logits_dir = os.path.join(folder_name, "logits")
@@ -326,11 +435,11 @@ def main():
     run_details = {
         "confidence_threshold": args.confidence_threshold,
         "max_consecutive_skips": args.max_consecutive_skips,
-        "no_spfs": args.no_spfs,
+        "mode": args.mode,
         "rnn_type": rnn_type,
         "model_config_path": args.config_dir,
         "command": " ".join(sys.argv),
-        "performance": metrics
+        "performance": metrics,
     }
     json_write(run_details, metrics_file)
 
@@ -338,6 +447,7 @@ def main():
     print(f"Saved logits to {os.path.join(logits_dir, 'act75.json')}")
     print(f"Saved MAE metrics to {metrics_file}")
     print(f"Average MAE accuracy: {metrics['average']:.2f}")
+
 
 if __name__ == "__main__":
     main()
