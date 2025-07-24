@@ -99,9 +99,9 @@ image = (
         # "" # <-- Todo: PREPARE DATASET
     )
     .run_commands(
-        "huggingface-cli download OpenGVLab/InternVideo2_distillation_models stage1/B14/B14_dist_1B_stage2/pytorch_model.bin --local-dir /root/IV2/models",
-        "huggingface-cli download OpenGVLab/InternVideo2_distillation_models clip/B14/pytorch_model.bin --local-dir /root/IV2/models",
-        "curl -L https://docs-assets.developer.apple.com/ml-research/datasets/mobileclip/mobileclip_blt.pt -o /root/IV2/models/mobileclip_blt.pt"
+        "huggingface-cli download OpenGVLab/InternVideo2_distillation_models stage1/B14/B14_dist_1B_stage2/pytorch_model.bin --local-dir /root/StreamMamba/models",
+        "huggingface-cli download OpenGVLab/InternVideo2_distillation_models clip/B14/pytorch_model.bin --local-dir /root/StreamMamba/models",
+        "curl -L https://docs-assets.developer.apple.com/ml-research/datasets/mobileclip/mobileclip_blt.pt -o /root/StreamMamba/models/mobileclip_blt.pt"
     )
 )
 
