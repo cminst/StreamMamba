@@ -61,6 +61,9 @@ def main(results_root):
 
         is_dense = (dir_name == dense_dir)
         is_optimal = (dir_name == optimal_dir)
+
+        if avg_fps > 40:
+            continue
         data.append( (avg_fps, accuracy, is_dense, is_optimal) )
 
     # Sort data by FPS
@@ -105,13 +108,13 @@ def main(results_root):
     # Plot InternVideo2-B14 baseline
     plt.scatter(1.4059, 74.67, color='blue', marker='x', s=100, label='InternVideo2-B14')
 
-    plt.axvline(x=30, color='black', linestyle='--', label='Real-time Threshold', alpha=0.4, zorder=8)
+    plt.axvline(x=24, color='black', linestyle='--', label='Real-time Threshold', alpha=0.4, zorder=8)
 
     max_fps = max([x[0] for x in data]) + 1
 
     xmin_current = plt.xlim()[0]
     plt.xlim(xmin_current, max_fps)
-    plt.axvspan(xmin=30, xmax=max_fps, color='lightgreen', alpha=0.1, zorder=8)
+    plt.axvspan(xmin=24, xmax=max_fps, color='lightgreen', alpha=0.1, zorder=8)
 
     plt.xlabel('Average FPS')
     plt.ylabel('Accuracy within ±4 frames')
