@@ -3,11 +3,11 @@ import logging
 import torch
 from torch import nn
 
-from .backbones.internvideo2 import pretrain_internvideo2_1b_patch14_224, pretrain_internvideo2_6b_patch14_224, internvl_clip_6b
+from .backbones.internvideo2 import pretrain_internvideo2_1b_patch14_224, pretrain_internvideo2_6b_patch14_224
 from .backbones.bert.builder import build_bert
 from .criterions import MLMLoss, VTC_VTM_Loss, new_UTA_Loss
 from .mask import (
-    TubeMaskingGenerator, 
+    TubeMaskingGenerator,
     RandomMaskingGenerator
 )
 
@@ -47,7 +47,7 @@ class InternVideo2_Stage2(nn.Module):
         self.loss_weight = config.criterion.loss_weight
         self.criterion_uta = new_UTA_Loss(
             config.criterion.distill_final_features,
-            config.criterion.clip_loss_ratio, 
+            config.criterion.clip_loss_ratio,
         )
         self.criterion_vtc_vtm = VTC_VTM_Loss(config.criterion.vtm_hard_neg)
         self.criterion_mlm = MLMLoss(config.criterion.mlm_masking_prob, tokenizer)
@@ -63,7 +63,7 @@ class InternVideo2_Stage2(nn.Module):
         """freeze text encoder"""
         for p in self.text_encoder.parameters():
             p.requires_grad = False
-            
+
     def no_weight_decay(self):
         ret = {"temp"}
         ret.update(
@@ -78,7 +78,7 @@ class InternVideo2_Stage2(nn.Module):
     @property
     def dtype(self):
         return self.vision_encoder.patch_embed.proj.weight.dtype
-    
+
     def forward(self, image, text, idx, media_type='image'):
         """forward and calculate loss.
 
@@ -87,10 +87,10 @@ class InternVideo2_Stage2(nn.Module):
             text (dict)
             idx (torch.Tensor)
             media_type: str
-        Returns: 
+        Returns:
 
         """
-        
+
         self.clip_contrastive_temperature()
         T = image.shape[1]
         use_image = True if T == 1 else False
@@ -178,20 +178,20 @@ class InternVideo2_Stage2(nn.Module):
                 return None, None, None
             else:
                 raise NotImplementedError
-            
+
             mask = mask.view(B, -1).to(torch.bool)
             mask = torch.cat((torch.zeros(B, 1).to(mask.device), mask), dim=1)
             mask = mask.to(torch.bool)
 
             return mask, None, None
-        
+
         if self.clip_teacher is None or self.loss_weight.uta == 0:
             return None, None, None
 
         if H != self.clip_img_size:
             image = torch.nn.functional.interpolate(
-                image.reshape(B, C*T, H, W), 
-                size=(self.clip_img_size, self.clip_img_size), 
+                image.reshape(B, C*T, H, W),
+                size=(self.clip_img_size, self.clip_img_size),
                 mode='bicubic', align_corners=False
             )
             image = image.view(B, C, T, self.clip_img_size, self.clip_img_size)
@@ -214,7 +214,7 @@ class InternVideo2_Stage2(nn.Module):
                 mask[pos1, pos2] = 0
             else:
                 raise NotImplementedError
-            
+
             mask = mask.view(B, -1).to(torch.bool)
             mask = torch.cat((torch.zeros(B, 1), mask), dim=1)
             mask = mask.to(torch.bool)
@@ -228,7 +228,7 @@ class InternVideo2_Stage2(nn.Module):
             else:
                 clip_mask = mask
                 targets_clip_middle_vis = norm_clip_middle[~clip_mask].reshape(B, -1, C_CLIP)
-                
+
             targets_clip_final_vis = norm_clip_final # only one tokens
 
         return mask, targets_clip_middle_vis, targets_clip_final_vis
@@ -247,7 +247,7 @@ class InternVideo2_Stage2(nn.Module):
             - clip_output (torch.Tensor): The features of clip. Shape: [K,B,N,C].
 
         """
-        
+
         T = image.shape[1]
         use_image = True if T == 1 else False
         image = image.permute(0, 2, 1, 3, 4) # [B,T,C,H,W] -> [B,C,T,H,W]
@@ -258,7 +258,7 @@ class InternVideo2_Stage2(nn.Module):
                 image, None, use_image)
             return vision_embeds, pooled_vision_embeds
         else:
-            mask, targets_clip_middle_vis, targets_clip_final_vis = self.encode_teacher(image) 
+            mask, targets_clip_middle_vis, targets_clip_final_vis = self.encode_teacher(image)
             # if mask is not None and (self.video_mask_type != 'tube' or self.image_mask_type != 'tube'):
             #     keep_temporal = False
             # print(f"\033[31mmask is {type(mask)}\033[0m")
@@ -333,7 +333,7 @@ class InternVideo2_Stage2(nn.Module):
         self.image_mask_type = self.config.model.vision_encoder.image_mask_type
         self.image_window_size = (1, img_size // patch_size, img_size // patch_size)
         self.image_mask_ratio = self.config.model.vision_encoder.image_mask_ratio
-        
+
         return vision_encoder
 
     def build_text_encoder(self):
