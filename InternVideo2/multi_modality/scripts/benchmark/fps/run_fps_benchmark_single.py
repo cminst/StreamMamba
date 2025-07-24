@@ -38,11 +38,7 @@ def parse_args():
         "config_dir",
         help="Path to training config directory, e.g. scripts/pretraining/clip/B14",
     )
-    parser.add_argument(
-        "--config-name",
-        default="delta",
-        help="Configuration name",
-    )
+    
     parser.add_argument(
         "--checkpoint",
         default=None,

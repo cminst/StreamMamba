@@ -38,11 +38,7 @@ def parse_args():
         "config_dir",
         help="Path to training config directory, e.g. scripts/pretraining/clip/B14",
     )
-    parser.add_argument(
-        "--config-name",
-        default="delta",
-        help="Configuration name",
-    )
+
     parser.add_argument(
         "--output-graph",
         default="accuracy_graph_single.png",
@@ -206,8 +202,6 @@ def main():
     if current_rnn_type != expected_rnn_type:
         print(f"Error: Expected RNN type to be '{expected_rnn_type}', but found '{current_rnn_type}'.")
         sys.exit(1)
-
-    config.model.text_ckpt_path = config.model.mobileclip_ckpt_path
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 

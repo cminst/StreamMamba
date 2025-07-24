@@ -40,11 +40,7 @@ def parse_args():
         "config_dir",
         help="Path to training config directory, e.g. scripts/pretraining/clip/B14",
     )
-    parser.add_argument(
-        "--config-name",
-        default="delta",
-        help="Configuration name",
-    )
+
     parser.add_argument(
         "--branch",
         default=None,
@@ -162,9 +158,6 @@ def main():
 
     config = Config.from_file(os.path.join(args.config_dir, "config.py"))
     config = eval_dict_leaf(config)
-
-    if "delta" not in args.config_name:
-        config.model.text_ckpt_path = config.model.mobileclip_ckpt_path
 
     streaming_vit_paths = find_streaming_checkpoints(args.config_dir, model_name)
 

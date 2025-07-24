@@ -33,11 +33,7 @@ def parse_args():
         "config_dir",
         help="Path to training config directory, e.g. scripts/pretraining/clip/B14",
     )
-    parser.add_argument(
-        "--config-name",
-        default="delta",
-        help="Configuration name",
-    )
+    
     parser.add_argument(
         "--checkpoint",
         default=None,
@@ -110,7 +106,9 @@ def main():
     config = Config.from_file(os.path.join(args.config_dir, "config.py"))
     config = eval_dict_leaf(config)
 
+    # Set rnn_type dynamically
     config.model.streaming_vision_encoder.rnn_type = rnn_type
+    config.model.text_ckpt_path = config.model.mobileclip_ckpt_path
 
     intern_model = InternVideo2_CLIP_small(config)
     intern_model.to(device)
