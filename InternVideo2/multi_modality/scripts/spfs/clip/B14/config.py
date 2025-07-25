@@ -77,7 +77,7 @@ model = dict(
         fc_hidden_layers=[768],
         teacher_clip_embed_dim=768,
         text_embed_dim=512,
-        pred_rank=64, # or None for a full linear layer
+        pred_rank=None, # or None for a full linear layer
     ),
     mobileclip_type=dict(name='mobileclip_b'),
     temp=1 / 100.0,
