@@ -158,7 +158,11 @@ class StreamMamba(nn.Module):
         else:
             frame_feature, _ = self.vit_lite.extract_features(single_frame_input)
 
-        if self.rnn_type in ['mamba', 'mamba_spfs', 'lstm']:
+        if self.rnn_type in ['lstm', 'gru']:
+            frame_feature = frame_feature.unsqueeze(1)
+            student_embedding, current_hidden_state = self.rnn(frame_feature, prev_hidden_state)
+            student_embedding = student_embedding.squeeze(1)
+        elif self.rnn_type in ['mamba', 'mamba_spfs']:
             student_embedding, current_hidden_state = self.rnn(frame_feature, prev_hidden_state)
         elif self.rnn_type == 'cross_mamba_film':
             student_embedding, current_hidden_state = self.rnn(frame_feature, prev_hidden_state, gamma, beta)
