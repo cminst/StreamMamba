@@ -169,4 +169,7 @@ class StreamMamba(nn.Module):
         else:
             raise NotImplementedError("Assuming Mamba for this review.")
 
+        if self.rnn_type in ['lstm', 'gru']:
+            student_embedding = self.output_fc(student_embedding)
+
         return student_embedding, current_hidden_state, spfs_info
