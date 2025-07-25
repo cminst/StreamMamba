@@ -156,7 +156,15 @@ def main():
         ckpt_path = hf_hub_download(repo_id=args.hf_repo, filename=args.checkpoint_file)
 
     ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
-    state_dict = ckpt["model"] if "model" in ckpt else ckpt
+
+    if "model" in ckpt.keys():
+        state_dict = ckpt["model"]
+    elif "module" in ckpt.keys():
+        state_dict = ckpt["module"]
+    else:
+        print("ERROR: Checkpoint state_dict does not contain 'model' or 'module' keys.")
+        sys.exit(1)
+
     missing_keys, unexpected_keys = intern_model.load_state_dict(
         state_dict, strict=False
     )
