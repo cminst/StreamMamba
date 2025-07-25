@@ -128,7 +128,7 @@ gradient_checkpointing = True
 # =================== spfs hyperparams =====================
 
 lambda_calib = 1.0
-lambda_skip = 0.1
+lambda_skip = 0.0
 calibration_loss_fn = 'mse' # or 'bce'
 
 # ========================= wandb ==========================
