@@ -78,6 +78,7 @@ def parse_args():
             "streammamba_uniform",
             "streammamba_spfs",
             "streammamba_spfs_uniform",
+            "lstm",
         ],
         help="Streaming configuration variant",
     )
@@ -99,11 +100,16 @@ def main():
     ensure_dependencies()
     args = parse_args()
 
-    if args.no_spfs:
+    if args.no_spfs and args.mode != "lstm":
         args.mode = "streammamba_dense"
 
-    use_spfs = args.mode in ["streammamba_spfs", "streammamba_spfs_uniform"]
-    rnn_type = "mamba_spfs" if use_spfs else "mamba"
+    if args.mode == "lstm":
+        use_spfs = False
+        rnn_type = "lstm"
+        args.checkpoint_file = "lstm_ckpt.pt"
+    else:
+        use_spfs = args.mode in ["streammamba_spfs", "streammamba_spfs_uniform"]
+        rnn_type = "mamba_spfs" if use_spfs else "mamba"
     print(f"Running in {args.mode} mode.")
 
     if use_spfs:
@@ -227,7 +233,7 @@ def main():
                 torch.cuda.synchronize()
             start = time.time()
 
-            if args.mode in ["streammamba_dense", "streammamba_uniform"]:
+            if args.mode in ["streammamba_dense", "streammamba_uniform", "lstm"]:
                 _, hidden, _ = intern_model.encode_streaming_vision(
                     tensor,
                     hidden,

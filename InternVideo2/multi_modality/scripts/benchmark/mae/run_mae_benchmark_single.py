@@ -91,6 +91,7 @@ def parse_args():
             "streammamba_uniform",
             "streammamba_spfs",
             "streammamba_spfs_uniform",
+            "lstm",
         ],
         help="Streaming configuration variant",
     )
@@ -227,18 +228,23 @@ def main():
     config = Config.from_file(config_path)
     config = eval_dict_leaf(config)
 
-    if args.no_spfs:
+    if args.no_spfs and args.mode != "lstm":
         args.mode = "streammamba_dense"
 
-    use_spfs = args.mode in ["streammamba_spfs", "streammamba_spfs_uniform"]
-    expected_rnn_type = "mamba_spfs" if use_spfs else "mamba"
+    if args.mode == "lstm":
+        use_spfs = False
+        expected_rnn_type = "lstm"
+        args.checkpoint_file = "lstm_ckpt.pt"
+    else:
+        use_spfs = args.mode in ["streammamba_spfs", "streammamba_spfs_uniform"]
+        expected_rnn_type = "mamba_spfs" if use_spfs else "mamba"
     current_rnn_type = config.model.streaming_vision_encoder.rnn_type
 
     if current_rnn_type != expected_rnn_type:
         print(
-            f"Error: Expected RNN type to be '{expected_rnn_type}', but found '{current_rnn_type}'."
+            f"Warning: Overriding RNN type from '{current_rnn_type}' to '{expected_rnn_type}'."
         )
-        sys.exit(1)
+        config.model.streaming_vision_encoder.rnn_type = expected_rnn_type
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -419,7 +425,7 @@ def main():
 
     reformatted_logits = [[(float(l[0]), l[1]) for l in x] for x in logits]
 
-    rnn_type = "mamba_spfs" if use_spfs else "mamba"
+    rnn_type = "lstm" if args.mode == "lstm" else ("mamba_spfs" if use_spfs else "mamba")
     folder_name = f"results_{rnn_type}_ct_{args.confidence_threshold}_mcs_{args.max_consecutive_skips}"
 
     # Add sampling rate to folder name if using uniform mode
