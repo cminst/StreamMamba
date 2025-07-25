@@ -275,9 +275,9 @@ def train(
         # Save checkpoint
         global_iter = global_step // step_count
 
-        # Run test inference on test video every 100 iterations
-        if is_main_process() and test_frames is not None and global_iter % 100 == 0 and global_iter > 0:
-            run_test_inference(model_without_ddp, test_frames, device, global_iter, data_type)
+        # # Run test inference on test video every 100 iterations
+        # if is_main_process() and test_frames is not None and global_iter % 100 == 0 and global_iter > 0:
+        #     run_test_inference(model_without_ddp, test_frames, device, global_iter, data_type)
 
         if is_main_process() and config.get("save_iter", False) and global_iter % config.save_iter == 0:
             state_dict = model_without_ddp.state_dict()
