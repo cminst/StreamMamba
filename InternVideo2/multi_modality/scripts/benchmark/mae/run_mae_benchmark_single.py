@@ -359,7 +359,7 @@ def main():
                 if force_skip
                 else (
                     args.confidence_threshold
-                    if args.mode == "streammamba_spfs"
+                    if use_spfs
                     else 1.0
                 )
             )
