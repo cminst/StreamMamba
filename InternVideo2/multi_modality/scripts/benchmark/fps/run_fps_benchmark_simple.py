@@ -125,6 +125,19 @@ def main():
     if "uniform" in args.mode:
         folder_name += f"_sr_{args.sampling_rate}"
 
+    # Determine root folder based on mode
+    if args.mode == "streammamba_reuse":
+        root_folder = "results_reuse"
+    elif args.mode == "streammamba_spfs_uniform":
+        root_folder = "results_uniform"
+    else:
+        root_folder = "results"
+
+    folder_path = os.path.join(root_folder, folder_name)
+    os.makedirs(folder_path, exist_ok=True)
+
+    fps_json_path = os.path.join(folder_path, os.path.basename(args.output_json))
+
     os.makedirs(folder_name, exist_ok=True)
 
     fps_json_path = os.path.join(folder_name, os.path.basename(args.output_json))

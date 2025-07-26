@@ -10,7 +10,6 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from huggingface_hub import hf_hub_download
 
-
 def ensure_dependencies():
     try:
         import einops  # noqa: F401
@@ -33,7 +32,6 @@ def ensure_dependencies():
             ]
         )
     print("Installed packages")
-
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -106,7 +104,6 @@ def parse_args():
     )
     return parser.parse_args()
 
-
 def main():
     ensure_dependencies()
     args = parse_args()
@@ -137,10 +134,19 @@ def main():
     if "uniform" in args.mode:
         folder_name += f"_sr_{args.sampling_rate}"
 
-    os.makedirs(folder_name, exist_ok=True)
+    # Determine root folder based on mode
+    if args.mode == "streammamba_reuse":
+        root_folder = "results_reuse"
+    elif args.mode == "streammamba_spfs_uniform":
+        root_folder = "results_uniform"
+    else:
+        root_folder = "results"
 
-    fps_json_path = os.path.join(folder_name, os.path.basename(args.output_json))
-    fps_graph_path = os.path.join(folder_name, os.path.basename(args.output_graph))
+    folder_path = os.path.join(root_folder, folder_name)
+    os.makedirs(folder_path, exist_ok=True)
+
+    fps_json_path = os.path.join(folder_path, os.path.basename(args.output_json))
+    fps_graph_path = os.path.join(folder_path, os.path.basename(args.output_graph))
 
     sys.path.append(os.getcwd())
 
@@ -340,7 +346,6 @@ def main():
     print(f"Total frames skipped: {total_skipped_frames}")
     print(f"Percentage of frames skipped: {skip_percentage:.2f}%")
     print(f"Average FPS: {avg_fps:.2f}")
-
 
 if __name__ == "__main__":
     main()

@@ -11,7 +11,6 @@ import numpy as np
 import torch
 from huggingface_hub import hf_hub_download
 
-
 def ensure_dependencies():
     try:
         import einops  # noqa: F401
@@ -35,7 +34,6 @@ def ensure_dependencies():
             ]
         )
     print("Installed packages")
-
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -108,13 +106,11 @@ def parse_args():
     )
     return parser.parse_args()
 
-
 def find_closest(pred, truths):
     """Return the truth value closest to ``pred``."""
     if not truths:
         return pred
     return min(truths, key=lambda x: abs(x - pred))
-
 
 def calculate_mse(preds_with_offset, data):
     """Calculate mean squared error for a list of predictions."""
@@ -126,7 +122,6 @@ def calculate_mse(preds_with_offset, data):
         closest_t = find_closest(p, truth_peaks)
         errors.append((p - closest_t) ** 2)
     return np.mean(errors) if errors else float("inf")
-
 
 def find_best_offset(preds, data, search_range=(-30, 30)):
     """Find the integer offset that minimises MSE."""
@@ -140,11 +135,9 @@ def find_best_offset(preds, data, search_range=(-30, 30)):
             best_offset = off
     return best_offset
 
-
 def offset_predictions(preds, data):
     best = find_best_offset(preds, data)
     return [p + best for p in preds]
-
 
 def compute_accuracy(preds: list[int], dataset: list) -> dict:
     """Return MAE percentages within various frame offsets using global offset."""
@@ -165,7 +158,6 @@ def compute_accuracy(preds: list[int], dataset: list) -> dict:
     percentages = {f"within_{t}": totals[t] * 100.0 / n for t in thresholds}
     percentages["average"] = sum(percentages.values()) / len(thresholds)
     return percentages
-
 
 def retrieve_text_streaming_spfs(
     new_frame,
@@ -205,7 +197,6 @@ def retrieve_text_streaming_spfs(
 
     ret_texts = [texts[i] for i in idxs.long().cpu().numpy()[0].tolist()]
     return ret_texts, probs.float().cpu().numpy()[0], new_hidden_state, spfs_info
-
 
 def main():
     ensure_dependencies()
@@ -391,8 +382,15 @@ def main():
 
     reformatted_logits = [[(float(l[0]), l[1]) for l in x] for x in logits]
 
+    if args.mode == "streammamba_reuse":
+        root_folder = "results_reuse"
+    elif args.mode == "streammamba_spfs_uniform":
+        root_folder = "results_uniform"
+    else:
+        root_folder = "results"
+
     rnn_type = "lstm" if args.mode == "lstm" else ("mamba_spfs" if use_spfs else "mamba")
-    folder_name = f"results_{rnn_type}_ct_{args.confidence_threshold}_mcs_{args.max_consecutive_skips}"
+    folder_name = f"{root_folder}/{rnn_type}_ct_{args.confidence_threshold}_mcs_{args.max_consecutive_skips}"
 
     # Add sampling rate to folder name if using uniform mode
     if "uniform" in args.mode:
@@ -425,7 +423,6 @@ def main():
     print(f"Saved logits to {os.path.join(logits_dir, 'act75.json')}")
     print(f"Saved MAE metrics to {metrics_file}")
     print(f"Average MAE accuracy: {metrics['average']:.2f}")
-
 
 if __name__ == "__main__":
     main()
