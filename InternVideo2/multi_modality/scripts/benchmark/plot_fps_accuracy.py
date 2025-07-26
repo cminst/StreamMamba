@@ -62,7 +62,7 @@ def main(results_root):
         is_dense = (dir_name == dense_dir)
         is_optimal = (dir_name == optimal_dir)
 
-        if avg_fps > 40 or '0.75' in dir_name:
+        if avg_fps > 40:
             continue
         data.append( (avg_fps, accuracy, is_dense, is_optimal) )
 
@@ -94,7 +94,7 @@ def main(results_root):
 
     # Plot Dense StreamMamba as filled circle
     if dense_fps is not None and dense_acc is not None:
-        plt.scatter(dense_fps, dense_acc, color='blueviolet', marker='D', facecolor='blueviolet', s=45, label='StreamMamba (Dense)', zorder=9)
+        plt.scatter(dense_fps, dense_acc, color='blueviolet', marker='D', facecolor='blueviolet', s=60, label='StreamMamba (Dense)', zorder=9)
 
     # Plot Optimal SPFS with visual separation
     if optimal_fps is not None and optimal_acc is not None:
@@ -108,24 +108,16 @@ def main(results_root):
     # Plot InternVideo2-B14 baseline
     plt.scatter(1.4059, 74.67, color='blue', marker='x', s=100, label='InternVideo2-B14')
 
-    uniform_points = [
-        data[0],
-        (40.10, 77.33),
-        (56.52, 66.67),
-        (71.43, 77.33),
-        (84.37, 78.67),
-        (96.59, 69.33),
-    ]
+    # Plot streaming LSTM-based model
+    plt.scatter(21.3665, 72.00, color='red', marker='^', s=120, label='Streaming LSTM (Dense)')
 
-    plt.plot([x[0] for x in uniform_points], [x[1] for x in uniform_points], 'red', label = 'Uniform Sampling', marker = 'o', markersize=4)
+    plt.axvline(x=30, color='black', linestyle='--', label='Real-time Threshold', alpha=0.4, zorder=8)
 
-    plt.axvline(x=24, color='black', linestyle='--', label='Real-time Threshold', alpha=0.4, zorder=8)
-
-    max_fps = 100#max([x[0] for x in data]) + 1
+    max_fps = max([x[0] for x in data]) + 1
 
     xmin_current = plt.xlim()[0]
     plt.xlim(xmin_current, max_fps)
-    plt.axvspan(xmin=24, xmax=max_fps, color='lightgreen', alpha=0.1, zorder=8)
+    plt.axvspan(xmin=30, xmax=max_fps, color='lightgreen', alpha=0.1, zorder=8)
 
     plt.xlabel('Average FPS')
     plt.ylabel('Accuracy within ±4 frames')
