@@ -86,9 +86,9 @@ def parse_args():
         default="streammamba_spfs",
         choices=[
             "streammamba_dense",
-            "streammamba_uniform",
             "streammamba_spfs",
             "streammamba_spfs_uniform",
+            "streammamba_reuse",
             "lstm",
         ],
         help="Streaming configuration variant",
@@ -119,7 +119,11 @@ def main():
         rnn_type = "lstm"
         args.checkpoint_file = "lstm_ckpt.pt"
     else:
-        use_spfs = args.mode in ["streammamba_spfs", "streammamba_spfs_uniform"]
+        use_spfs = args.mode in [
+            "streammamba_spfs",
+            "streammamba_spfs_uniform",
+            "streammamba_reuse",
+        ]
         rnn_type = "mamba_spfs" if use_spfs else "mamba"
     print(f"Running in {args.mode} mode.")
 
@@ -238,15 +242,9 @@ def main():
 
         # Process remaining frames
         for idx, f in enumerate(frames[7:], start=7):
-            process = True
             force_skip = False
-            if args.mode == "streammamba_uniform":
-                process = (idx - 7) % args.sampling_rate == 0 or idx == len(frames) - 1
             if args.mode == "streammamba_spfs_uniform":
                 force_skip = (idx - 7) % args.sampling_rate == 0
-
-            if not process and args.mode == "streammamba_uniform":
-                continue
 
             tensor = frames2tensor(
                 [f], fnum=1, target_size=(size_t, size_t), device=device
@@ -255,7 +253,7 @@ def main():
                 torch.cuda.synchronize()
             start = time.time()
 
-            if args.mode in ["streammamba_dense", "streammamba_uniform", "lstm"]:
+            if args.mode in ["streammamba_dense", "lstm"]:
                 _, hidden, _ = intern_model.encode_streaming_vision(
                     tensor,
                     hidden,
@@ -268,6 +266,16 @@ def main():
                     hidden,
                     confidence_threshold=args.confidence_threshold,
                     max_consecutive_skips=args.max_consecutive_skips,
+                )
+                if spfs_info.skipped:
+                    skipped_frames += 1
+            elif args.mode == "streammamba_reuse":
+                _, hidden, spfs_info = intern_model.encode_streaming_vision(
+                    tensor,
+                    hidden,
+                    confidence_threshold=args.confidence_threshold,
+                    max_consecutive_skips=args.max_consecutive_skips,
+                    reuse_state_on_skip=True,
                 )
                 if spfs_info.skipped:
                     skipped_frames += 1
