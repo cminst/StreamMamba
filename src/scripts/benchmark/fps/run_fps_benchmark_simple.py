@@ -77,7 +77,7 @@ def parse_args():
             "streammamba_dense",
             "streammamba_spfs",
             "streammamba_spfs_uniform",
-            "streammamba_reuse",
+            "streammamba_skip",
             "lstm",
         ],
         help="Streaming configuration variant",
@@ -111,7 +111,7 @@ def main():
         use_spfs = args.mode in [
             "streammamba_spfs",
             "streammamba_spfs_uniform",
-            "streammamba_reuse",
+            "streammamba_skip",
         ]
         rnn_type = "mamba_spfs" if use_spfs else "mamba"
     print(f"Running in {args.mode} mode.")
@@ -126,8 +126,8 @@ def main():
         folder_name += f"_sr_{args.sampling_rate}"
 
     # Determine root folder based on mode
-    if args.mode == "streammamba_reuse":
-        root_folder = "results_reuse"
+    if args.mode == "streammamba_skip":
+        root_folder = "results_skip"
     elif args.mode == "streammamba_spfs_uniform":
         root_folder = "results_uniform"
     else:
@@ -269,7 +269,7 @@ def main():
                 )
                 if spfs_info.skipped:
                     skipped_frames += 1
-            elif args.mode == "streammamba_reuse":
+            elif args.mode == "streammamba_skip":
                 _, hidden, spfs_info = intern_model.encode_streaming_vision(
                     tensor,
                     hidden,

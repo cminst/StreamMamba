@@ -88,7 +88,7 @@ def parse_args():
             "streammamba_dense",
             "streammamba_spfs",
             "streammamba_spfs_uniform",
-            "streammamba_reuse",
+            "streammamba_skip",
             "lstm",
         ],
         help="Streaming configuration variant",
@@ -232,7 +232,7 @@ def main():
         use_spfs = args.mode in [
             "streammamba_spfs",
             "streammamba_spfs_uniform",
-            "streammamba_reuse",
+            "streammamba_skip",
         ]
         expected_rnn_type = "mamba_spfs" if use_spfs else "mamba"
     current_rnn_type = config.model.streaming_vision_encoder.rnn_type
@@ -371,7 +371,7 @@ def main():
                 device=device,
                 confidence_threshold=threshold,
                 max_consecutive_skips=max_skip,
-                reuse_state_on_skip=(args.mode == "streammamba_reuse"),
+                reuse_state_on_skip=(args.mode == "streammamba_skip"),
                 frames2tensor_func=frames2tensor,
             )
             logit_curr.append(probs.item())
@@ -385,8 +385,8 @@ def main():
 
     reformatted_logits = [[(float(l[0]), l[1]) for l in x] for x in logits]
 
-    if args.mode == "streammamba_reuse":
-        root_folder = "results_reuse"
+    if args.mode == "streammamba_skip":
+        root_folder = "results_skip"
     elif args.mode == "streammamba_spfs_uniform":
         root_folder = "results_uniform"
     else:
