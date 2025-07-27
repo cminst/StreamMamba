@@ -42,7 +42,7 @@ def parse_args():
     )
     parser.add_argument(
         "--output-json",
-        default="results_average/average_embedding_results.json",
+        default="average_embedding_results.json",
         help="Path to output JSON file",
     )
     parser.add_argument(
@@ -86,7 +86,11 @@ def streammamba_embedding(frames, model, device, size):
             confidence_threshold=1.0,
             max_consecutive_skips=0,
         )
-    return emb.squeeze(0).cpu()
+
+    vision_embeds_aligned = model.vision_align(emb)
+    
+    vision_embeds_aligned /= vision_embeds_aligned.norm(dim=-1, keepdim=True)
+    return vision_embeds_aligned.squeeze(0).cpu()
 
 
 def teacher_embedding(frames, model, device, size):
