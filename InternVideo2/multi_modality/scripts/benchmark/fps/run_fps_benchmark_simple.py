@@ -62,7 +62,7 @@ def parse_args():
     parser.add_argument(
         "--max-consecutive-skips",
         type=int,
-        default=8,
+        default=0,
         help="Maximum number of consecutive frames to skip",
     )
     parser.add_argument(
