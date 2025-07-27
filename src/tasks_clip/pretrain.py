@@ -240,7 +240,7 @@ def evaluate_streaming_similarity(
             frame_data = all_frames_raw[i]
             frame_tensor_batch = preprocess_frame(frame_data, streaming_transform, device)
             frame_tensor_streaming_input = frame_tensor_batch.unsqueeze(2)
-            _, curr_hidden_state_streaming = model.streaming_vision_encoder(
+            _, curr_hidden_state_streaming, _ = model.streaming_vision_encoder(
                 frame_tensor_streaming_input,
                 curr_hidden_state_streaming
             )
@@ -255,7 +255,7 @@ def evaluate_streaming_similarity(
 
             frame_tensor_streaming_input = frame_tensor_batch.unsqueeze(2)
 
-            raw_stream_embedding, new_hidden_state = model.streaming_vision_encoder(
+            raw_stream_embedding, new_hidden_state, _ = model.streaming_vision_encoder(
                 frame_tensor_streaming_input,
                 curr_hidden_state_streaming
             )
@@ -489,7 +489,7 @@ def train(
             with torch.no_grad(): # Warm-up phase does not require gradients
                 for frame_idx in range(MODEL_MAX_FRAMES - 1):
                     initial_frame_mc = mc_image[:, :, frame_idx, :, :].unsqueeze(2)
-                    _, curr_hidden_state = model.streaming_vision_encoder(initial_frame_mc, curr_hidden_state, gamma, beta)
+                    _, curr_hidden_state, _ = model.streaming_vision_encoder(initial_frame_mc, curr_hidden_state, gamma, beta)
 
             num_sliding_windows = T - (MODEL_MAX_FRAMES - 1)
 
@@ -507,7 +507,7 @@ def train(
 
                 # Stream Embedding Calculation (using mc_image and streaming encoder)
                 current_streaming_frame_mc = mc_image[:, :, current_frame_in_video_idx, :, :].unsqueeze(2)
-                raw_stream_emb_mc, new_hidden_state_mc_updated = model.streaming_vision_encoder(
+                raw_stream_emb_mc, new_hidden_state_mc_updated, _ = model.streaming_vision_encoder(
                     current_streaming_frame_mc, hidden_state_fed_to_encoder_this_step, gamma, beta
                 )
                 if config.model.use_streaming_vision_align:
