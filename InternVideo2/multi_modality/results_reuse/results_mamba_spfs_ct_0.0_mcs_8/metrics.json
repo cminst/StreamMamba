@@ -1,0 +1,16 @@
+{
+    "confidence_threshold": -0.0,
+    "max_consecutive_skips": 8,
+    "mode": "streammamba_reuse",
+    "rnn_type": "mamba_spfs",
+    "model_config_path": "scripts/spfs/clip/B14/",
+    "command": "scripts/benchmark/mae/run_mae_benchmark_single.py scripts/spfs/clip/B14/ --mode streammamba_reuse --confidence-threshold -0.00 --max-consecutive-skips 8",
+    "performance": {
+        "within_2": 57.333333333333336,
+        "within_4": 65.33333333333333,
+        "within_8": 76.0,
+        "within_16": 88.0,
+        "within_32": 93.33333333333333,
+        "average": 75.99999999999999
+    }
+}

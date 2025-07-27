@@ -38,12 +38,37 @@ def main(results_root):
     Returns:
         None: Generates and saves plot files (png/svg)
     """
+    MISC_DATA = {
+        'dense_dir_name': 'results_mamba_spfs_ct_1.0_mcs_8',
+        'optimal_dir_name': 'results_mamba_spfs_ct_0.7_mcs_8',
+        'baselines': {
+            'internvideo2_b14': {
+                'fps': 1.4059,
+                'accuracy': 74.67,
+                'label': 'InternVideo2-B14',
+                'color': 'blue',
+                'marker': 'x',
+                's': 100
+            },
+            'streaming_lstm_dense': {
+                'fps': 21.3665,
+                'accuracy': 72.00,
+                'label': 'Streaming LSTM (Dense)',
+                'color': 'red',
+                'marker': '^',
+                's': 120
+            }
+        },
+        'realtime_threshold_fps': 30,
+        'max_fps_data_limit': 40
+    }
+
     result_dirs = [d for d in os.listdir(results_root)
                    if os.path.isdir(os.path.join(results_root, d))]
 
     data = []
-    dense_dir = 'results_mamba_spfs_ct_1.0_mcs_8'
-    optimal_dir = 'results_mamba_spfs_ct_0.7_mcs_8'
+    dense_dir = MISC_DATA['dense_dir_name']
+    optimal_dir = MISC_DATA['optimal_dir_name']
 
     for dir_name in result_dirs:
         dir_path = os.path.join(results_root, dir_name)
@@ -62,7 +87,7 @@ def main(results_root):
         is_dense = (dir_name == dense_dir)
         is_optimal = (dir_name == optimal_dir)
 
-        if avg_fps > 40:
+        if avg_fps > MISC_DATA['max_fps_data_limit']:
             continue
         data.append( (avg_fps, accuracy, is_dense, is_optimal) )
 
@@ -89,35 +114,96 @@ def main(results_root):
 
     plt.figure(figsize=(8, 6))
 
-    # Plot all SPFS line (including Dense and Optimal)
-    plt.plot(spfs_fps, spfs_acc, 'g-', alpha=0.5, linewidth=2, marker='o', markerfacecolor='green', markersize=4, label='StreamMamba (SPFS)')
+    # Plot StreamMamba (SPFS)
+    plt.plot(
+        spfs_fps,
+        spfs_acc,
+        'g-',
+        alpha=0.5,
+        linewidth=2,
+        marker='o',
+        markerfacecolor='green',
+        markersize=4,
+        label='StreamMamba (SPFS)'
+    )
 
-    # Plot Dense StreamMamba as filled circle
+    # Plot Dense StreamMamba
     if dense_fps is not None and dense_acc is not None:
-        plt.scatter(dense_fps, dense_acc, color='blueviolet', marker='D', facecolor='blueviolet', s=60, label='StreamMamba (Dense)', zorder=9)
+        plt.scatter(
+            dense_fps,
+            dense_acc,
+            color='blueviolet',
+            marker='D',
+            facecolor='blueviolet',
+            s=60,
+            label='StreamMamba (Dense)',
+            zorder=9
+        )
 
-    # Plot Optimal SPFS with visual separation
+    # Plot Optimal SPFS
     if optimal_fps is not None and optimal_acc is not None:
-        # Padding
-        plt.scatter(optimal_fps, optimal_acc, color='white', marker='o', s=250,
-                    linewidth=3, zorder=5)
+        plt.scatter(
+            optimal_fps,
+            optimal_acc,
+            color='white',
+            marker='o',
+            s=250,
+            linewidth=3,
+            zorder=5
+        )
 
-        plt.scatter(optimal_fps, optimal_acc, color='green', marker='*', s=160, zorder=9,
-                    label='StreamMamba (SPFS optimal)')
+        plt.scatter(
+            optimal_fps,
+            optimal_acc,
+            color='green',
+            marker='*',
+            s=160,
+            zorder=9,
+            label='StreamMamba (SPFS optimal)'
+        )
 
     # Plot InternVideo2-B14 baseline
-    plt.scatter(1.4059, 74.67, color='blue', marker='x', s=100, label='InternVideo2-B14')
+    iv_baseline = MISC_DATA['baselines']['internvideo2_b14']
+    plt.scatter(
+        iv_baseline['fps'],
+        iv_baseline['accuracy'],
+        color=iv_baseline['color'],
+        marker=iv_baseline['marker'],
+        s=iv_baseline['s'],
+        label=iv_baseline['label']
+    )
 
     # Plot streaming LSTM-based model
-    plt.scatter(21.3665, 72.00, color='red', marker='^', s=120, label='Streaming LSTM (Dense)')
+    lstm_baseline = MISC_DATA['baselines']['streaming_lstm_dense']
+    plt.scatter(
+        lstm_baseline['fps'],
+        lstm_baseline['accuracy'],
+        color=lstm_baseline['color'],
+        marker=lstm_baseline['marker'],
+        s=lstm_baseline['s'],
+        label=lstm_baseline['label']
+    )
 
-    plt.axvline(x=30, color='black', linestyle='--', label='Real-time Threshold', alpha=0.4, zorder=8)
+    plt.axvline(
+        x=MISC_DATA['realtime_threshold_fps'],
+        color='black',
+        linestyle='--',
+        label='Real-time Threshold',
+        alpha=0.4,
+        zorder=8
+    )
 
     max_fps = max([x[0] for x in data]) + 1
 
     xmin_current = plt.xlim()[0]
     plt.xlim(xmin_current, max_fps)
-    plt.axvspan(xmin=30, xmax=max_fps, color='lightgreen', alpha=0.1, zorder=8)
+    plt.axvspan(
+        xmin=MISC_DATA['realtime_threshold_fps'],
+        xmax=max_fps,
+        color='lightgreen',
+        alpha=0.1,
+        zorder=8
+    )
 
     plt.xlabel('Average FPS')
     plt.ylabel('Accuracy within ±4 frames')

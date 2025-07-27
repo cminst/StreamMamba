@@ -11,7 +11,6 @@ import numpy as np
 import torch
 from huggingface_hub import hf_hub_download
 
-
 def ensure_dependencies():
     try:
         import einops  # noqa: F401
@@ -35,7 +34,6 @@ def ensure_dependencies():
             ]
         )
     print("Installed packages")
-
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -88,9 +86,9 @@ def parse_args():
         default="streammamba_spfs",
         choices=[
             "streammamba_dense",
-            "streammamba_uniform",
             "streammamba_spfs",
             "streammamba_spfs_uniform",
+            "streammamba_reuse",
             "lstm",
         ],
         help="Streaming configuration variant",
@@ -108,13 +106,11 @@ def parse_args():
     )
     return parser.parse_args()
 
-
 def find_closest(pred, truths):
     """Return the truth value closest to ``pred``."""
     if not truths:
         return pred
     return min(truths, key=lambda x: abs(x - pred))
-
 
 def calculate_mse(preds_with_offset, data):
     """Calculate mean squared error for a list of predictions."""
@@ -126,7 +122,6 @@ def calculate_mse(preds_with_offset, data):
         closest_t = find_closest(p, truth_peaks)
         errors.append((p - closest_t) ** 2)
     return np.mean(errors) if errors else float("inf")
-
 
 def find_best_offset(preds, data, search_range=(-30, 30)):
     """Find the integer offset that minimises MSE."""
@@ -140,11 +135,9 @@ def find_best_offset(preds, data, search_range=(-30, 30)):
             best_offset = off
     return best_offset
 
-
 def offset_predictions(preds, data):
     best = find_best_offset(preds, data)
     return [p + best for p in preds]
-
 
 def compute_accuracy(preds: list[int], dataset: list) -> dict:
     """Return MAE percentages within various frame offsets using global offset."""
@@ -166,7 +159,6 @@ def compute_accuracy(preds: list[int], dataset: list) -> dict:
     percentages["average"] = sum(percentages.values()) / len(thresholds)
     return percentages
 
-
 def retrieve_text_streaming_spfs(
     new_frame,
     texts,
@@ -178,6 +170,7 @@ def retrieve_text_streaming_spfs(
     device,
     confidence_threshold: float,
     max_consecutive_skips: int,
+    reuse_state_on_skip: bool,
     frames2tensor_func,
 ):
     """Lightweight inline implementation of ``retrieve_text_streaming`` with SPFS support."""
@@ -195,6 +188,7 @@ def retrieve_text_streaming_spfs(
         prev_hidden_state,
         confidence_threshold=confidence_threshold,
         max_consecutive_skips=max_consecutive_skips,
+        reuse_state_on_skip=reuse_state_on_skip,
     )
 
     text_feats = torch.cat([model.get_txt_feat(t) for t in texts], dim=0)
@@ -203,7 +197,6 @@ def retrieve_text_streaming_spfs(
 
     ret_texts = [texts[i] for i in idxs.long().cpu().numpy()[0].tolist()]
     return ret_texts, probs.float().cpu().numpy()[0], new_hidden_state, spfs_info
-
 
 def main():
     ensure_dependencies()
@@ -236,7 +229,11 @@ def main():
         expected_rnn_type = "lstm"
         args.checkpoint_file = "lstm_ckpt.pt"
     else:
-        use_spfs = args.mode in ["streammamba_spfs", "streammamba_spfs_uniform"]
+        use_spfs = args.mode in [
+            "streammamba_spfs",
+            "streammamba_spfs_uniform",
+            "streammamba_reuse",
+        ]
         expected_rnn_type = "mamba_spfs" if use_spfs else "mamba"
     current_rnn_type = config.model.streaming_vision_encoder.rnn_type
 
@@ -343,80 +340,43 @@ def main():
             )
             logit_curr.append(0.0)
 
-        if args.mode == "streammamba_uniform":
-            processed = list(range(7, len(frames), args.sampling_rate))
-            if (len(frames) - 1) not in processed:
-                processed.append(len(frames) - 1)
+        for j in pbar:
+            force_skip = False
+            if args.mode == "streammamba_spfs_uniform":
+                sampling_rate = args.sampling_rate
+                if sampling_rate > 1:
+                    force_skip = (j - 7) % sampling_rate != (sampling_rate - 1)
+                else:
+                    force_skip = False
+            threshold = (
+                -1e6
+                if force_skip
+                else (
+                    args.confidence_threshold
+                    if use_spfs
+                    else 1.0
+                )
+            )
+            max_skip = (
+                1000 if force_skip else (args.max_consecutive_skips if use_spfs else 0)
+            )
 
-            feats = [None] * len(frames)
-            prev_idx = 6
-            prev_feat = None
-            for idx in processed:
-                frame_tensor = frames2tensor(
-                    [frames[idx]],
-                    fnum=1,
-                    target_size=(size_t, size_t),
-                    device=device,
-                ).squeeze(0)
-                vfeat, curr_hidden_state, _ = intern_model.encode_streaming_vision(
-                    frame_tensor,
-                    curr_hidden_state,
-                    confidence_threshold=1.0,
-                    max_consecutive_skips=0,
-                )
-                feats[idx] = vfeat.squeeze(0)
-                if prev_feat is not None:
-                    gap = idx - prev_idx
-                    if gap > 1:
-                        for k in range(1, gap):
-                            alpha = k / gap
-                            feats[prev_idx + k] = (
-                                prev_feat * (1 - alpha) + feats[idx] * alpha
-                            )
-                prev_feat = feats[idx]
-                prev_idx = idx
-
-            text_feat = intern_model.get_txt_feat(phrase)
-            for j in pbar:
-                vfeat = feats[j].unsqueeze(0)
-                probs, _ = intern_model.predict_label(vfeat, text_feat, top=1)
-                logit_curr.append(probs.item())
-                if len(logit_curr) > 0:
-                    pbar.set_description(str(np.argmax(logit_curr) + 1))
-        else:
-            for j in pbar:
-                force_skip = (
-                    args.mode == "streammamba_spfs_uniform"
-                    and (j - 7) % args.sampling_rate == 0
-                )
-                threshold = (
-                    -1e6
-                    if force_skip
-                    else (
-                        args.confidence_threshold
-                        if args.mode == "streammamba_spfs"
-                        else 1.0
-                    )
-                )
-                max_skip = (
-                    1 if force_skip else (args.max_consecutive_skips if use_spfs else 0)
-                )
-
-                _, probs, curr_hidden_state, _ = retrieve_text_streaming_spfs(
-                    frames[j],
-                    [phrase],
-                    intern_model,
-                    curr_hidden_state,
-                    topk=1,
-                    config=config,
-                    device=device,
-                    confidence_threshold=threshold,
-                    max_consecutive_skips=max_skip,
-                    frames2tensor_func=frames2tensor,
-                )
-                logit_curr.append(probs.item())
-                if len(logit_curr) > 0:
-                    pbar.set_description(str(np.argmax(logit_curr) + 1))
+            _, probs, curr_hidden_state, _ = retrieve_text_streaming_spfs(
+                frames[j],
+                [phrase],
+                intern_model,
+                curr_hidden_state,
+                topk=1,
+                config=config,
+                device=device,
+                confidence_threshold=threshold,
+                max_consecutive_skips=max_skip,
+                reuse_state_on_skip=(args.mode == "streammamba_reuse"),
+                frames2tensor_func=frames2tensor,
+            )
+            logit_curr.append(probs.item())
+            if len(logit_curr) > 0:
+                pbar.set_description(str(np.argmax(logit_curr) + 1))
 
         preds.append(np.argmax(logit_curr) + 1)
         logits.append(list(zip(logit_curr, range(1, len(logit_curr) + 1))))
@@ -425,8 +385,15 @@ def main():
 
     reformatted_logits = [[(float(l[0]), l[1]) for l in x] for x in logits]
 
+    if args.mode == "streammamba_reuse":
+        root_folder = "results_reuse"
+    elif args.mode == "streammamba_spfs_uniform":
+        root_folder = "results_uniform"
+    else:
+        root_folder = "results"
+
     rnn_type = "lstm" if args.mode == "lstm" else ("mamba_spfs" if use_spfs else "mamba")
-    folder_name = f"results_{rnn_type}_ct_{args.confidence_threshold}_mcs_{args.max_consecutive_skips}"
+    folder_name = f"{root_folder}/{rnn_type}_ct_{args.confidence_threshold}_mcs_{args.max_consecutive_skips}"
 
     # Add sampling rate to folder name if using uniform mode
     if "uniform" in args.mode:
@@ -459,7 +426,6 @@ def main():
     print(f"Saved logits to {os.path.join(logits_dir, 'act75.json')}")
     print(f"Saved MAE metrics to {metrics_file}")
     print(f"Average MAE accuracy: {metrics['average']:.2f}")
-
 
 if __name__ == "__main__":
     main()

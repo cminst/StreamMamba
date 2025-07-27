@@ -62,7 +62,7 @@ def parse_args():
     parser.add_argument(
         "--max-consecutive-skips",
         type=int,
-        default=8,
+        default=0,
         help="Maximum number of consecutive frames to skip",
     )
     parser.add_argument(
@@ -75,9 +75,9 @@ def parse_args():
         default="streammamba_spfs",
         choices=[
             "streammamba_dense",
-            "streammamba_uniform",
             "streammamba_spfs",
             "streammamba_spfs_uniform",
+            "streammamba_reuse",
             "lstm",
         ],
         help="Streaming configuration variant",
@@ -86,7 +86,7 @@ def parse_args():
         "--sampling-rate",
         type=int,
         default=2,
-        help="Sampling rate for *_uniform modes",
+        help="Sampling rate for *_uniform modes.",
     )
     parser.add_argument(
         "--no-spfs",
@@ -108,7 +108,11 @@ def main():
         rnn_type = "lstm"
         args.checkpoint_file = "lstm_ckpt.pt"
     else:
-        use_spfs = args.mode in ["streammamba_spfs", "streammamba_spfs_uniform"]
+        use_spfs = args.mode in [
+            "streammamba_spfs",
+            "streammamba_spfs_uniform",
+            "streammamba_reuse",
+        ]
         rnn_type = "mamba_spfs" if use_spfs else "mamba"
     print(f"Running in {args.mode} mode.")
 
@@ -121,9 +125,18 @@ def main():
     if "uniform" in args.mode:
         folder_name += f"_sr_{args.sampling_rate}"
 
-    os.makedirs(folder_name, exist_ok=True)
+    # Determine root folder based on mode
+    if args.mode == "streammamba_reuse":
+        root_folder = "results_reuse"
+    elif args.mode == "streammamba_spfs_uniform":
+        root_folder = "results_uniform"
+    else:
+        root_folder = "results"
 
-    fps_json_path = os.path.join(folder_name, os.path.basename(args.output_json))
+    folder_path = os.path.join(root_folder, folder_name)
+    os.makedirs(folder_path, exist_ok=True)
+
+    fps_json_path = os.path.join(folder_path, os.path.basename(args.output_json))
 
     sys.path.append(os.getcwd())
 
@@ -224,15 +237,14 @@ def main():
             total_time += end - start
 
         for idx, f in enumerate(frames[7:], start=7):
-            process = True
             force_skip = False
-            if args.mode == "streammamba_uniform":
-                process = (idx - 7) % args.sampling_rate == 0 or idx == len(frames) - 1
             if args.mode == "streammamba_spfs_uniform":
-                force_skip = (idx - 7) % args.sampling_rate == 0
-
-            if not process and args.mode == "streammamba_uniform":
-                continue
+                sampling_rate = args.sampling_rate
+                if sampling_rate > 1:
+                    # Process 1 frame every 'sampling_rate' frames (last in cycle)
+                    force_skip = (idx - 7) % sampling_rate != (sampling_rate - 1)
+                else:
+                    force_skip = False  # Process all if rate is 1 or less
 
             tensor = frames2tensor(
                 [f], fnum=1, target_size=(size_t, size_t), device=device
@@ -241,7 +253,7 @@ def main():
                 torch.cuda.synchronize()
             start = time.time()
 
-            if args.mode in ["streammamba_dense", "streammamba_uniform", "lstm"]:
+            if args.mode in ["streammamba_dense", "lstm"]:
                 _, hidden, _ = intern_model.encode_streaming_vision(
                     tensor,
                     hidden,
@@ -257,9 +269,19 @@ def main():
                 )
                 if spfs_info.skipped:
                     skipped_frames += 1
+            elif args.mode == "streammamba_reuse":
+                _, hidden, spfs_info = intern_model.encode_streaming_vision(
+                    tensor,
+                    hidden,
+                    confidence_threshold=args.confidence_threshold,
+                    max_consecutive_skips=args.max_consecutive_skips,
+                    reuse_state_on_skip=True,
+                )
+                if spfs_info.skipped:
+                    skipped_frames += 1
             else:  # streammamba_spfs_uniform
                 threshold = -1e6 if force_skip else 1.0
-                max_skip = 1 if force_skip else 0
+                max_skip = 1000 if force_skip else 0  # Allow many consecutive skips for uniform mode
                 _, hidden, spfs_info = intern_model.encode_streaming_vision(
                     tensor,
                     hidden,

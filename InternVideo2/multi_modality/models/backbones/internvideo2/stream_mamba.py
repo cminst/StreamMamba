@@ -93,19 +93,33 @@ class StreamMamba(nn.Module):
         else:
             self.output_fc = nn.Identity()
 
+        self.last_output = None
+
     def init_hidden(self, batch_size, device):
         if self.rnn_type in ['mamba', 'cross_mamba_film', 'mamba_spfs']:
             state = self.rnn.init_state(batch_size, device)
             if self.rnn_type == 'mamba_spfs':
                 self.rnn.last_hidden = None
+                self.last_output = None
             return state
         h0 = torch.zeros(self.rnn_num_layers, batch_size, self.rnn_hidden_size).to(device)
         if self.rnn_type == 'lstm':
             c0 = torch.zeros(self.rnn_num_layers, batch_size, self.rnn_hidden_size).to(device)
+            self.last_output = None
             return (h0, c0)
+        self.last_output = None
         return h0
 
-    def forward(self, single_frame_input, prev_hidden_state, confidence_threshold=0.9, max_consecutive_skips=0, gamma=None, beta=None):
+    def forward(
+        self,
+        single_frame_input,
+        prev_hidden_state,
+        confidence_threshold=0.9,
+        max_consecutive_skips=0,
+        reuse_state_on_skip=False,
+        gamma=None,
+        beta=None,
+    ):
         """
         Processes a single frame (or a small chunk of frames) and updates the hidden state.
 
@@ -120,6 +134,8 @@ class StreamMamba(nn.Module):
                 For GRU: h_prev
             confidence_threshold (float): Confidence threshold for SPFS. Default 0.9
             max_consecutive_skips (int): Maximum number of consecutive frames to skip. Default 0
+            reuse_state_on_skip (bool): If True, reuse the previous hidden state and
+                output when skipping a frame instead of predicting the next feature.
             gamma (torch.Tensor): Used for FiLM
             beta (torch.Tensor): Used for FiLM
 
@@ -146,9 +162,11 @@ class StreamMamba(nn.Module):
                 spfs_info.confidence = confidence
 
                 if confidence > confidence_threshold:
-                    frame_feature = predicted_feature
                     spfs_info.skipped = True
                     self.consecutive_skips = getattr(self, 'consecutive_skips', 0) + 1
+                    if reuse_state_on_skip and self.last_output is not None:
+                        return self.last_output, prev_hidden_state, spfs_info
+                    frame_feature = predicted_feature
                 else:
                     frame_feature, _ = self.vit_lite.extract_features(single_frame_input)
                     self.consecutive_skips = 0
@@ -171,5 +189,8 @@ class StreamMamba(nn.Module):
 
         if self.rnn_type in ['lstm', 'gru']:
             student_embedding = self.output_fc(student_embedding)
+
+        if self.rnn_type == 'mamba_spfs':
+            self.last_output = student_embedding
 
         return student_embedding, current_hidden_state, spfs_info
