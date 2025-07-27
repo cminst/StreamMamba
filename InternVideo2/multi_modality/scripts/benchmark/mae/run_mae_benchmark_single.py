@@ -95,9 +95,9 @@ def parse_args():
     )
     parser.add_argument(
         "--sampling-rate",
-        type=str,
-        default="2",
-        help="Sampling rate for *_uniform modes. Can be an integer or a fraction like '1/3'.",
+        type=int,
+        default=2,
+        help="Sampling rate for *_uniform modes",
     )
     parser.add_argument(
         "--no-spfs",
@@ -343,29 +343,11 @@ def main():
         for j in pbar:
             force_skip = False
             if args.mode == "streammamba_spfs_uniform":
-                if "/" in args.sampling_rate:
-                    parts = args.sampling_rate.split('/')
-                    if len(parts) == 2 and parts[0] == '1' and parts[1].isdigit():
-                        den = int(parts[1])
-                        if den > 1:
-                            # For 1/N, process the last frame in a cycle of N
-                            force_skip = (j - 7) % den != (den - 1)
-                        else:
-                            force_skip = False  # Process all for 1/1
-                    else:
-                        print(f"Warning: Invalid fractional sampling rate '{args.sampling_rate}'. Only '1/N' format is supported. Treating as dense.")
-                        force_skip = False
+                sampling_rate = args.sampling_rate
+                if sampling_rate > 1:
+                    force_skip = (j - 7) % sampling_rate != (sampling_rate - 1)
                 else:
-                    try:
-                        sampling_rate = int(args.sampling_rate)
-                        if sampling_rate > 1:
-                            # Process 1 frame every 'sampling_rate' frames (last in cycle)
-                            force_skip = (j - 7) % sampling_rate != (sampling_rate - 1)
-                        else:
-                            force_skip = False  # Process all if rate is 1 or less
-                    except ValueError:
-                        print(f"Warning: Invalid integer sampling rate '{args.sampling_rate}'. Treating as dense.")
-                        force_skip = False
+                    force_skip = False
             threshold = (
                 -1e6
                 if force_skip
@@ -376,7 +358,7 @@ def main():
                 )
             )
             max_skip = (
-                1 if force_skip else (args.max_consecutive_skips if use_spfs else 0)
+                1000 if force_skip else (args.max_consecutive_skips if use_spfs else 0)
             )
 
             _, probs, curr_hidden_state, _ = retrieve_text_streaming_spfs(
