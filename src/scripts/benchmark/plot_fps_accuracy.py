@@ -40,7 +40,7 @@ def main(results_root):
     """
     MISC_DATA = {
         'dense_dir_name': 'results_mamba_spfs_ct_1.0_mcs_8',
-        'optimal_dir_name': 'results_mamba_spfs_ct_0.7_mcs_8',
+        'optimal_dir_name': 'results_mamba_spfs_ct_0.85_mcs_8',
         'baselines': {
             'internvideo2_b14': {
                 'fps': 1.4059,
@@ -59,7 +59,7 @@ def main(results_root):
                 's': 120
             }
         },
-        'realtime_threshold_fps': 30,
+        'realtime_threshold_fps': 24,
         'max_fps_data_limit': 40
     }
 
@@ -190,7 +190,7 @@ def main(results_root):
         linestyle='--',
         label='Real-time Threshold',
         alpha=0.4,
-        zorder=8
+        zorder=1
     )
 
     max_fps = max([x[0] for x in data]) + 1

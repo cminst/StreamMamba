@@ -393,7 +393,7 @@ def main():
         root_folder = "results"
 
     rnn_type = "lstm" if args.mode == "lstm" else ("mamba_spfs" if use_spfs else "mamba")
-    folder_name = f"{root_folder}/{rnn_type}_ct_{args.confidence_threshold}_mcs_{args.max_consecutive_skips}"
+    folder_name = f"{root_folder}/results_{rnn_type}_ct_{args.confidence_threshold}_mcs_{args.max_consecutive_skips}"
 
     # Add sampling rate to folder name if using uniform mode
     if "uniform" in args.mode:
