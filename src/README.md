@@ -4,7 +4,7 @@
 
 ```shell
 ~/StreamMamba/mamba$ pip install -e .
-~/StreamMamba/InternVideo2/multi_modality$ pip install -r requirements.txt
+~/StreamMamba/src$ pip install -r requirements.txt
 ```
 
 In addition, to ensure no issues arise with installation of Flash Attention, feel free to install prebuilt wheels from [here](https://github.com/mjun0812/flash-attention-prebuild-wheels)
