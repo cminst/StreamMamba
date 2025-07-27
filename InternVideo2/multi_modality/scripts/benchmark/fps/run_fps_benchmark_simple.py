@@ -123,7 +123,7 @@ def main():
 
     # Add sampling rate to folder name if using uniform mode
     if "uniform" in args.mode:
-        folder_name += f"_sr_{args.sampling_rate}""
+        folder_name += f"_sr_{args.sampling_rate}"
 
     # Determine root folder based on mode
     if args.mode == "streammamba_reuse":
