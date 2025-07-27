@@ -138,10 +138,6 @@ def main():
 
     fps_json_path = os.path.join(folder_path, os.path.basename(args.output_json))
 
-    os.makedirs(folder_name, exist_ok=True)
-
-    fps_json_path = os.path.join(folder_name, os.path.basename(args.output_json))
-
     sys.path.append(os.getcwd())
 
     from demo.config import Config, eval_dict_leaf
