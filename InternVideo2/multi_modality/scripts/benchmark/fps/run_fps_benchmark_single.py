@@ -250,7 +250,12 @@ def main():
         for idx, f in enumerate(frames[7:], start=7):
             force_skip = False
             if args.mode == "streammamba_spfs_uniform":
-                force_skip = (idx - 7) % args.sampling_rate == 0
+                if "/" in args.sampling_rate:
+                    den = int(args.sampling_rate.split("/")[1])
+                    force_skip = (idx - 7) % den != 0
+                else:
+                    sampling_rate = int(args.sampling_rate)
+                    force_skip = (idx - 7) % sampling_rate == 0
 
             tensor = frames2tensor(
                 [f], fnum=1, target_size=(size_t, size_t), device=device

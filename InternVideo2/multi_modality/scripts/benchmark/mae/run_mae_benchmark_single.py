@@ -341,10 +341,14 @@ def main():
             logit_curr.append(0.0)
 
         for j in pbar:
-            force_skip = (
-                args.mode == "streammamba_spfs_uniform"
-                and (j - 7) % args.sampling_rate == 0
-            )
+            force_skip = False
+            if args.mode == "streammamba_spfs_uniform":
+                if "/" in args.sampling_rate:
+                    den = int(args.sampling_rate.split("/")[1])
+                    force_skip = (j - 7) % den != 0
+                else:
+                    sampling_rate = int(args.sampling_rate)
+                    force_skip = (j - 7) % sampling_rate == 0
             threshold = (
                 -1e6
                 if force_skip
