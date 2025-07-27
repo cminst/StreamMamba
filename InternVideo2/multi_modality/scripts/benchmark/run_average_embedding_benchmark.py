@@ -1,4 +1,5 @@
 import argparse
+from tqdm import tqdm
 import os
 import sys
 import subprocess
@@ -105,6 +106,10 @@ def main():
     args = parse_args()
 
     sys.path.append(os.getcwd())
+    
+    output_dir = os.path.join(os.getcwd(), "results_average")
+    args.output_json = os.path.join(output_dir, os.path.basename(args.output_json))
+    os.makedirs(output_dir, exist_ok=True)
 
     from demo.config import Config, eval_dict_leaf
     from demo.utils import _frame_from_video
@@ -139,6 +144,10 @@ def main():
     state_dict = ckpt.get("model", ckpt.get("module"))
     model.load_state_dict(state_dict, strict=False)
     model.eval()
+    del ckpt
+    del state_dict
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
     act75_data = json_read("photography-model/data/ACT75.json")
     size_t = config.get("size_t", 224)
@@ -146,35 +155,35 @@ def main():
 
     results = {N: {"d_avg": 0.0, "d_tail": 0.0, "count": 0} for N in window_sizes}
 
-    for video_path, _, _ in act75_data:
-        cap = cv2.VideoCapture(os.path.join("photography-model", video_path))
-        frames = [x for x in _frame_from_video(cap)]
-        if not frames:
-            continue
-        for N in window_sizes:
-            if len(frames) < N:
+    with torch.no_grad():
+        for video_path, _, _ in tqdm(act75_data):
+            cap = cv2.VideoCapture(os.path.join("photography-model", video_path))
+            frames = [x for x in _frame_from_video(cap)]
+            if not frames:
                 continue
-            for start in range(len(frames) - N + 1):
-                clip = frames[start:start + N]
-                teacher = teacher_embedding(clip, model, device, size_t)
-                avg_embeds = []
-                for k in range(N - 7):
-                    sub = clip[k:k + 8]
-                    avg_embeds.append(streammamba_embedding(sub, model, device, size_t))
-                avg_embed = torch.stack(avg_embeds).mean(dim=0)
-                tail_embed = streammamba_embedding(clip[-8:], model, device, size_t)
-                d_avg = cosine_distance(avg_embed, teacher)
-                d_tail = cosine_distance(tail_embed, teacher)
-                results[N]["d_avg"] += d_avg
-                results[N]["d_tail"] += d_tail
-                results[N]["count"] += 1
+            for N in window_sizes:
+                if len(frames) < N:
+                    continue
+                for start in range(len(frames) - N + 1):
+                    clip = frames[start:start + N]
+                    teacher = teacher_embedding(clip, model, device, size_t)
+                    avg_embeds = []
+                    for k in range(N - 7):
+                        sub = clip[k:k + 8]
+                        avg_embeds.append(streammamba_embedding(sub, model, device, size_t))
+                    avg_embed = torch.stack(avg_embeds).mean(dim=0)
+                    tail_embed = streammamba_embedding(clip[-8:], model, device, size_t)
+                    d_avg = cosine_distance(avg_embed, teacher)
+                    d_tail = cosine_distance(tail_embed, teacher)
+                    results[N]["d_avg"] += d_avg
+                    results[N]["d_tail"] += d_tail
+                    results[N]["count"] += 1
 
     for N in window_sizes:
         if results[N]["count"] > 0:
             results[N]["d_avg"] /= results[N]["count"]
             results[N]["d_tail"] /= results[N]["count"]
 
-    os.makedirs(os.path.dirname(args.output_json), exist_ok=True)
     json_write(results, args.output_json)
     print(f"Saved results to {args.output_json}")
 
