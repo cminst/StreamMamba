@@ -240,11 +240,28 @@ def main():
             force_skip = False
             if args.mode == "streammamba_spfs_uniform":
                 if "/" in args.sampling_rate:
-                    den = int(args.sampling_rate.split("/")[1])
-                    force_skip = (idx - 7) % den != 0
+                    parts = args.sampling_rate.split('/')
+                    if len(parts) == 2 and parts[0] == '1' and parts[1].isdigit():
+                        den = int(parts[1])
+                        if den > 1:
+                            # For 1/N, process the last frame in a cycle of N
+                            force_skip = (idx - 7) % den != (den - 1)
+                        else:
+                            force_skip = False  # Process all for 1/1
+                    else:
+                        print(f"Warning: Invalid fractional sampling rate '{args.sampling_rate}'. Only '1/N' format is supported. Treating as dense.")
+                        force_skip = False
                 else:
-                    sampling_rate = int(args.sampling_rate)
-                    force_skip = (idx - 7) % sampling_rate == 0
+                    try:
+                        sampling_rate = int(args.sampling_rate)
+                        if sampling_rate > 1:
+                            # Process 1 frame every 'sampling_rate' frames (last in cycle)
+                            force_skip = (idx - 7) % sampling_rate != (sampling_rate - 1)
+                        else:
+                            force_skip = False  # Process all if rate is 1 or less
+                    except ValueError:
+                        print(f"Warning: Invalid integer sampling rate '{args.sampling_rate}'. Treating as dense.")
+                        force_skip = False
 
             tensor = frames2tensor(
                 [f], fnum=1, target_size=(size_t, size_t), device=device
