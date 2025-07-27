@@ -84,9 +84,9 @@ def parse_args():
     )
     parser.add_argument(
         "--sampling-rate",
-        type=int,
-        default=2,
-        help="Sampling rate for *_uniform modes",
+        type=str,
+        default="2",
+        help="Sampling rate for *_uniform modes. Can be an integer or a fraction like '1/3'.",
     )
     parser.add_argument(
         "--no-spfs",
