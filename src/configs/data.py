@@ -18,8 +18,8 @@ available_corpus = dict(
         media_type="video",
     ),
     smol_test=dict(
-        anno_path="/root/IV2/InternVideo2/multi_modality/data_test/smol_test.json",
-        data_root="/root/IV2/InternVideo2/multi_modality/data_test/",
+        anno_path="/root/StreamMamba/src/data_test/smol_test.json",
+        data_root="/root/StreamMamba/src/data_test/",
         media_type="video"
     ),
     slim_kinetics=dict(

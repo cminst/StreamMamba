@@ -364,7 +364,6 @@ class InternVideo2(nn.Module):
         self.embed_dim = embed_dim
         self.T = num_frames // tubelet_size
 
-        # Added so that WindowInternVideo2 can access
         self.num_heads = num_heads
         self.mlp_ratio = mlp_ratio
         self.qkv_bias = qkv_bias
@@ -533,8 +532,5 @@ class InternVideo2(nn.Module):
         x = self.clip_projector(x)
 
         x = self.fc_norm(x)
-
-        # print('---- InternVideo2.forward() ----')
-        # print(f'Function executed successfully, x is shaped {x.shape}')
 
         return x
