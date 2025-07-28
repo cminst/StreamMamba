@@ -238,10 +238,28 @@ def main():
     act75_data = json_read(data_path)
 
     size_t = config.get("size_t", 224)
-    window_sizes = sorted([int(x) for x in args.window_sizes.split(",")])
-    print(f"Evaluating window sizes: {window_sizes}")
+    requested_window_sizes = sorted([int(x) for x in args.window_sizes.split(",")])
+    print(f"Requested window sizes: {requested_window_sizes}")
 
-    # Initialize results
+    # Load existing results if file exists
+    existing_results = {}
+    if os.path.exists(args.output_json):
+        print(f"Loading existing results from: {args.output_json}")
+        existing_results = json_read(args.output_json)
+        
+        # Filter window sizes to only process those not already in results
+        window_sizes = [N for N in requested_window_sizes if str(N) not in existing_results]
+        if window_sizes:
+            print(f"Skipping already processed window sizes: {[N for N in requested_window_sizes if str(N) in existing_results]}")
+            print(f"Processing new window sizes: {window_sizes}")
+        else:
+            print("All requested window sizes already processed. Nothing to do.")
+            return
+    else:
+        window_sizes = requested_window_sizes
+        print(f"No existing results found. Processing all window sizes: {window_sizes}")
+
+    # Initialize results for new window sizes
     results = {N: {"d_avg": 0.0, "d_tail": 0.0, "count": 0} for N in window_sizes}
 
     # Main video processing loop with tqdm
@@ -278,8 +296,8 @@ def main():
             tqdm.write(f"Error processing {video_path}: {e}")
             continue
 
-    # Finalize results
-    print("\nFinal Results:")
+    # Finalize results for new window sizes
+    print("\nNew Results:")
     for N in window_sizes:
         if results[N]["count"] > 0:
             results[N]["d_avg"] /= results[N]["count"]
@@ -289,11 +307,24 @@ def main():
         else:
             print(f"  Window {N}: No valid samples processed.")
 
-    # Save results
+    # Merge new results with existing ones
+    final_results = existing_results.copy()
+    for N, data in results.items():
+        if data["count"] > 0:  # Only include results with actual data
+            final_results[str(N)] = {
+                "d_avg": data["d_avg"],
+                "d_tail": data["d_tail"],
+                "count": data["count"]
+            }
+
+    # Sort final results by window size
+    final_results = dict(sorted(final_results.items(), key=lambda x: int(x[0])))
+
+    # Save merged results
     output_dir = os.path.dirname(args.output_json)
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
-    json_write(results, args.output_json)
+    json_write(final_results, args.output_json)
     print(f"Results saved to: {args.output_json}")
 
 
