@@ -112,20 +112,71 @@ def main(results_root):
             optimal_fps = fps
             optimal_acc = acc
 
-    plt.figure(figsize=(8, 6))
+    # Process uniform sampling results
+    uniform_results_root = os.path.join(os.path.dirname(results_root), 'results_uniform')
+    if os.path.exists(uniform_results_root):
+        uniform_dirs = [d for d in os.listdir(uniform_results_root)if os.path.isdir(os.path.join(uniform_results_root, d))]
 
-    # Plot StreamMamba (SPFS)
-    plt.plot(
-        spfs_fps,
-        spfs_acc,
-        'g-',
-        alpha=0.5,
-        linewidth=2,
-        marker='o',
-        markerfacecolor='green',
-        markersize=4,
-        label='StreamMamba (SPFS)'
-    )
+        uniform_fps = [data[0][0]]
+        uniform_acc = [data[0][1]]
+
+        for dir_name in uniform_dirs:
+            dir_path = os.path.join(uniform_results_root, dir_name)
+
+            # Extract confidence threshold from directory name
+            if 'ct_' in dir_name:
+                try:
+                    fps_data = load_fps_results(dir_path)
+                    if len(fps_data) > 1:
+                        avg_fps = sum(item['fps'] for item in fps_data) / (len(fps_data))
+                    else:
+                        continue
+
+                    metrics = load_metrics(dir_path)
+                    accuracy = metrics['performance']['within_4']
+
+                    print(f"Uniform Sampling - Directory: {dir_name}, Average FPS: {avg_fps:.4f}, Accuracy: {accuracy:.4f}")
+
+                    if True or avg_fps <= MISC_DATA['max_fps_data_limit']:
+                        uniform_fps.append(avg_fps)
+                        uniform_acc.append(accuracy)
+                except (ValueError, IndexError) as e:
+                    print(f"Error processing directory {dir_name}: {e}")
+                    continue
+
+        # Sort by FPS
+        uniform_data = list(zip(uniform_fps, uniform_acc))
+        uniform_data.sort(key=lambda x: x[0])
+        uniform_fps, uniform_acc = zip(*uniform_data) if uniform_data else ([], [])
+
+        plt.figure(figsize=(8, 6))
+
+        # Plot StreamMamba (SPFS)
+        plt.plot(
+            spfs_fps,
+            spfs_acc,
+            'g-',
+            alpha=0.5,
+            linewidth=2,
+            marker='o',
+            markerfacecolor='green',
+            markersize=4,
+            label='StreamMamba (SPFS)'
+        )
+
+        # Plot StreamMamba (USP)
+        if uniform_fps:
+            plt.plot(
+                uniform_fps,
+                uniform_acc,
+                'orange',
+                alpha=0.7,
+                linewidth=2,
+                marker='s',
+                markerfacecolor='#d16f24',
+                markersize=4,
+                label='StreamMamba (USP)'
+            )
 
     # Plot Dense StreamMamba
     if dense_fps is not None and dense_acc is not None:
@@ -135,7 +186,7 @@ def main(results_root):
             color='blueviolet',
             marker='D',
             facecolor='blueviolet',
-            s=60,
+            s=50,
             label='StreamMamba (Dense)',
             zorder=9
         )
