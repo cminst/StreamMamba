@@ -136,7 +136,7 @@ def load_all_data(results_root):
     return spfs_data, usp_data
 
 def generate_plot(spfs_data, usp_data, results_root):
-    plt.figure(figsize=(6, 7))
+    plt.figure(figsize=(7, 6))
 
     if spfs_data:
         spfs_style = STYLES['streambm_spfs']
