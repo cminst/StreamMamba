@@ -136,7 +136,7 @@ def load_all_data(results_root):
     return spfs_data, usp_data
 
 def generate_plot(spfs_data, usp_data, results_root):
-    plt.figure(figsize=(7, 6))
+    plt.figure(figsize=(6, 6))
 
     if spfs_data:
         spfs_style = STYLES['streambm_spfs']
@@ -200,7 +200,7 @@ def generate_plot(spfs_data, usp_data, results_root):
 
     plt.grid(False)
     plt.xlim(left=-2, right=max_fps_plot)
-    plt.ylim(bottom=30)
+    plt.ylim(bottom=35)
     plt.xlabel('Average FPS (Throughput)', fontsize=12)
     plt.ylabel('Accuracy within ±4 frames (%)', fontsize=12)
     plt.title('Performance-Throughput Trade-off', fontsize=14, fontweight='bold')
