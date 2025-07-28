@@ -8,7 +8,7 @@ import torch
 
 def ensure_dependencies():
     try:
-        import torch  # noqa: F401
+        import torch
     except ImportError:
         print("Installing required dependencies...")
         subprocess.check_call([
@@ -83,7 +83,6 @@ def cosine_distance(a, b):
 
 
 def preprocess_frames_to_tensors(frames, size, device):
-    """Preprocess all frames to tensors once to avoid repeated conversion."""
     from demo.utils import frames2tensor
     tensors = []
     with torch.no_grad():
@@ -94,7 +93,6 @@ def preprocess_frames_to_tensors(frames, size, device):
 
 
 def streammamba_embedding_from_tensors(tensors, model, device):
-    """StreamMamba embedding using pre-processed tensors."""
     with torch.no_grad():
         hidden = model.streaming_vision_encoder.init_hidden(batch_size=1, device=device)
         emb = None
@@ -112,7 +110,6 @@ def streammamba_embedding_from_tensors(tensors, model, device):
 
 
 def teacher_embedding(frames, model, device, size_t):
-    """Teacher embedding (unchanged for compatibility)."""
     from demo.utils import frames2tensor
     with torch.no_grad():
         tensor = frames2tensor(frames, fnum=8, target_size=(size_t, size_t), device=device)
@@ -121,50 +118,40 @@ def teacher_embedding(frames, model, device, size_t):
 
 
 def process_video_optimized(frames, model, device, size_t, window_sizes, results, verbose=False):
-    """Process a single video with optimized computation and progress tracking."""
     if not frames:
         return
 
     if verbose:
         print(f"Processing video with {len(frames)} frames")
 
-    # Pre-process all frames to tensors once
     frame_tensors = preprocess_frames_to_tensors(frames, size_t, device)
 
-    # Outer loop: window sizes
     for N in tqdm(window_sizes, desc="Window sizes", leave=False, disable=not verbose):
         if len(frames) < N:
             if verbose:
                 print(f"Skipping window size {N} (not enough frames: {len(frames)})")
             continue
 
-        # Inner loop: sliding window
         for start in tqdm(range(len(frames) - N + 1), desc=f"Sliding N={N}", leave=False, disable=not verbose):
             clip_frames = frames[start:start + N]
             clip_tensors = frame_tensors[start:start + N]
 
-            # Compute teacher embedding
             teacher = teacher_embedding(clip_frames, model, device, size_t)
 
-            # Compute all StreamMamba embeddings for 8-frame windows
             avg_embeds = []
             for k in range(N - 7):
                 sub_tensors = clip_tensors[k:k + 8]
                 embed = streammamba_embedding_from_tensors(sub_tensors, model, device)
                 avg_embeds.append(embed)
 
-            # Average embedding
             with torch.no_grad():
                 avg_embed = torch.stack(avg_embeds).mean(dim=0)
 
-            # Tail embedding is just the last computed embedding
             tail_embed = avg_embeds[-1]
 
-            # Compute distances
             d_avg = cosine_distance(avg_embed, teacher)
             d_tail = cosine_distance(tail_embed, teacher)
 
-            # Update results
             results[N]["d_avg"] += d_avg
             results[N]["d_tail"] += d_tail
             results[N]["count"] += 1
@@ -189,7 +176,6 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    # Clone repo if not exists
     repo_path = "photography-model"
     if not os.path.exists(repo_path):
         print("Cloning photography-model repository...")
@@ -198,7 +184,6 @@ def main():
         ])
         print("Repository cloned.")
 
-    # Load config
     config_path = os.path.join(args.config_dir, "config.py")
     if not os.path.exists(config_path):
         raise FileNotFoundError(f"Config file not found: {config_path}")
@@ -206,12 +191,10 @@ def main():
     config = Config.from_file(config_path)
     config = eval_dict_leaf(config)
 
-    # Initialize model
     print("Initializing model...")
     model = InternVideo2_CLIP_small(config)
     model.to(device)
 
-    # Load checkpoint
     ckpt_path = args.checkpoint
     if ckpt_path is None:
         print(f"Downloading checkpoint '{args.checkpoint_file}' from Hugging Face ({args.hf_repo})...")
@@ -225,12 +208,10 @@ def main():
     model.eval()
     print("Model loaded and set to eval mode.")
 
-    # Clean up memory
     del ckpt, state_dict
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
-    # Load dataset
     data_path = os.path.join(repo_path, "data/ACT75.json")
     if not os.path.exists(data_path):
         raise FileNotFoundError(f"Dataset file not found: {data_path}")
@@ -241,13 +222,11 @@ def main():
     requested_window_sizes = sorted([int(x) for x in args.window_sizes.split(",")])
     print(f"Requested window sizes: {requested_window_sizes}")
 
-    # Load existing results if file exists
     existing_results = {}
     if os.path.exists(args.output_json):
         print(f"Loading existing results from: {args.output_json}")
         existing_results = json_read(args.output_json)
         
-        # Filter window sizes to only process those not already in results
         window_sizes = [N for N in requested_window_sizes if str(N) not in existing_results]
         if window_sizes:
             print(f"Skipping already processed window sizes: {[N for N in requested_window_sizes if str(N) in existing_results]}")
@@ -259,10 +238,8 @@ def main():
         window_sizes = requested_window_sizes
         print(f"No existing results found. Processing all window sizes: {window_sizes}")
 
-    # Initialize results for new window sizes
     results = {N: {"d_avg": 0.0, "d_tail": 0.0, "count": 0} for N in window_sizes}
 
-    # Main video processing loop with tqdm
     print(f"Processing {len(act75_data)} videos...")
     for item in tqdm(act75_data, desc="Videos", unit="video"):
         video_path, _, _ = item
@@ -284,10 +261,8 @@ def main():
                 tqdm.write(f"No frames extracted from {video_path}")
                 continue
 
-            # Process video with progress bars inside
             process_video_optimized(frames, model, device, size_t, window_sizes, results, verbose=args.verbose)
 
-            # Optional: free memory
             del frames
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
@@ -296,7 +271,6 @@ def main():
             tqdm.write(f"Error processing {video_path}: {e}")
             continue
 
-    # Finalize results for new window sizes
     print("\nNew Results:")
     for N in window_sizes:
         if results[N]["count"] > 0:
@@ -307,20 +281,17 @@ def main():
         else:
             print(f"  Window {N}: No valid samples processed.")
 
-    # Merge new results with existing ones
     final_results = existing_results.copy()
     for N, data in results.items():
-        if data["count"] > 0:  # Only include results with actual data
+        if data["count"] > 0:
             final_results[str(N)] = {
                 "d_avg": data["d_avg"],
                 "d_tail": data["d_tail"],
                 "count": data["count"]
             }
 
-    # Sort final results by window size
     final_results = dict(sorted(final_results.items(), key=lambda x: int(x[0])))
 
-    # Save merged results
     output_dir = os.path.dirname(args.output_json)
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
