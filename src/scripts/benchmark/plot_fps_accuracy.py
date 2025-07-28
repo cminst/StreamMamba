@@ -207,8 +207,8 @@ def generate_plot(spfs_data, usp_data, results_root):
     plt.legend(fontsize=10)
     plt.tight_layout()
 
-    output_png = os.path.join(results_root, 'fps_accuracy_plot.png')
-    output_svg = os.path.join(results_root, 'fps_accuracy_plot.svg')
+    output_png = os.path.join(results_root, 'performance_throughput_plot.png')
+    output_svg = os.path.join(results_root, 'performance_throughput_plot.svg')
     plt.savefig(output_png, dpi=300)
     plt.savefig(output_svg)
     print(f"Plot saved to {output_png} and {output_svg}")
