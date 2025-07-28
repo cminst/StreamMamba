@@ -3,274 +3,227 @@ import json
 import argparse
 import matplotlib.pyplot as plt
 
+STYLES = {
+    'streambm_spfs': {
+        'color': 'green',
+        'marker': 'o',
+        'linestyle': '-',
+        'label': 'StreamMamba (SPFS)',
+        'zorder': 5
+    },
+    'streambm_usp': {
+        'color': 'green',
+        'marker': 's',
+        'linestyle': '--',
+        'label': 'StreamMamba (USP)',
+        'zorder': 5
+    },
+    'streambm_dense': {
+        'color': 'green',
+        'marker': 'D',
+        's': 70,
+        'label': 'StreamMamba (Dense)',
+        'zorder': 6
+    },
+    'streambm_optimal': {
+        'color': 'gold',
+        'marker': '*',
+        's': 300,
+        'label': 'StreamMamba (SPFS Optimal)',
+        'edgecolors': 'black',
+        'linewidth': 0.5,
+        'zorder': 10
+    },
+    'internvideo2_b14': {
+        'color': '#377eb8',
+        'marker': 'x',
+        's': 100,
+        'label': 'InternVideo2-B14'
+    },
+    'internvideo2_6b': {
+        'color': '#ff7f00',
+        'marker': 'x',
+        's': 100,
+        'label': 'InternVideo2-6B'
+    },
+    'streaming_lstm': {
+        'color': '#e41a1c',
+        'marker': '^',
+        's': 120,
+        'label': 'Streaming LSTM (Dense)'
+    }
+}
+
+MISC_DATA = {
+    'dense_dir_name': 'results_mamba_spfs_ct_1.0_mcs_8',
+    'optimal_dir_name': 'results_mamba_spfs_ct_0.85_mcs_8',
+    'realtime_threshold_fps': 24,
+    'max_fps_data_limit': 40,
+    'baselines': {
+        'internvideo2_b14': {'fps': 1.4059, 'accuracy': 74.67},
+        'internvideo2_6b': {'fps': 0.0, 'accuracy': 84.00},
+        'streaming_lstm': {'fps': 21.3665, 'accuracy': 64.00}
+    }
+}
+
 def load_metrics(results_path):
-    """Load metrics from a JSON file.
-
-    Args:
-        results_path (str): Path to directory containing metrics.json
-
-    Returns:
-        dict: Loaded metrics data
-    """
     metrics_path = os.path.join(results_path, 'metrics.json')
     with open(metrics_path, 'r') as f:
         return json.load(f)
 
 def load_fps_results(results_path):
-    """Load FPS results from a JSON file.
-
-    Args:
-        results_path (str): Path to directory containing fps_results_spfs.json
-
-    Returns:
-        dict: Loaded FPS results data
-    """
     fps_path = os.path.join(results_path, 'fps_results_spfs.json')
     with open(fps_path, 'r') as f:
         return json.load(f)
 
-def main(results_root):
-    """Main function to generate FPS vs accuracy plot.
-
-    Args:
-        results_root (str): Path to root directory containing experiment subdirectories
-
-    Returns:
-        None: Generates and saves plot files (png/svg)
-    """
-    MISC_DATA = {
-        'dense_dir_name': 'results_mamba_spfs_ct_1.0_mcs_8',
-        'optimal_dir_name': 'results_mamba_spfs_ct_0.85_mcs_8',
-        'baselines': {
-            'internvideo2_b14': {
-                'fps': 1.4059,
-                'accuracy': 74.67,
-                'label': 'InternVideo2-B14',
-                'color': 'blue',
-                'marker': 'x',
-                's': 100
-            },
-            'streaming_lstm_dense': {
-                'fps': 21.3665,
-                'accuracy': 72.00,
-                'label': 'Streaming LSTM (Dense)',
-                'color': 'red',
-                'marker': '^',
-                's': 120
-            }
-        },
-        'realtime_threshold_fps': 24,
-        'max_fps_data_limit': 40
-    }
-
+def load_all_data(results_root):
+    spfs_data = []
     result_dirs = [d for d in os.listdir(results_root)
                    if os.path.isdir(os.path.join(results_root, d))]
 
-    data = []
-    dense_dir = MISC_DATA['dense_dir_name']
-    optimal_dir = MISC_DATA['optimal_dir_name']
-
     for dir_name in result_dirs:
         dir_path = os.path.join(results_root, dir_name)
+        try:
+            fps_data = load_fps_results(dir_path)
+            avg_fps = sum(item['fps'] for item in fps_data[1:]) / (len(fps_data) - 1) if len(fps_data) > 1 else 0
+            if not avg_fps or avg_fps > MISC_DATA['max_fps_data_limit']:
+                continue
 
-        fps_data = load_fps_results(dir_path)
-        if len(fps_data) > 1:
-            avg_fps = sum(item['fps'] for item in fps_data[1:]) / (len(fps_data) - 1)
-        else:
+            metrics = load_metrics(dir_path)
+            accuracy = metrics['performance']['within_4']
+
+            is_dense = (dir_name == MISC_DATA['dense_dir_name'])
+            is_optimal = (dir_name == MISC_DATA['optimal_dir_name'])
+
+            spfs_data.append({'fps': avg_fps, 'acc': accuracy, 'is_dense': is_dense, 'is_optimal': is_optimal})
+            print(f"SPFS - Dir: {dir_name}, FPS: {avg_fps:.2f}, Acc: {accuracy:.2f}")
+
+        except (FileNotFoundError, json.JSONDecodeError, KeyError) as e:
+            print(f"Could not process SPFS dir {dir_name}: {e}")
             continue
 
-        metrics = load_metrics(dir_path)
-        accuracy = metrics['performance']['within_4']
+    spfs_data.sort(key=lambda x: x['fps'])
 
-        print(f"Directory: {dir_path[16:]}, Average FPS: {avg_fps:.4f}, Accuracy: {accuracy:.4f}")
-
-        is_dense = (dir_name == dense_dir)
-        is_optimal = (dir_name == optimal_dir)
-
-        if avg_fps > MISC_DATA['max_fps_data_limit']:
-            continue
-        data.append( (avg_fps, accuracy, is_dense, is_optimal) )
-
-    # Sort data by FPS
-    data.sort(key=lambda x: x[0])
-
-    # Separate data
-    dense_fps = None
-    dense_acc = None
-    optimal_fps = None
-    optimal_acc = None
-    spfs_fps = []
-    spfs_acc = []
-
-    for fps, acc, is_dense, is_optimal in data:
-        spfs_fps.append(fps)
-        spfs_acc.append(acc)
-        if is_dense:
-            dense_fps = fps
-            dense_acc = acc
-        if is_optimal:
-            optimal_fps = fps
-            optimal_acc = acc
-
-    # Process uniform sampling results
+    usp_data = []
     uniform_results_root = os.path.join(os.path.dirname(results_root), 'results_uniform')
     if os.path.exists(uniform_results_root):
-        uniform_dirs = [d for d in os.listdir(uniform_results_root)if os.path.isdir(os.path.join(uniform_results_root, d))]
-
-        uniform_fps = [data[0][0]]
-        uniform_acc = [data[0][1]]
+        uniform_dirs = [d for d in os.listdir(uniform_results_root) if os.path.isdir(os.path.join(uniform_results_root, d))]
 
         for dir_name in uniform_dirs:
             dir_path = os.path.join(uniform_results_root, dir_name)
-
-            # Extract confidence threshold from directory name
-            if 'ct_' in dir_name:
-                try:
-                    fps_data = load_fps_results(dir_path)
-                    if len(fps_data) > 1:
-                        avg_fps = sum(item['fps'] for item in fps_data) / (len(fps_data))
-                    else:
-                        continue
-
-                    metrics = load_metrics(dir_path)
-                    accuracy = metrics['performance']['within_4']
-
-                    print(f"Uniform Sampling - Directory: {dir_name}, Average FPS: {avg_fps:.4f}, Accuracy: {accuracy:.4f}")
-
-                    if True or avg_fps <= MISC_DATA['max_fps_data_limit']:
-                        uniform_fps.append(avg_fps)
-                        uniform_acc.append(accuracy)
-                except (ValueError, IndexError) as e:
-                    print(f"Error processing directory {dir_name}: {e}")
+            try:
+                fps_data = load_fps_results(dir_path)
+                avg_fps = sum(item['fps'] for item in fps_data) / len(fps_data) if fps_data else 0
+                if not avg_fps or avg_fps > MISC_DATA['max_fps_data_limit']:
                     continue
 
-        # Sort by FPS
-        uniform_data = list(zip(uniform_fps, uniform_acc))
-        uniform_data.sort(key=lambda x: x[0])
-        uniform_fps, uniform_acc = zip(*uniform_data) if uniform_data else ([], [])
+                metrics = load_metrics(dir_path)
+                accuracy = metrics['performance']['within_4']
 
-        plt.figure(figsize=(8, 6))
+                usp_data.append({'fps': avg_fps, 'acc': accuracy})
+                print(f"USP - Dir: {dir_name}, FPS: {avg_fps:.2f}, Acc: {accuracy:.2f}")
 
-        # Plot StreamMamba (SPFS)
+            except (FileNotFoundError, json.JSONDecodeError, KeyError) as e:
+                print(f"Could not process USP dir {dir_name}: {e}")
+                continue
+
+    dense_point = next((p for p in spfs_data if p['is_dense']), None)
+    if dense_point:
+        usp_data.append({'fps': dense_point['fps'], 'acc': dense_point['acc']})
+
+    usp_data.sort(key=lambda x: x['fps'])
+
+    return spfs_data, usp_data
+
+def generate_plot(spfs_data, usp_data, results_root):
+    plt.figure(figsize=(6, 7))
+
+    if spfs_data:
+        spfs_style = STYLES['streambm_spfs']
         plt.plot(
-            spfs_fps,
-            spfs_acc,
-            'g-',
-            alpha=0.5,
+            [d['fps'] for d in spfs_data],
+            [d['acc'] for d in spfs_data],
+            color=spfs_style['color'],
+            marker=spfs_style['marker'],
+            linestyle=spfs_style['linestyle'],
+            label=spfs_style['label'],
+            zorder=spfs_style['zorder'],
+            linewidth=2.5,
+            markersize=6
+        )
+
+    if usp_data:
+        usp_style = STYLES['streambm_usp']
+        plt.plot(
+            [d['fps'] for d in usp_data],
+            [d['acc'] for d in usp_data],
+            color=usp_style['color'],
+            marker=usp_style['marker'],
+            linestyle=usp_style['linestyle'],
+            label=usp_style['label'],
+            zorder=usp_style['zorder'],
             linewidth=2,
-            marker='o',
-            markerfacecolor='green',
-            markersize=4,
-            label='StreamMamba (SPFS)'
+            alpha=0.8
         )
 
-        # Plot StreamMamba (USP)
-        if uniform_fps:
-            plt.plot(
-                uniform_fps,
-                uniform_acc,
-                'orange',
-                alpha=0.7,
-                linewidth=2,
-                marker='s',
-                markerfacecolor='#d16f24',
-                markersize=4,
-                label='StreamMamba (USP)'
-            )
+    dense_point = next((p for p in spfs_data if p['is_dense']), None)
+    if dense_point:
+        style = STYLES['streambm_dense']
+        plt.scatter(dense_point['fps'], dense_point['acc'], **style)
 
-    # Plot Dense StreamMamba
-    if dense_fps is not None and dense_acc is not None:
-        plt.scatter(
-            dense_fps,
-            dense_acc,
-            color='blueviolet',
-            marker='D',
-            facecolor='blueviolet',
-            s=50,
-            label='StreamMamba (Dense)',
-            zorder=9
-        )
+    optimal_point = next((p for p in spfs_data if p['is_optimal']), None)
+    if optimal_point:
+        style = STYLES['streambm_optimal']
+        plt.scatter(optimal_point['fps'], optimal_point['acc'], **style)
 
-    # Plot Optimal SPFS
-    if optimal_fps is not None and optimal_acc is not None:
-        plt.scatter(
-            optimal_fps,
-            optimal_acc,
-            color='white',
-            marker='o',
-            s=250,
-            linewidth=3,
-            zorder=5
-        )
-
-        plt.scatter(
-            optimal_fps,
-            optimal_acc,
-            color='green',
-            marker='*',
-            s=160,
-            zorder=9,
-            label='StreamMamba (SPFS optimal)'
-        )
-
-    # Plot InternVideo2-B14 baseline
-    iv_baseline = MISC_DATA['baselines']['internvideo2_b14']
-    plt.scatter(
-        iv_baseline['fps'],
-        iv_baseline['accuracy'],
-        color=iv_baseline['color'],
-        marker=iv_baseline['marker'],
-        s=iv_baseline['s'],
-        label=iv_baseline['label']
-    )
-
-    # Plot streaming LSTM-based model
-    lstm_baseline = MISC_DATA['baselines']['streaming_lstm_dense']
-    plt.scatter(
-        lstm_baseline['fps'],
-        lstm_baseline['accuracy'],
-        color=lstm_baseline['color'],
-        marker=lstm_baseline['marker'],
-        s=lstm_baseline['s'],
-        label=lstm_baseline['label']
-    )
+    for name, data in MISC_DATA['baselines'].items():
+        style = STYLES[name]
+        plt.scatter(data['fps'], data['accuracy'], **style)
 
     plt.axvline(
         x=MISC_DATA['realtime_threshold_fps'],
         color='black',
         linestyle='--',
-        label='Real-time Threshold',
-        alpha=0.4,
-        zorder=1
+        label='Real-time Threshold (24 FPS)',
+        alpha=0.5,
+        zorder=2
     )
 
-    max_fps = max([x[0] for x in data]) + 1
-
-    xmin_current = plt.xlim()[0]
-    plt.xlim(xmin_current, max_fps)
+    max_fps_plot = MISC_DATA['max_fps_data_limit']
     plt.axvspan(
         xmin=MISC_DATA['realtime_threshold_fps'],
-        xmax=max_fps,
+        xmax=max_fps_plot,
         color='lightgreen',
-        alpha=0.1,
-        zorder=8
+        alpha=0.2,
+        zorder=0
     )
 
-    plt.xlabel('Average FPS')
-    plt.ylabel('Accuracy within ±4 frames')
-    plt.title('FPS vs Accuracy Tradeoff')
     plt.grid(False)
-    plt.legend()
+    plt.xlim(left=-2, right=max_fps_plot)
+    plt.ylim(bottom=30)
+    plt.xlabel('Average FPS (Throughput)', fontsize=12)
+    plt.ylabel('Accuracy within ±4 frames (%)', fontsize=12)
+    plt.title('Performance-Throughput Trade-off', fontsize=14, fontweight='bold')
+    plt.legend(fontsize=10)
     plt.tight_layout()
 
-    plt.savefig(os.path.join(results_root, 'fps_accuracy_plot.png'))
-    plt.savefig(os.path.join(results_root, 'fps_accuracy_plot.svg'))
+    output_png = os.path.join(results_root, 'fps_accuracy_plot.png')
+    output_svg = os.path.join(results_root, 'fps_accuracy_plot.svg')
+    plt.savefig(output_png, dpi=300)
+    plt.savefig(output_svg)
+    print(f"Plot saved to {output_png} and {output_svg}")
     plt.close()
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--results-path', type=str, required=True,
-                        help='Path to results directory containing experiment folders')
-    args = parser.parse_args()
+def main(results_root):
+    spfs_data, usp_data = load_all_data(results_root)
+    if not spfs_data:
+        print("No valid SPFS data found. Aborting plot generation.")
+        return
+    generate_plot(spfs_data, usp_data, results_root)
 
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="Generate FPS vs. Accuracy plots from experiment results.")
+    parser.add_argument('--results-path', type=str, required=True,
+                        help='Path to results directory containing SPFS experiment folders')
+    args = parser.parse_args()
     main(args.results_path)
