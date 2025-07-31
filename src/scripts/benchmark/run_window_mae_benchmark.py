@@ -11,41 +11,38 @@ except Exception:  # pragma: no cover - install at runtime
     import numpy as np
 
 import torch
+from tqdm import tqdm
 
-
-# -------------------------------------------------------------------------------------
-# Dependency management
-# -------------------------------------------------------------------------------------
 
 def ensure_dependencies():
     try:
         import einops  # noqa: F401
     except Exception:
         print("Installing dependencies...")
-        subprocess.check_call(
-            [
+        packages = [
+            "einops",
+            "peft",
+            "open_clip_torch",
+            "protobuf",
+            "sentencepiece",
+            "iv2-utils",
+            "matplotlib",
+            "huggingface_hub",
+            "tabulate",
+            "tqdm",
+        ]
+        # Using tqdm for progress bar during installation
+        for package in tqdm(packages, desc="Installing packages"):
+            subprocess.check_call([
                 sys.executable,
                 "-m",
                 "pip",
                 "install",
                 "-q",
-                "einops",
-                "peft",
-                "open_clip_torch",
-                "protobuf",
-                "sentencepiece",
-                "iv2-utils",
-                "matplotlib",
-                "huggingface_hub",
-                "tabulate",
-            ]
-        )
+                package,
+            ])
     print("Dependencies installed/verified")
 
-
-# -------------------------------------------------------------------------------------
-# Argument parsing
-# -------------------------------------------------------------------------------------
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -82,10 +79,6 @@ def parse_args():
     )
     return parser.parse_args()
 
-
-# -------------------------------------------------------------------------------------
-# Utility functions
-# -------------------------------------------------------------------------------------
 
 def find_closest(pred, truths):
     if not truths:
@@ -141,10 +134,6 @@ def compute_accuracy(preds: List[int], dataset: List) -> dict:
     return percentages
 
 
-# -------------------------------------------------------------------------------------
-# Prediction helpers
-# -------------------------------------------------------------------------------------
-
 def streammamba_predict(frames, phrase, model, device, size_t, window_size):
     from demo.utils import frames2tensor
 
@@ -199,10 +188,6 @@ def internvideo2_predict(frames, phrase, model, device, size_t, window_size):
     return int(np.argmax(logits) + 1)
 
 
-# -------------------------------------------------------------------------------------
-# Main execution
-# -------------------------------------------------------------------------------------
-
 def main():
     ensure_dependencies()
     args = parse_args()
@@ -249,10 +234,12 @@ def main():
 
     results = {}
 
-    for N in window_sizes:
+    # Progress bar for window sizes
+    for N in tqdm(window_sizes, desc="Processing window sizes"):
         preds_stream = []
         preds_intern = []
-        for video_path, phrase, _ in act75_data:
+        # Progress bar for video processing
+        for video_path, phrase, _ in tqdm(act75_data, desc=f"Processing videos for window size {N}", leave=False):
             frames = [
                 f
                 for f in _frame_from_video(
