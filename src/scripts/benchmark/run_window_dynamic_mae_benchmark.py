@@ -171,9 +171,10 @@ def streammamba_predict(frames, phrase, model, device, size_t, window_size):
             use_emb = (emb_stack * weights.view(-1, 1)).sum(dim=0)
 
         probs, _ = model.predict_label(use_emb, text_feat, top=1)
+        probs = probs.mean(dim=0)
         logits.append(probs.item())
 
-    return int(np.argmax(logits) + 1)
+    return int(np.argmax(logits) + 1), logits
 
 
 def internvideo2_predict(frames, phrase, model, device, size_t, window_size):
@@ -192,7 +193,7 @@ def internvideo2_predict(frames, phrase, model, device, size_t, window_size):
         vid_feat = model.get_vid_feat(tensor)
         probs, _ = model.predict_label(vid_feat, text_feat, top=1)
         logits.append(probs.item())
-    return int(np.argmax(logits) + 1)
+    return int(np.argmax(logits) + 1), logits
 
 
 def main():
@@ -244,27 +245,51 @@ def main():
     # Progress bar for window sizes
     for N in tqdm(window_sizes, desc="Processing window sizes"):
         preds_stream = []
+        logits_stream = []
         preds_intern = []
+        logits_intern = []
         # Progress bar for video processing
-        for video_path, phrase, _ in tqdm(act75_data, desc=f"Processing videos for window size {N}", leave=False):
+        for video_path, phrase, _ in tqdm(
+            act75_data, desc=f"Processing videos for window size {N}", leave=False
+        ):
             frames = [
                 f
                 for f in _frame_from_video(
                     cv2.VideoCapture(os.path.join("photography-model", video_path))
                 )
             ]
-            preds_stream.append(
-                streammamba_predict(frames, phrase, model, device, size_t, N)
+            pred_s, log_s = streammamba_predict(
+                frames, phrase, model, device, size_t, N
             )
-            preds_intern.append(
-                internvideo2_predict(frames, phrase, model, device, size_t, N)
+            preds_stream.append(pred_s)
+            logits_stream.append([(float(l), i + 1) for i, l in enumerate(log_s)])
+
+            pred_i, log_i = internvideo2_predict(
+                frames, phrase, model, device, size_t, N
             )
+            preds_intern.append(pred_i)
+            logits_intern.append([(float(l), i + 1) for i, l in enumerate(log_i)])
+
         metrics_stream = compute_accuracy(preds_stream, act75_data)
         metrics_intern = compute_accuracy(preds_intern, act75_data)
         results[N] = {
             "streammamba": metrics_stream,
             "internvideo2": metrics_intern,
         }
+
+        # Save predictions and logits for this window size
+        json_write(
+            preds_stream, f"streammamba_preds_window_{N}.json"
+        )
+        json_write(
+            logits_stream, f"streammamba_logits_window_{N}.json"
+        )
+        json_write(
+            preds_intern, f"internvideo2_preds_window_{N}.json"
+        )
+        json_write(
+            logits_intern, f"internvideo2_logits_window_{N}.json"
+        )
 
     table = [
         (N, results[N]["streammamba"]["average"], results[N]["internvideo2"]["average"])
