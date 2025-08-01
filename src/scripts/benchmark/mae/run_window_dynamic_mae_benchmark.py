@@ -76,6 +76,11 @@ def parse_args():
         default="8,9,10,16",
         help="Comma separated list of window sizes to evaluate",
     )
+    parser.add_argument(
+        "--equal-weights",
+        action="store_true",
+        help="Use equal weights for all embeddings instead of confidence-based weighting",
+    )
     return parser.parse_args()
 
 
@@ -133,7 +138,7 @@ def compute_accuracy(preds: List[int], dataset: List) -> dict:
     return percentages
 
 
-def streammamba_predict(frames, phrase, model, device, size_t, window_size):
+def streammamba_predict(frames, phrase, model, device, size_t, window_size, equal_weights=False):
     from demo.utils import frames2tensor
 
     hidden = model.streaming_vision_encoder.init_hidden(batch_size=1, device=device)
@@ -163,11 +168,18 @@ def streammamba_predict(frames, phrase, model, device, size_t, window_size):
             use_emb = embeddings[-1]
         else:
             recent_embs = embeddings[-k:]
-            recent_conf = confidences[-k:]
-            weight_scores = torch.tensor([1 - c for c in recent_conf], device=device)
-            weights = torch.softmax(weight_scores, dim=0)
-            emb_stack = torch.stack(recent_embs)
-            use_emb = (emb_stack * weights.view(-1, 1)).sum(dim=0)
+            if equal_weights:
+                # Use uniform weights
+                weights = torch.ones(k, device=device) / k
+                emb_stack = torch.stack(recent_embs)
+                use_emb = (emb_stack * weights.view(-1, 1)).sum(dim=0)
+            else:
+                # Use confidence-based weighting
+                recent_conf = confidences[-k:]
+                weight_scores = torch.tensor([1 - c for c in recent_conf], device=device)
+                weights = torch.softmax(weight_scores, dim=0)
+                emb_stack = torch.stack(recent_embs)
+                use_emb = (emb_stack * weights.view(-1, 1)).sum(dim=0)
 
         probs, _ = model.predict_label(use_emb, text_feat, top=1)
         probs = probs.mean(dim=0)
@@ -257,7 +269,7 @@ def main():
                 )
             ]
             pred_s, log_s = streammamba_predict(
-                frames, phrase, model, device, size_t, N
+                frames, phrase, model, device, size_t, N, args.equal_weights
             )
             preds_stream.append(pred_s)
             logits_stream.append([(float(l), i + 1) for i, l in enumerate(log_s)])
