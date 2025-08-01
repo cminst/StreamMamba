@@ -221,6 +221,10 @@ def main():
     from tabulate import tabulate
     import cv2
 
+    use_equal_weights = args.equal_weights
+
+    use_spfs_weights = not use_equal_weights
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     if "photography-model" not in os.listdir("."):
@@ -269,42 +273,54 @@ def main():
                 )
             ]
             pred_s, log_s = streammamba_predict(
-                frames, phrase, model, device, size_t, N, args.equal_weights
+                frames, phrase, model, device, size_t, N, use_equal_weights
             )
             preds_stream.append(pred_s)
             logits_stream.append([(float(l), i + 1) for i, l in enumerate(log_s)])
 
-            pred_i, log_i = internvideo2_predict(
-                frames, phrase, model, device, size_t, N
-            )
-            preds_intern.append(pred_i)
-            logits_intern.append([(float(l), i + 1) for i, l in enumerate(log_i)])
+            if use_spfs_weights:
+                pred_i, log_i = internvideo2_predict(
+                    frames, phrase, model, device, size_t, N
+                )
+                preds_intern.append(pred_i)
+                logits_intern.append([(float(l), i + 1) for i, l in enumerate(log_i)])
 
         metrics_stream = compute_accuracy(preds_stream, act75_data)
-        metrics_intern = compute_accuracy(preds_intern, act75_data)
         results[N] = {
             "streammamba": metrics_stream,
-            "internvideo2": metrics_intern,
         }
+        if use_spfs_weights:
+            metrics_intern = compute_accuracy(preds_intern, act75_data)
+            results[N]["internvideo2"] = metrics_intern
 
+        suffix = "_equal" if use_equal_weights else ""
         json_write(
-            preds_stream, os.path.join("results_window", f"streammamba_preds_window_{N}.json")
+            preds_stream, os.path.join("results_window", f"streammamba_preds_window_{N}{suffix}.json")
         )
         json_write(
-            logits_stream, os.path.join("results_window", f"streammamba_logits_window_{N}.json")
+            logits_stream, os.path.join("results_window", f"streammamba_logits_window_{N}{suffix}.json")
         )
-        json_write(
-            preds_intern, os.path.join("results_window", f"internvideo2_preds_window_{N}.json")
-        )
-        json_write(
-            logits_intern, os.path.join("results_window", f"internvideo2_logits_window_{N}.json")
-        )
+        if use_spfs_weights:
+            json_write(
+                preds_intern, os.path.join("results_window", f"internvideo2_preds_window_{N}.json")
+            )
+            json_write(
+                logits_intern, os.path.join("results_window", f"internvideo2_logits_window_{N}.json")
+            )
 
-    table = [
-        (N, results[N]["streammamba"]["average"], results[N]["internvideo2"]["average"])
-        for N in window_sizes
-    ]
-    print(tabulate(table, headers=["Window Size", "StreamMamba", "InternVideo2"], floatfmt=".2f"))
+    if use_equal_weights:
+        table = [
+            (N, results[N]["streammamba"]["average"])
+            for N in window_sizes
+        ]
+        headers = ["Window Size", "StreamMamba (Equal Weights)"]
+    else:
+        table = [
+            (N, results[N]["streammamba"]["average"], results[N]["internvideo2"]["average"])
+            for N in window_sizes
+        ]
+        headers = ["Window Size", "StreamMamba", "InternVideo2"]
+    print(tabulate(table, headers=headers, floatfmt=".2f"))
 
     json_write(results, args.output_json)
     print(f"Saved results to {args.output_json}")
