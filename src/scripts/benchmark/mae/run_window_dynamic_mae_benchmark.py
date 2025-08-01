@@ -6,7 +6,7 @@ from typing import List
 
 try:
     import numpy as np
-except Exception:  # pragma: no cover - install at runtime
+except Exception:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "numpy"])
     import numpy as np
 
@@ -16,7 +16,7 @@ from tqdm import tqdm
 
 def ensure_dependencies():
     try:
-        import einops  # noqa: F401
+        import einops
     except Exception:
         print("Installing dependencies...")
         packages = [
@@ -31,7 +31,6 @@ def ensure_dependencies():
             "tabulate",
             "tqdm",
         ]
-        # Using tqdm for progress bar during installation
         for package in tqdm(packages, desc="Installing packages"):
             subprocess.check_call([
                 sys.executable,
@@ -237,18 +236,17 @@ def main():
     model.eval()
 
     size_t = config.get("size_t", 224)
+    os.makedirs("results_window", exist_ok=True)
 
     window_sizes = [int(x) for x in args.window_sizes.split(",") if x.strip()]
 
     results = {}
 
-    # Progress bar for window sizes
     for N in tqdm(window_sizes, desc="Processing window sizes"):
         preds_stream = []
         logits_stream = []
         preds_intern = []
         logits_intern = []
-        # Progress bar for video processing
         for video_path, phrase, _ in tqdm(
             act75_data, desc=f"Processing videos for window size {N}", leave=False
         ):
@@ -277,18 +275,17 @@ def main():
             "internvideo2": metrics_intern,
         }
 
-        # Save predictions and logits for this window size
         json_write(
-            preds_stream, f"streammamba_preds_window_{N}.json"
+            preds_stream, os.path.join("results_window", f"streammamba_preds_window_{N}.json")
         )
         json_write(
-            logits_stream, f"streammamba_logits_window_{N}.json"
+            logits_stream, os.path.join("results_window", f"streammamba_logits_window_{N}.json")
         )
         json_write(
-            preds_intern, f"internvideo2_preds_window_{N}.json"
+            preds_intern, os.path.join("results_window", f"internvideo2_preds_window_{N}.json")
         )
         json_write(
-            logits_intern, f"internvideo2_logits_window_{N}.json"
+            logits_intern, os.path.join("results_window", f"internvideo2_logits_window_{N}.json")
         )
 
     table = [
