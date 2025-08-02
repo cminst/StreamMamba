@@ -203,7 +203,7 @@ def generate_plot(spfs_data, usp_data, results_root):
     plt.ylim(bottom=35)
     plt.xlabel('Average FPS (Throughput)', fontsize=12)
     plt.ylabel('Accuracy within ±4 frames (%)', fontsize=12)
-    plt.title('Performance-Throughput Trade-off', fontsize=14, fontweight='bold')
+    plt.title('Performance-Throughput Trade-off', fontsize=14)#, fontweight='bold')
     plt.legend(fontsize=10)
     plt.tight_layout()
 
