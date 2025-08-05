@@ -8,3 +8,10 @@ This repository contains the official PyTorch implementation for the paper: **"S
 StreamMamba introduces a novel framework for efficient video understanding that dramatically reduces computational cost without significant loss in performance. It leverages a Mamba state-space model trained to predict future video content, allowing it to dynamically skip processing redundant frames. This makes it ideal for real-time applications on resource-constrained devices like smartphones.
 
 **Note:** The `mamba` folder in this repository is copied from the original implementation at https://github.com/state-spaces/mamba.
+
+## Training and Inference Instructions
+
+For detailed instructions on how to prepare datasets and models, as well as how to run training and inference, please refer to:
+
+- [Dataset and Model Preparation](src/DATASET_MODELS.md)
+- [Installation and Usage](src/README.md)
