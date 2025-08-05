@@ -6,10 +6,8 @@ import subprocess
 import pathlib
 import modal
 
-# ── Image ─────────────────────────────────────────────────────────
 image = (
     modal.Image.debian_slim()
-    # core Jupyter stack
     .pip_install(
         "httpx",
         "tqdm",
@@ -17,7 +15,6 @@ image = (
         "packaging",
         "ninja",
     )
-    # OS‑level bits
     .run_commands(
         "apt-get update -y"
     )
@@ -31,7 +28,6 @@ image = (
     .pip_install("huggingface_hub")
 )
 
-# ── Modal App / GPU entrypoint ───────────────────────────────────────────
 app = modal.App(image=image, name="Downloading ACT75 as Test Set")
 
 k600_volume = modal.Volume.from_name("k600", create_if_missing=True)

@@ -6,28 +6,23 @@ import subprocess
 import pathlib
 import modal
 
-# ── Image ─────────────────────────────────────────────────────────
 image = (
     modal.Image.from_registry(
         "nvidia/cuda:12.6.3-devel-ubuntu22.04",
         add_python="3.10"
     )
-    # core Jupyter stack
     .pip_install(
         "jupyterlab",
         "jupyter",
         "ipywidgets",
     )
-    # general‑purpose utils / evaluation deps  ← NEW
     .pip_install(
         "openai",
         "httpx",
         "tqdm",
         "nest_asyncio",
     )
-    # HF transfer helper
     .pip_install("hf_transfer")
-    # numeric / ML stack
     .pip_install(
         "packaging",
         "ninja",
@@ -37,7 +32,6 @@ image = (
         "pandas",
         "wandb",
     )
-    # UnsLoTH + friends
     .pip_install(
         "bitsandbytes",
         "accelerate",
@@ -49,16 +43,13 @@ image = (
         "huggingface_hub",
         "datasets",
     )
-    # keep xformers pinned
     .run_commands("pip install xformers==0.0.29")
-    # OS‑level bits
     .run_commands(
         "apt-get update -y",
         "apt-get install -y git",
         "apt-get install -y curl",
         "apt-get install -y ffmpeg"
     )
-    # speedier HF downloads
     .env({
         "HF_HUB_ENABLE_HF_TRANSFER": "1",
         "HF_TOKEN": os.environ['HF_TOKEN']
@@ -69,7 +60,6 @@ image = (
     .run_commands(
         "pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121"
     )
-    # clone & build
     .pip_install(
         'deepspeed',
         'timm',
@@ -96,7 +86,6 @@ image = (
     .run_commands(
         "cd /root && git clone https://github.com/qingy1337/IV2.git",
         "cd /root/IV2 && git checkout window",
-        # "" # <-- Todo: PREPARE DATASET
     )
     .run_commands(
         "huggingface-cli download OpenGVLab/InternVideo2_distillation_models stage1/B14/B14_dist_1B_stage2/pytorch_model.bin --local-dir /root/StreamMamba/models",
@@ -105,13 +94,11 @@ image = (
     )
 )
 
-# ── Modal App / GPU entrypoint ───────────────────────────────────────────
-
 k600_volume = modal.Volume.from_name("k600")
 
 app = modal.App(image=image, name="Window InternVideo2 Training")
 
-@app.function(volumes={"/root/k600": k600_volume}, gpu="A100-80GB:1", timeout=86_400)  # 24 hour timeout
+@app.function(volumes={"/root/k600": k600_volume}, gpu="A100-80GB:1", timeout=86_400)
 def runwithgpu():
     token = secrets.token_urlsafe(13)
     with modal.forward(8888) as tunnel:
