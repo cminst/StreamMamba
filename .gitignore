@@ -162,3 +162,4 @@ wandb
 src/configs/data.py
 *cookies[0-9].txt
 *cookies.txt
+.aider*
