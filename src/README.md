@@ -11,7 +11,19 @@ In addition, to ensure no issues arise with installation of Flash Attention, fee
 
 ## Note
 
-Before running any training scripts, set the environment variable `DATASET_ROOT`
+Before running any training scripts, set the environment variable `DATASET_ROOT` to the root directory of your datasets.
+
+Example directory structure for `DATASET_ROOT`:
+```text
+DATASET_ROOT
+├── k600
+│   └── kinetics-dataset
+│       ├── annotations/
+│       └── videos/
+└── # other datasets can go here
+```
+
+The project (StreamMamba) should be cloned and installed separately, as described above.
 
 ## Key Dependencies Installation for FlashAttention2
 
