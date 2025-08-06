@@ -107,7 +107,6 @@ def get_frame_indices(num_frames, vlen, sample='rand', fix_start=None, input_fps
         frame_indices = [e for e in frame_indices if e < vlen]
         if max_num_frames > 0 and len(frame_indices) > max_num_frames:
             frame_indices = frame_indices[:max_num_frames]
-            # frame_indices = np.linspace(0 + delta / 2, duration + delta / 2, endpoint=False, num=max_num_frames)
     else:
         raise ValueError
     return frame_indices
@@ -123,8 +122,8 @@ def read_frames_av(video_path, num_frames, sample='rand', fix_start=None, max_nu
         num_frames, vlen, sample=sample, fix_start=fix_start,
         input_fps=fps, max_num_frames=max_num_frames
     )
-    frames = torch.stack([frames[idx] for idx in frame_indices])  # (T, H, W, C), torch.uint8
-    frames = frames.permute(0, 3, 1, 2)  # (T, C, H, W), torch.uint8
+    frames = torch.stack([frames[idx] for idx in frame_indices])  # (T, H, W, C)
+    frames = frames.permute(0, 3, 1, 2)  # (T, C, H, W)
     return frames, frame_indices, duration
 
 
@@ -159,10 +158,9 @@ def read_frames_decord(
         video_path, num_frames, sample='rand', fix_start=None,
         max_num_frames=-1, client=None, trimmed30=False
     ):
-    num_threads = 1 if video_path.endswith('.webm') else 0 # make ssv2 happy
+    num_threads = 1 if video_path.endswith('.webm') else 0
     if "s3://" in video_path:
         video_bytes = client.get(video_path)
-        # print(f"\033[1;31;40m {video_path} ok: {video_bytes is None} \033[0m")
         if video_bytes is None:
             logger.warning(f"Failed to load {video_path}")
         video_reader = VideoReader(io.BytesIO(video_bytes), num_threads=num_threads)
@@ -183,8 +181,8 @@ def read_frames_decord(
         input_fps=fps, max_num_frames=max_num_frames
     )
 
-    frames = video_reader.get_batch(frame_indices)  # (T, H, W, C), torch.uint8
-    frames = frames.permute(0, 3, 1, 2)  # (T, C, H, W), torch.uint8
+    frames = video_reader.get_batch(frame_indices)  # (T, H, W, C)
+    frames = frames.permute(0, 3, 1, 2)  # (T, C, H, W)
     return frames, frame_indices, duration
 
 
