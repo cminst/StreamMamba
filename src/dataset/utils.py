@@ -15,7 +15,6 @@ from PIL import ImageFile
 from torchvision.transforms import PILToTensor
 import librosa
 import torchaudio
-# import soundfile as sf
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 Image.MAX_IMAGE_PIXELS = None
@@ -24,21 +23,17 @@ logger = logging.getLogger(__name__)
 
 
 def load_audio_from_path(audio_path, client, sr, audio_reader_type, max_length=0):
-    # print(f"audio_path: {audio_path}, client: {client}, sr: {sr}, audio_reader_type: {audio_reader_type}")
     if "s3://" in audio_path and client is not None:
         audio_bytes = client.get(audio_path)
         buff = io.BytesIO(audio_bytes)
     else:
         buff = audio_path
+
     if audio_reader_type == 'librosa':
         audio, _ = librosa.load(buff, sr=sr)
         audio = torch.from_numpy(audio)
-        # audio = normalize(audio)        # normalize waveform to -1,1 due to specified sr in librosa.load
-    # elif audio_reader_type == 'soundfile':
-    #     audio, _ = sf.read(buff, sr=sr)
-    #     audio = torch.from_numpy(audio)
     elif audio_reader_type == 'torchaudio':
-        torchaudio.set_audio_backend('soundfile')   # for flac files
+        torchaudio.set_audio_backend('soundfile')
         audio, csr = torchaudio.load(buff)
         if csr != sr:
             trans = torchaudio.transforms.Resample(csr, sr)
@@ -47,17 +42,15 @@ def load_audio_from_path(audio_path, client, sr, audio_reader_type, max_length=0
             audio = torch.mean(audio, dim=0, keepdim=False)
     else:
         raise NotImplementedError
+
     if max_length != 0:
-    # if audio length is longer than max_length, we randomly crop it to uta length
         if audio.shape[0] >= max_length:
             max_start = audio.shape[0] - max_length
             start = random.randint(0, max_start)
             audio = audio[start: start + max_length]
-            # padding = torch.zeros(audio.shape).long()
         else:
-            # padding = torch.cat((torch.zeros(audio.shape), torch.ones(max_length-audio.shape[0])), -1).long()
             audio = torch.nn.functional.pad(audio, (0, max_length-audio.shape[-1]), 'constant')
-    # print(f"post audio max: {audio.max()}, audio min: {audio.min()}, audio shape: {audio.shape}")
+
     if len(audio.shape) == 1:
         audio = audio.unsqueeze(0)
     fbank = audio * 2 ** 15
@@ -78,7 +71,7 @@ def load_image_from_path(image_path, client):
         image = Image.open(buff).convert('RGB')
     else:
         image = Image.open(image_path).convert('RGB')  # PIL Image
-    image = PILToTensor()(image).unsqueeze(0)  # (1, C, H, W), torch.uint8
+    image = PILToTensor()(image).unsqueeze(0)  # (1, C, H, W)
     return image
 
 
@@ -101,7 +94,7 @@ def load_anno(ann_file_list):
         ann_file_list = [ann_file_list]
 
     ann = []
-    for d in ann_file_list:        
+    for d in ann_file_list:
 
         data_root = d.data_root
         data_root_prefix = d.get("data_root_prefix", "")
@@ -119,7 +112,7 @@ def load_anno(ann_file_list):
                 key = "audio"
             else:
                 raise NotImplementedError(key)
-            
+
             # unified to have the same key for data path
             if isinstance(cur_ann[idx][key], str):
                 cur_ann[idx]["image"] = data_root_prefix + join(data_root, cur_ann[idx][key])
