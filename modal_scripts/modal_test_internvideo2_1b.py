@@ -29,14 +29,12 @@ image = (
     .pip_install('huggingface_hub')
 )
 
-# Set environment variables within the Modal image.
 image = image.env({
     "HF_HUB_ENABLE_HF_TRANSFER": "1",
     "HF_TOKEN": os.environ['HF_TOKEN'],
     "WANDB_API_KEY": os.environ['WANDB_API_KEY']
 })
 
-# Add system-level commands to the Modal image to update package lists and install essential tools.
 image = image.run_commands(
     "apt-get update -y",
     "apt-get install git curl -y",
@@ -46,7 +44,6 @@ image = image.run_commands(
     "huggingface-cli download OpenGVLab/InternVideo2-Stage2_1B-224p-f4 --local-dir /root/",
 )
 
-# Clone the InternVideo2 Repository
 image = image.run_commands(
     "cd /root/ && git clone https://github.com/qingy1337/IV2.git",
 )
@@ -56,7 +53,6 @@ image = image.run_commands(
     "apt-get update",
     "apt-get install ffmpeg libsm6 libxext6 -y"
 )
-# ---------
 
 app = modal.App(image=image, name="InternVideo2 Experiments")
 
@@ -74,29 +70,27 @@ def runwithgpu():
     """.strip().splitlines()
 
     for line in commands:
-        subprocess.run(line.strip().split(), check = True)
+        subprocess.run(line.strip().split(), check=True)
 
     pass
 
     token = 'jupyter'
     with modal.forward(8888) as tunnel:
-        # Construct the URL to access JupyterLab, including the generated token.
         url = tunnel.url + "/?token=" + token
-        print('-'*50 + '\n' + f"{url}\n"+'-'*50) # Print the URL to the console, making it easy to access JupyterLab in a browser.
-        # Start JupyterLab server with specific configurations.
+        print('-' * 50 + '\n' + f"{url}\n" + '-' * 50)
         subprocess.run(
             [
-                "jupyter", # Command to execute JupyterLab.
-                "lab", # Start JupyterLab interface.
-                "--no-browser", # Prevent JupyterLab from trying to open a browser automatically.
-                "--allow-root", # Allow JupyterLab to be run as root user inside the container.
-                "--ip=0.0.0.0", # Bind JupyterLab to all network interfaces, making it accessible externally.
-                "--port=8888", # Specify the port for JupyterLab to listen on.
-                "--LabApp.allow_origin='*'", # Allow requests from any origin (for easier access from different networks).
-                "--LabApp.allow_remote_access=1", # Allow remote connections to JupyterLab.
+                "jupyter",
+                "lab",
+                "--no-browser",
+                "--allow-root",
+                "--ip=0.0.0.0",
+                "--port=8888",
+                "--LabApp.allow_origin='*'",
+                "--LabApp.allow_remote_access=1",
             ],
-            env={**os.environ, "JUPYTER_TOKEN": token, "SHELL": "/bin/bash"}, # Set environment variables, including the authentication token and shell.
-            stderr=subprocess.DEVNULL, # Suppress standard error output from JupyterLab for cleaner logs.
+            env={**os.environ, "JUPYTER_TOKEN": token, "SHELL": "/bin/bash"},
+            stderr=subprocess.DEVNULL,
         )
 
 @app.local_entrypoint()
