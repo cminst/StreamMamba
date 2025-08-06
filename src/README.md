@@ -39,3 +39,19 @@ cd csrc/fused_dense_lib && pip install .
 ```python
 cd csrc/layer_norm && pip install .
 ```
+
+## Pretraining
+
+To pretrain the StreamMamba model, run the following command from the `src` directory:
+
+```shell
+sh scripts/pretraining/clip/B14/run.sh
+```
+
+## SPFS Training
+
+To train the SPFS model, run the following command from the `src` directory:
+
+```shell
+sh scripts/spfs/clip/B14/run.sh
+```
