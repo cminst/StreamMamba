@@ -64,7 +64,7 @@ def get_frame_indices(num_frames, vlen, sample='rand', fix_start=None, input_fps
         list: A list of frame indices.
     """
 
-    max_num_frames = 248 # >> MANUAL OVERRIDE RRR RRRR RRR RRR
+    max_num_frames = 248 # We select 248 frames out of 10-second, 30 FPS videos
 
     if sample == 'all':
         if log:
