@@ -9,7 +9,7 @@ StreamMamba introduces a novel framework for efficient video understanding that 
 
 **Note:** The `mamba` folder in this repository is copied from the original implementation at https://github.com/state-spaces/mamba.
 
-## Training and Inference Instructions
+## Training and Inference
 
 For detailed instructions on how to prepare datasets and models, as well as how to run training and inference, please refer to:
 
