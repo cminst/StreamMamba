@@ -9,7 +9,6 @@ from vllm import LLM, SamplingParams
 from tqdm.auto import tqdm
 import numpy as np
 
-# --- Configuration ---
 CLASSIFICATION_MODEL = "./action_classifier/"
 GENERATION_MODEL = "./ReAction-1.5B/"
 DATASET_ID = "TempoFunk/webvid-10M"
@@ -19,15 +18,9 @@ CLASSIFICATION_OUTPUT_FILE = "webvid_classification.jsonl"
 CLASSIFICATION_BATCH_SIZE = 1024
 GENERATION_BATCH_SIZE = 900
 
-PROMPT_TEMPLATE = """<|im_start|>system
-You are ReAction, an assistant to rewrite video caption to make them clearer. Rewrite the user's video caption.<|im_end|>
-<|im_start|>user
-{caption_text_from_name_column}<|im_end|>
-<|im_start|>assistant
-"""
+PROMPT_TEMPLATE = """{caption_text_from_name_column}"""
 
 def main():
-    """Main function to run the processing pipeline."""
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
     logger = logging.getLogger(__name__)
     logger.info("Starting WebVid caption classification and rewriting script.")
@@ -36,12 +29,10 @@ def main():
     dataset = load_dataset(DATASET_ID, split='train')
     logger.info(f"Dataset loaded with {len(dataset)} rows.")
 
-    # Check if classification file exists
     if os.path.exists(CLASSIFICATION_OUTPUT_FILE):
         logger.info(f"Found existing classification file: {CLASSIFICATION_OUTPUT_FILE}")
-        logger.info("Loading classifications from file...")
+        logger.info("Loading classifications from file.")
 
-        # Load classifications from file
         classifications = []
         action_count = 0
         no_action_count = 0
@@ -58,11 +49,9 @@ def main():
                     elif classification == 'no_action':
                         no_action_count += 1
 
-            # Verify we have the right number of classifications
             if len(classifications) != len(dataset):
                 logger.warning(f"Number of classifications ({len(classifications)}) doesn't match dataset size ({len(dataset)})")
-                logger.info("Re-running classification...")
-                # Clear the classifications to trigger re-classification
+                logger.info("Re-running classification.")
                 classifications = []
             else:
                 logger.info(f"Successfully loaded {len(classifications)} classifications")
@@ -70,14 +59,13 @@ def main():
 
         except Exception as e:
             logger.error(f"Error loading classification file: {e}")
-            logger.info("Re-running classification...")
+            logger.info("Re-running classification.")
             classifications = []
 
     else:
-        logger.info(f"No existing classification file found. Running classification...")
+        logger.info("No existing classification file found. Running classification.")
         classifications = []
 
-    # Only run classification if we don't have valid classifications
     if not classifications:
         logger.info(f"Initializing classification model: {CLASSIFICATION_MODEL}")
         classifier = pipeline(
@@ -88,16 +76,13 @@ def main():
             batch_size=CLASSIFICATION_BATCH_SIZE
         )
 
-        logger.info("Starting caption classification...")
+        logger.info("Starting caption classification.")
 
-        # Process the dataset in streaming fashion for optimal GPU utilization
         classifications = []
         action_count = 0
         no_action_count = 0
 
-        # Open file for writing classification results
         with open(CLASSIFICATION_OUTPUT_FILE, 'w', encoding='utf-8') as f:
-            # Directly iterate over dataset with the pipeline using KeyDataset
             progress_bar = tqdm(
                 enumerate(classifier(KeyDataset(dataset, "name"))),
                 total=len(dataset),
@@ -108,7 +93,6 @@ def main():
                 label = result['label']
                 classifications.append(label)
 
-                # Save classification result to JSONL file
                 classification_entry = {
                     "index": idx,
                     "caption": dataset[idx]["name"],
@@ -122,17 +106,14 @@ def main():
                 elif label == 'no_action':
                     no_action_count += 1
 
-                # Update progress bar description with current counts
                 progress_bar.set_postfix(actions=action_count, no_actions=no_action_count)
 
         logger.info(f"Classification results saved to {CLASSIFICATION_OUTPUT_FILE}")
         logger.info("Classification complete.")
         logger.info(f"Found {action_count} 'action' captions and {no_action_count} 'no_action' captions.")
 
-    # Add classification column to dataset
     dataset = dataset.add_column("classification", classifications)
 
-    # Split dataset based on classification
     action_subset = dataset.filter(lambda x: x['classification'] == 'action')
     no_action_subset = dataset.filter(lambda x: x['classification'] == 'no_action')
 
@@ -151,11 +132,9 @@ def main():
             skip_special_tokens=True,
         )
 
-        # Process in batches for more efficient generation
-        logger.info(f"Generating rewritten captions for {len(action_subset)} action captions...")
+        logger.info(f"Generating rewritten captions for {len(action_subset)} action captions.")
         rewritten_captions = []
 
-        # Process in batches for memory efficiency
         for i in tqdm(range(0, len(action_subset), GENERATION_BATCH_SIZE), desc="Generating captions"):
             batch = action_subset[i:i + GENERATION_BATCH_SIZE]
             prompts = [PROMPT_TEMPLATE.format(caption_text_from_name_column=c) for c in batch["name"]]
