@@ -98,6 +98,15 @@ def parse_args():
         default=2,
         help="Sampling rate for *_uniform modes",
     )
+    parser.add_argument(
+        "--dataset-name",
+        default="act75",
+        choices=[
+            "act75",
+            "flash",
+        ],
+        help="Dataset to evaluate on",
+    )
 
     return parser.parse_args()
 
@@ -242,7 +251,7 @@ def main():
             ["git", "clone", "https://github.com/cminst/peakframe-toolkit.git"]
         )
 
-    dataset = json_read("peakframe-toolkit/data/ACT75.json")
+    dataset = json_read(f"peakframe-toolkit/data/{args.dataset_name.uppercase()}.json")
 
     # ---------- Model Loading ----------
 
@@ -387,13 +396,13 @@ def main():
         folder_name += f"_sr_{args.sampling_rate}"
 
     logits_dir = os.path.join(folder_name, "logits")
-    preds_dir = os.path.join(folder_name, "predictions", "act75")
+    preds_dir = os.path.join(folder_name, "predictions", args.dataset_name)
     metrics_file = os.path.join(folder_name, "metrics.json")
 
     os.makedirs(logits_dir, exist_ok=True)
     os.makedirs(preds_dir, exist_ok=True)
 
-    json_write(reformatted_logits, os.path.join(logits_dir, "act75.json"))
+    json_write(reformatted_logits, os.path.join(logits_dir, f"{args.dataset_name}.json"))
     json_write(preds, os.path.join(preds_dir, "8.json"))
 
     metrics = compute_accuracy(preds, dataset)
@@ -410,7 +419,7 @@ def main():
     json_write(run_details, metrics_file)
 
     print(f"Saved MAE results to {os.path.join(preds_dir, '8.json')}")
-    print(f"Saved logits to {os.path.join(logits_dir, 'act75.json')}")
+    print(f"Saved logits to {os.path.join(logits_dir, f'{args.dataset_name}.json')}")
     print(f"Saved MAE metrics to {metrics_file}")
     print(f"Average MAE accuracy: {metrics['average']:.2f}")
 
