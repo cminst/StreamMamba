@@ -121,12 +121,12 @@ def main():
 
     intern_model.eval()
 
-    act75_data = json_read('peakframe-toolkit/data/ACT75.json')
+    dataset = json_read('peakframe-toolkit/data/ACT75.json')
 
     results = []
     size_t = config.get('size_t', 224)
 
-    for video_path, _, _ in act75_data:
+    for video_path, _, _ in dataset:
         cap = cv2.VideoCapture('peakframe-toolkit/' + video_path)
         frames = [x for x in _frame_from_video(cap)]
         if not frames:

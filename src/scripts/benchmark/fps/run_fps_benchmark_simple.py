@@ -77,7 +77,6 @@ def parse_args():
             "streammamba_dense",
             "streammamba_spfs",
             "streammamba_spfs_uniform",
-            "streammamba_skip",
             "lstm",
         ],
         help="Streaming configuration variant",
@@ -88,20 +87,12 @@ def parse_args():
         default=2,
         help="Sampling rate for *_uniform modes.",
     )
-    parser.add_argument(
-        "--no-spfs",
-        action="store_true",
-        help="(Deprecated) Disable SPFS; equivalent to --mode streammamba_dense",
-    )
     return parser.parse_args()
 
 
 def main():
     ensure_dependencies()
     args = parse_args()
-
-    if args.no_spfs and args.mode != "lstm":
-        args.mode = "streammamba_dense"
 
     if args.mode == "lstm":
         use_spfs = False
@@ -111,7 +102,6 @@ def main():
         use_spfs = args.mode in [
             "streammamba_spfs",
             "streammamba_spfs_uniform",
-            "streammamba_skip",
         ]
         rnn_type = "mamba_spfs" if use_spfs else "mamba"
     print(f"Running in {args.mode} mode.")
@@ -126,9 +116,7 @@ def main():
         folder_name += f"_sr_{args.sampling_rate}"
 
     # Determine root folder based on mode
-    if args.mode == "streammamba_skip":
-        root_folder = "results_skip"
-    elif args.mode == "streammamba_spfs_uniform":
+    if args.mode == "streammamba_spfs_uniform":
         root_folder = "results_uniform"
     else:
         root_folder = "results"
@@ -261,15 +249,6 @@ def main():
                     max_consecutive_skips=0,
                 )
             elif args.mode == "streammamba_spfs":
-                _, hidden, spfs_info = intern_model.encode_streaming_vision(
-                    tensor,
-                    hidden,
-                    confidence_threshold=args.confidence_threshold,
-                    max_consecutive_skips=args.max_consecutive_skips,
-                )
-                if spfs_info.skipped:
-                    skipped_frames += 1
-            elif args.mode == "streammamba_skip":
                 _, hidden, spfs_info = intern_model.encode_streaming_vision(
                     tensor,
                     hidden,

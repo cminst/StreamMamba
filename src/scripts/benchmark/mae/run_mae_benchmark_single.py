@@ -224,6 +224,7 @@ def main():
             "streammamba_spfs_uniform",
         ]
         expected_rnn_type = "mamba_spfs" if use_spfs else "mamba"
+
     current_rnn_type = config.model.streaming_vision_encoder.rnn_type
 
     if current_rnn_type != expected_rnn_type:
