@@ -88,7 +88,6 @@ def parse_args():
             "streammamba_dense",
             "streammamba_spfs",
             "streammamba_spfs_uniform",
-            "streammamba_skip",
             "lstm",
         ],
         help="Streaming configuration variant",
@@ -99,11 +98,7 @@ def parse_args():
         default=2,
         help="Sampling rate for *_uniform modes",
     )
-    parser.add_argument(
-        "--no-spfs",
-        action="store_true",
-        help="(Deprecated) Disable SPFS; equivalent to --mode streammamba_dense",
-    )
+    
     return parser.parse_args()
 
 def find_closest(pred, truths):
@@ -221,9 +216,6 @@ def main():
     config = Config.from_file(config_path)
     config = eval_dict_leaf(config)
 
-    if args.no_spfs and args.mode != "lstm":
-        args.mode = "streammamba_dense"
-
     if args.mode == "lstm":
         use_spfs = False
         expected_rnn_type = "lstm"
@@ -232,7 +224,6 @@ def main():
         use_spfs = args.mode in [
             "streammamba_spfs",
             "streammamba_spfs_uniform",
-            "streammamba_skip",
         ]
         expected_rnn_type = "mamba_spfs" if use_spfs else "mamba"
     current_rnn_type = config.model.streaming_vision_encoder.rnn_type
@@ -252,7 +243,7 @@ def main():
             ["git", "clone", "https://github.com/ruo2019/photography-model.git"]
         )
 
-    act75_data = json_read("photography-model/data/ACT75.json")
+    dataset = json_read("photography-model/data/ACT75.json")
 
     # ---------- Model Loading ----------
 
@@ -305,7 +296,7 @@ def main():
 
     intern_model.to(device)
 
-    for video_path, phrase, frames in act75_data:
+    for video_path, phrase, frames in dataset:
         frames = [
             x
             for x in _frame_from_video(
@@ -371,7 +362,7 @@ def main():
                 device=device,
                 confidence_threshold=threshold,
                 max_consecutive_skips=max_skip,
-                reuse_state_on_skip=(args.mode == "streammamba_skip"),
+                reuse_state_on_skip=False,
                 frames2tensor_func=frames2tensor,
             )
             logit_curr.append(probs.item())
@@ -385,9 +376,7 @@ def main():
 
     reformatted_logits = [[(float(l[0]), l[1]) for l in x] for x in logits]
 
-    if args.mode == "streammamba_skip":
-        root_folder = "results_skip"
-    elif args.mode == "streammamba_spfs_uniform":
+    if args.mode == "streammamba_spfs_uniform":
         root_folder = "results_uniform"
     else:
         root_folder = "results"
@@ -409,7 +398,7 @@ def main():
     json_write(reformatted_logits, os.path.join(logits_dir, "act75.json"))
     json_write(preds, os.path.join(preds_dir, "8.json"))
 
-    metrics = compute_accuracy(preds, act75_data)
+    metrics = compute_accuracy(preds, dataset)
 
     run_details = {
         "confidence_threshold": args.confidence_threshold,
