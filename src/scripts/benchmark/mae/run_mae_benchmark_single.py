@@ -202,7 +202,7 @@ def main():
     ensure_dependencies()
     args = parse_args()
 
-    # ---------- Setup ----------
+    # ------------- Setup ---------------
 
     sys.path.append(os.getcwd())
 
@@ -245,7 +245,7 @@ def main():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # ---------- Data Preparation ----------
+    # -------- Data Preparation ---------
 
     if "photography-model" not in os.listdir("."):
         subprocess.check_call(
@@ -295,7 +295,7 @@ def main():
     intern_model.eval()
     print("Model set to evaluation mode.")
 
-    # ---------- Prediction ----------
+    # ----------- Prediction ------------
 
     logits = []
 
