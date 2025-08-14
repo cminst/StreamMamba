@@ -275,7 +275,6 @@ def main():
                     hidden,
                     confidence_threshold=args.confidence_threshold,
                     max_consecutive_skips=args.max_consecutive_skips,
-                    reuse_state_on_skip=True,
                 )
                 if spfs_info.skipped:
                     skipped_frames += 1

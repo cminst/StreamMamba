@@ -165,7 +165,6 @@ def retrieve_text_streaming_spfs(
     device,
     confidence_threshold: float,
     max_consecutive_skips: int,
-    reuse_state_on_skip: bool,
     frames2tensor_func,
 ):
     """Lightweight inline implementation of ``retrieve_text_streaming`` with SPFS support."""
@@ -183,7 +182,6 @@ def retrieve_text_streaming_spfs(
         prev_hidden_state,
         confidence_threshold=confidence_threshold,
         max_consecutive_skips=max_consecutive_skips,
-        reuse_state_on_skip=reuse_state_on_skip,
     )
 
     text_feats = torch.cat([model.get_txt_feat(t) for t in texts], dim=0)
@@ -362,7 +360,6 @@ def main():
                 device=device,
                 confidence_threshold=threshold,
                 max_consecutive_skips=max_skip,
-                reuse_state_on_skip=False,
                 frames2tensor_func=frames2tensor,
             )
             logit_curr.append(probs.item())

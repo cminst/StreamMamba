@@ -116,7 +116,6 @@ class StreamMamba(nn.Module):
         prev_hidden_state,
         confidence_threshold=0.9,
         max_consecutive_skips=0,
-        reuse_state_on_skip=False,
         gamma=None,
         beta=None,
     ):
@@ -134,8 +133,6 @@ class StreamMamba(nn.Module):
                 For GRU: h_prev
             confidence_threshold (float): Confidence threshold for SPFS. Default 0.9
             max_consecutive_skips (int): Maximum number of consecutive frames to skip. Default 0
-            reuse_state_on_skip (bool): If True, reuse the previous hidden state and
-                output when skipping a frame instead of predicting the next feature.
             gamma (torch.Tensor): Used for FiLM
             beta (torch.Tensor): Used for FiLM
 
@@ -164,8 +161,6 @@ class StreamMamba(nn.Module):
                 if confidence > confidence_threshold:
                     spfs_info.skipped = True
                     self.consecutive_skips = getattr(self, 'consecutive_skips', 0) + 1
-                    if reuse_state_on_skip and self.last_output is not None:
-                        return self.last_output, prev_hidden_state, spfs_info
                     frame_feature = predicted_feature
                 else:
                     frame_feature, _ = self.vit_lite.extract_features(single_frame_input)

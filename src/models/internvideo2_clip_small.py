@@ -192,7 +192,6 @@ class InternVideo2_CLIP_small(nn.Module):
         prev_hidden_state,
         confidence_threshold=0.9,
         max_consecutive_skips=0,
-        reuse_state_on_skip=False,
         gamma=None,
         beta=None,
     ):
@@ -207,8 +206,6 @@ class InternVideo2_CLIP_small(nn.Module):
                 For GRU: h_prev
             confidence_threshold (float): Confidence threshold for SPFS. Default 0.9
             max_consecutive_skips (int): Maximum number of consecutive frames to skip. Default 0
-            reuse_state_on_skip (bool): Reuse previous state when skipping instead of
-                predicting the next feature.
             gamma (torch.Tensor, optional): FiLM scale parameters for conditioning the
                 streaming encoder. ``None`` if FiLM is not used.
             beta (torch.Tensor, optional): FiLM shift parameters for conditioning the
@@ -227,7 +224,6 @@ class InternVideo2_CLIP_small(nn.Module):
             prev_hidden_state=prev_hidden_state,
             confidence_threshold=confidence_threshold,
             max_consecutive_skips=max_consecutive_skips,
-            reuse_state_on_skip=reuse_state_on_skip,
             gamma=gamma,
             beta=beta,
         )
@@ -245,7 +241,6 @@ class InternVideo2_CLIP_small(nn.Module):
         prev_hidden_state,
         confidence_threshold=0.9,
         max_consecutive_skips=0,
-        reuse_state_on_skip=False,
         gamma=None,
         beta=None,
     ):
@@ -261,8 +256,6 @@ class InternVideo2_CLIP_small(nn.Module):
                 For LSTM: ``(h_prev, c_prev)``; for GRU: ``h_prev``.
             confidence_threshold (float): Confidence threshold for SPFS. Default 0.9
             max_consecutive_skips (int): Maximum number of consecutive frames to skip. Default 0
-            reuse_state_on_skip (bool): Reuse previous state when skipping instead of
-                predicting the next feature.
             gamma (torch.Tensor, optional): FiLM scale parameters for conditioning the
                 streaming encoder. ``None`` if FiLM is not used.
             beta (torch.Tensor, optional): FiLM shift parameters for conditioning the
@@ -278,7 +271,6 @@ class InternVideo2_CLIP_small(nn.Module):
                 prev_hidden_state=prev_hidden_state,
                 confidence_threshold=confidence_threshold,
                 max_consecutive_skips=max_consecutive_skips,
-                reuse_state_on_skip=reuse_state_on_skip,
                 gamma=gamma,
                 beta=beta,
             )
