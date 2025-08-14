@@ -231,7 +231,7 @@ def main():
         subprocess.check_call([
             "git",
             "clone",
-            "https://github.com/ruo2019/photography-model.git",
+            "https://github.com/cminst/photography-model.git",
         ])
 
     act75_data = json_read("photography-model/data/ACT75.json")

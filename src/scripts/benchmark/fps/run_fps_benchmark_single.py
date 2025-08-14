@@ -159,7 +159,7 @@ def main():
 
     if "photography-model" not in os.listdir("."):
         subprocess.check_call(
-            ["git", "clone", "https://github.com/ruo2019/photography-model.git"]
+            ["git", "clone", "https://github.com/cminst/photography-model.git"]
         )
 
     config = Config.from_file(os.path.join(args.config_dir, "config.py"))

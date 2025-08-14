@@ -98,7 +98,7 @@ def parse_args():
         default=2,
         help="Sampling rate for *_uniform modes",
     )
-    
+
     return parser.parse_args()
 
 def find_closest(pred, truths):
@@ -238,7 +238,7 @@ def main():
 
     if "photography-model" not in os.listdir("."):
         subprocess.check_call(
-            ["git", "clone", "https://github.com/ruo2019/photography-model.git"]
+            ["git", "clone", "https://github.com/cminst/photography-model.git"]
         )
 
     dataset = json_read("photography-model/data/ACT75.json")

@@ -172,7 +172,7 @@ def main():
     from iv2_utils.iv2 import json_read, json_write
 
     if "photography-model" not in os.listdir('.'):
-        subprocess.check_call(["git", "clone", "https://github.com/ruo2019/photography-model.git"])
+        subprocess.check_call(["git", "clone", "https://github.com/cminst/photography-model.git"])
 
     act75_data = json_read('photography-model/data/ACT75.json')
 

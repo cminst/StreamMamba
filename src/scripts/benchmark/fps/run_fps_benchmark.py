@@ -104,7 +104,7 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     if "photography-model" not in os.listdir('.'):
-        subprocess.check_call(["git", "clone", "https://github.com/ruo2019/photography-model.git"])
+        subprocess.check_call(["git", "clone", "https://github.com/cminst/photography-model.git"])
 
     config = Config.from_file(os.path.join(args.config_dir, "config.py"))
     config = eval_dict_leaf(config)

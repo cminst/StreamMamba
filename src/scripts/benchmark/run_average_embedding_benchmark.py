@@ -180,7 +180,7 @@ def main():
     if not os.path.exists(repo_path):
         print("Cloning photography-model repository...")
         subprocess.check_call([
-            "git", "clone", "https://github.com/ruo2019/photography-model.git"
+            "git", "clone", "https://github.com/cminst/photography-model.git"
         ])
         print("Repository cloned.")
 
@@ -226,7 +226,7 @@ def main():
     if os.path.exists(args.output_json):
         print(f"Loading existing results from: {args.output_json}")
         existing_results = json_read(args.output_json)
-        
+
         window_sizes = [N for N in requested_window_sizes if str(N) not in existing_results]
         if window_sizes:
             print(f"Skipping already processed window sizes: {[N for N in requested_window_sizes if str(N) in existing_results]}")
