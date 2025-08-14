@@ -236,12 +236,12 @@ def main():
 
     # -------- Data Preparation ---------
 
-    if "photography-model" not in os.listdir("."):
+    if "peakframe-toolkit" not in os.listdir("."):
         subprocess.check_call(
-            ["git", "clone", "https://github.com/cminst/photography-model.git"]
+            ["git", "clone", "https://github.com/cminst/peakframe-toolkit.git"]
         )
 
-    dataset = json_read("photography-model/data/ACT75.json")
+    dataset = json_read("peakframe-toolkit/data/ACT75.json")
 
     # ---------- Model Loading ----------
 
@@ -298,7 +298,7 @@ def main():
         frames = [
             x
             for x in _frame_from_video(
-                cv2.VideoCapture("photography-model/" + video_path)
+                cv2.VideoCapture("peakframe-toolkit/" + video_path)
             )
         ]
 

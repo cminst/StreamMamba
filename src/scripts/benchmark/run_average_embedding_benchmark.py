@@ -176,11 +176,11 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    repo_path = "photography-model"
+    repo_path = "peakframe-toolkit"
     if not os.path.exists(repo_path):
-        print("Cloning photography-model repository...")
+        print("Cloning peakframe-toolkit repository...")
         subprocess.check_call([
-            "git", "clone", "https://github.com/cminst/photography-model.git"
+            "git", "clone", "https://github.com/cminst/peakframe-toolkit.git"
         ])
         print("Repository cloned.")
 

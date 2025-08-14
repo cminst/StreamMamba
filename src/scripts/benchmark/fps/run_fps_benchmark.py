@@ -103,8 +103,8 @@ def main():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    if "photography-model" not in os.listdir('.'):
-        subprocess.check_call(["git", "clone", "https://github.com/cminst/photography-model.git"])
+    if "peakframe-toolkit" not in os.listdir('.'):
+        subprocess.check_call(["git", "clone", "https://github.com/cminst/peakframe-toolkit.git"])
 
     config = Config.from_file(os.path.join(args.config_dir, "config.py"))
     config = eval_dict_leaf(config)
@@ -121,13 +121,13 @@ def main():
 
     intern_model.eval()
 
-    act75_data = json_read('photography-model/data/ACT75.json')
+    act75_data = json_read('peakframe-toolkit/data/ACT75.json')
 
     results = []
     size_t = config.get('size_t', 224)
 
     for video_path, _, _ in act75_data:
-        cap = cv2.VideoCapture('photography-model/' + video_path)
+        cap = cv2.VideoCapture('peakframe-toolkit/' + video_path)
         frames = [x for x in _frame_from_video(cap)]
         if not frames:
             continue

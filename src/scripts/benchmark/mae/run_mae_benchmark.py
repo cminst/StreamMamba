@@ -171,10 +171,10 @@ def main():
 
     from iv2_utils.iv2 import json_read, json_write
 
-    if "photography-model" not in os.listdir('.'):
-        subprocess.check_call(["git", "clone", "https://github.com/cminst/photography-model.git"])
+    if "peakframe-toolkit" not in os.listdir('.'):
+        subprocess.check_call(["git", "clone", "https://github.com/cminst/peakframe-toolkit.git"])
 
-    act75_data = json_read('photography-model/data/ACT75.json')
+    act75_data = json_read('peakframe-toolkit/data/ACT75.json')
 
     def evaluate_checkpoint(checkpoint_path: str, dataset, eval_again: bool = False):
         out_dir = os.path.dirname(checkpoint_path)
@@ -266,7 +266,7 @@ def main():
         intern_model.to(device)
 
         for video_path, phrase, frames in dataset:
-            frames = [x for x in _frame_from_video(cv2.VideoCapture('photography-model/' + video_path))]
+            frames = [x for x in _frame_from_video(cv2.VideoCapture('peakframe-toolkit/' + video_path))]
 
             logit_curr = []
             pbar = tqdm(range(7, len(frames)))

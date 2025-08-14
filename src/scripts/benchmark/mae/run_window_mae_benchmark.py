@@ -227,14 +227,14 @@ def main():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    if "photography-model" not in os.listdir("."):
+    if "peakframe-toolkit" not in os.listdir("."):
         subprocess.check_call([
             "git",
             "clone",
-            "https://github.com/cminst/photography-model.git",
+            "https://github.com/cminst/peakframe-toolkit.git",
         ])
 
-    act75_data = json_read("photography-model/data/ACT75.json")
+    act75_data = json_read("peakframe-toolkit/data/ACT75.json")
 
     config_path = os.path.join(args.config_dir, "config.py")
     config = Config.from_file(config_path)
@@ -269,7 +269,7 @@ def main():
             frames = [
                 f
                 for f in _frame_from_video(
-                    cv2.VideoCapture(os.path.join("photography-model", video_path))
+                    cv2.VideoCapture(os.path.join("peakframe-toolkit", video_path))
                 )
             ]
             pred_s, log_s = streammamba_predict(
