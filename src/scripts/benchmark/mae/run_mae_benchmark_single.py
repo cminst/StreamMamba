@@ -363,6 +363,9 @@ def main():
             continue
 
         # Load frames from video
+        video_path = "peakframe-toolkit/" + video_path
+        assert os.path.exists(video_path), f"Could not find video {video_path}, please download the FLASH dataset via the downloader script in peakframe-toolkit"
+
         video_capture = cv2.VideoCapture("peakframe-toolkit/" + video_path)
         all_frames = [x for x in _frame_from_video(video_capture)]
 
