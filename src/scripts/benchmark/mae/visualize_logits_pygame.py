@@ -280,6 +280,9 @@ def main():
     screen_h = left_h
 
     screen = pygame.display.set_mode((screen_w, screen_h))
+
+    pygame.key.set_repeat(250, 50)  # Wait 250ms, then repeat every 50ms
+
     pygame.display.set_caption(f"Logits Viewer - {os.path.basename(video_path)} [{args.dataset_name}] (# {args.index})")
 
     # Pre-scale frames to target size for faster blits
@@ -374,4 +377,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
