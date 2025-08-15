@@ -8,10 +8,7 @@ from huggingface_hub import hf_hub_download
 
 def ensure_dependencies():
     """Ensure required packages are installed."""
-    required_packages = {
-        "einops", "peft", "open_clip_torch", "protobuf",
-        "sentencepiece", "iv2-utils", "huggingface_hub"
-    }
+    required_packages = {"einops", "peft""sentencepiece", "iv2-utils", "huggingface_hub"}
 
     missing = []
     for package in required_packages:
