@@ -147,11 +147,6 @@ def forward_streaming_spfs(
     prev_hidden_state=None,
 ):
     """Lightweight implementation of ``retrieve_text_streaming`` with SPFS support."""
-
-    if new_frame_tensor.ndim == 5:
-        print("NDIM IS 5")
-        new_frame_tensor = new_frame_tensor.squeeze(1)
-
     vid_feat, new_hidden_state, spfs_info = model.get_streaming_vid_feat(
         new_frame_tensor,
         prev_hidden_state,
@@ -328,7 +323,9 @@ def main():
     # Helper for simplifying frame -> tensor conversion
     def get_frame_tensor(frame):
         frame_size = config.get("size_t", 224)
-        return frames2tensor([frame], fnum=1, target_size=(frame_size, frame_size), device=device)
+
+        # [1, 3, 224, 224]
+        return frames2tensor([frame], fnum=1, target_size=(frame_size, frame_size), device=device).squeeze(0)
 
     # -------- Data Preparation ---------
 
@@ -387,7 +384,7 @@ def main():
         curr_hidden_state = model.streaming_vision_encoder.init_hidden(batch_size=1, device=device)
 
         for frame_idx in range(7):
-            initial_frame_tensor = get_frame_tensor(frames[frame_idx]).squeeze(0).to(device)
+            initial_frame_tensor = get_frame_tensor(frames[frame_idx])
 
             _, curr_hidden_state, _ = model.streaming_vision_encoder(
                 initial_frame_tensor,
