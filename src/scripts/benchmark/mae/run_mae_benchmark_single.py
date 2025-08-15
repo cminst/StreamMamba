@@ -222,7 +222,7 @@ def get_output_folder(args, rnn_type):
     """Generate output folder name based on configuration."""
     base = "results_uniform" if "uniform" in args.mode else "results"
 
-    spfs_template = f"{base}/results_{rnn_type}_ct_{args.confidence_threshold}_mcs_{args.max_consecutive_steps}"
+    spfs_template = f"{base}/results_{rnn_type}_ct_{args.confidence_threshold}_mcs_{args.max_consecutive_skips}"
     uniform_sampling_template = f"{base}/results_{rnn_type}_{args.sampling_rate}"
 
     if "uniform" in args.mode:
@@ -364,9 +364,9 @@ def main():
 
         # Load frames from video
         video_path = "peakframe-toolkit/" + video_path
-        assert os.path.exists(video_path), f"Could not find video {video_path}, please download the FLASH dataset via the downloader script in peakframe-toolkit"
+        assert os.path.exists(video_path), f"Could not find video {video_path}, please download the FLASH dataset via the downloader script in peakframe-toolkit/"
 
-        video_capture = cv2.VideoCapture("peakframe-toolkit/" + video_path)
+        video_capture = cv2.VideoCapture(video_path)
         all_frames = [x for x in _frame_from_video(video_capture)]
 
         # For FLASH dataset, crop to the [build_up, drop_off] segment
