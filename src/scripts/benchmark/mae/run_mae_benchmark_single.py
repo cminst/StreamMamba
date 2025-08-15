@@ -379,7 +379,7 @@ def main():
             frames = all_frames
 
         # Need at least 8 frames to warm up and score
-        assert len(frames) >= 8, f"Video must have at least 8 frames, but only found {len(frames)}."
+        assert len(frames) >= 8, f"Video must have at least 8 frames, but only found {len(frames)} ({len(all_frames)} total)."
 
         logits_list_curr = []
         frame_progress_bar = tqdm(range(7, len(frames)))
