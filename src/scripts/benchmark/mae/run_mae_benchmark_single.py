@@ -2,38 +2,27 @@ import argparse
 import os
 import sys
 import subprocess
-
-import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from huggingface_hub import hf_hub_download
 
 def ensure_dependencies():
-    try:
-        import einops  # noqa: F401
-    except Exception:
-        print("Installing...")
-        subprocess.check_call(
-            [
-                sys.executable,
-                "-m",
-                "pip",
-                "install",
-                "-q",
-                "einops",
-                "peft",
-                "open_clip_torch",
-                "protobuf",
-                "sentencepiece",
-                "iv2-utils",
-                "matplotlib",
-                "huggingface_hub",
-            ]
-        )
-    print("Installed packages")
+    """Ensure required packages are installed."""
+    required_packages = {
+        "einops", "peft", "open_clip_torch", "protobuf",
+        "sentencepiece", "iv2-utils", "huggingface_hub"
+    }
+
+    missing = []
+    for package in required_packages:
+        try:
+            __import__(package.replace("-", "_"))
+        except ImportError:
+            missing.append(package)
+
+    if missing:
+        print(f"Missing required packages: {missing}")
+        sys.exit(1)
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -43,24 +32,13 @@ def parse_args():
         "config_dir",
         help="Path to training config directory, e.g. scripts/pretraining/clip/B14",
     )
-
     parser.add_argument(
-        "--output-graph",
-        default="accuracy_graph_single.png",
-        help="Path to output PNG graph of accuracy",
-    )
-    parser.add_argument(
-        "--output-json",
-        default="mae_results_single.json",
-        help="Path to output JSON with MAE results",
-    )
-    parser.add_argument(
-        "--checkpoint",
+        "--checkpoint-file",
         default=None,
         help="Path to a checkpoint file. If not provided, will download from HF.",
     )
     parser.add_argument(
-        "--checkpoint-file",
+        "--hf-checkpoint-file",
         default="spfs_r64/ckpt_step_24500.pt",
         help="Checkpoint filename within the HF repo",
     )
@@ -131,20 +109,20 @@ def find_best_offset(preds, data, search_range=(-30, 30)):
     """Find the integer offset that minimises MSE."""
     best_offset = 0
     best_mse = float("inf")
-    for off in range(search_range[0], search_range[1] + 1):
-        shifted = [p + off for p in preds]
+    for offset in range(search_range[0], search_range[1] + 1):
+        shifted = [p + offset for p in preds]
         mse = calculate_mse(shifted, data)
         if mse < best_mse:
             best_mse = mse
-            best_offset = off
+            best_offset = offset
     return best_offset
 
 def offset_predictions(preds, data):
     best = find_best_offset(preds, data)
     return [p + best for p in preds]
 
-def compute_accuracy(preds: list[int], dataset: list) -> dict:
-    """Return MAE percentages within various frame offsets using global offset."""
+def compute_frame_accuracy(preds: list[int], dataset: list) -> dict:
+    """Return accuracy percentages within various frame offset thresholds."""
     thresholds = [2, 4, 8, 16, 32]
     preds_adj = offset_predictions(preds, dataset)
     totals = {t: 0 for t in thresholds}
@@ -163,31 +141,22 @@ def compute_accuracy(preds: list[int], dataset: list) -> dict:
     percentages["average"] = sum(percentages.values()) / len(thresholds)
     return percentages
 
-def retrieve_text_streaming_spfs(
-    new_frame,
+def forward_streaming_spfs(
+    new_frame_tensor,
     texts,
     model,
+    confidence_threshold: float = 0.8,
+    max_consecutive_skips: int = 8,
     prev_hidden_state=None,
-    *,
-    topk: int = 5,
-    config: dict,
-    device,
-    confidence_threshold: float,
-    max_consecutive_skips: int,
-    frames2tensor_func,
 ):
-    """Lightweight inline implementation of ``retrieve_text_streaming`` with SPFS support."""
+    """Lightweight implementation of ``retrieve_text_streaming`` with SPFS support."""
 
-    size_t = config.get("size_t", 224)
-
-    frame_tensor = frames2tensor_func(
-        [new_frame], fnum=1, target_size=(size_t, size_t), device=device
-    )
-    if frame_tensor.ndim == 5:
-        frame_tensor = frame_tensor.squeeze(1)
+    if new_frame_tensor.ndim == 5:
+        print("NDIM IS 5")
+        new_frame_tensor = new_frame_tensor.squeeze(1)
 
     vid_feat, new_hidden_state, spfs_info = model.get_streaming_vid_feat(
-        frame_tensor,
+        new_frame_tensor,
         prev_hidden_state,
         confidence_threshold=confidence_threshold,
         max_consecutive_skips=max_consecutive_skips,
@@ -195,18 +164,121 @@ def retrieve_text_streaming_spfs(
 
     text_feats = torch.cat([model.get_txt_feat(t) for t in texts], dim=0)
 
-    probs, idxs = model.predict_label(vid_feat, text_feats, top=topk)
+    probs, idxs = model.predict_label(vid_feat, text_feats, top=1)
 
     ret_texts = [texts[i] for i in idxs.long().cpu().numpy()[0].tolist()]
     return ret_texts, probs.float().cpu().numpy()[0], new_hidden_state, spfs_info
 
+
+# Normalize dataset entries into a common format:
+# For ACT75: expected as [video_path, phrase, gt_frames]
+# For FLASH: input format is [video_path, [peaks...]] per video.
+# We expand each peak into an entry:
+#   (video_path, caption, relative_gt_peak_frames, build_up, drop_off)
+def normalize_dataset(args, raw_dataset):
+    dataset = []
+    if args.dataset_name.lower() == "flash":
+        for item in raw_dataset:
+            # Each item: [video_path, [ {build_up, peak_start, peak_end, drop_off, caption}, ... ]]
+            if not isinstance(item, (list, tuple)) or len(item) != 2:
+                continue
+
+            video_path, peaks = item
+
+            for peak in peaks:
+                build_up = peak["build_up"]
+                peak_start = peak["peak_start"]
+                peak_end = peak["peak_end"]
+                drop_off = peak["drop_off"]
+                caption = str(peak.get("caption", "")).strip()
+
+                # Compute relative GT frames within [build_up, drop_off] inclusive
+                # Prediction indices are 1-based relative to the segment start
+                rel_start = peak_start - build_up + 1
+                rel_end = peak_end - build_up + 1
+                if rel_end < 1 or rel_start > (drop_off - build_up + 1):
+                    # Peak window falls entirely outside the evaluated segment
+                    rel_gt = []
+                else:
+                    rel_start = max(rel_start, 1)
+                    rel_end = min(rel_end, drop_off - build_up + 1)
+                    rel_gt = list(range(rel_start, rel_end + 1))
+
+                dataset.append((video_path, caption, rel_gt, build_up, drop_off))
+    else:
+        # Assume already in [video_path, phrase, gt_frames]
+        dataset = raw_dataset
+
+    return dataset
+
+def should_force_skip(frame_idx, args):
+    if args.mode == "streammamba_spfs_uniform" and args.sampling_rate > 1:
+        return (frame_idx - 7) % args.sampling_rate != (args.sampling_rate - 1)
+    else:
+        return False
+
+def get_skip_parameters(frame_idx, args, use_spfs):
+    """Determine skip parameters for current frame."""
+    if should_force_skip(frame_idx, args):
+        return -1e6, 10**6  # Force skip
+    elif use_spfs:
+        return args.confidence_threshold, args.max_consecutive_skips
+    else:
+        return 1.0, 0  # No skipping
+
+def get_output_folder(args, rnn_type):
+    """Generate output folder name based on configuration."""
+    base = "results_uniform" if "uniform" in args.mode else "results"
+
+    spfs_template = f"{base}/results_{rnn_type}_ct_{args.confidence_threshold}_mcs_{args.max_consecutive_steps}"
+    uniform_sampling_template = f"{base}/results_{rnn_type}_{args.sampling_rate}"
+
+    if "uniform" in args.mode:
+        return uniform_sampling_template
+    else:
+        return spfs_template
+
+def get_checkpoint_weights(ckpt_path):
+    ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+
+    if "model" in ckpt.keys():
+        state_dict = ckpt["model"]
+    elif "module" in ckpt.keys():
+        state_dict = ckpt["module"]
+    else:
+        print("ERROR: Checkpoint state_dict does not contain 'model' or 'module' keys.")
+        sys.exit(1)
+
+    return state_dict
+
+def load_checkpoint(args, model):
+    ckpt_path = args.checkpoint_file
+    if ckpt_path is None:
+        print(f"Downloading {args.hf_checkpoint_file} from Hugging Face...")
+        ckpt_path = hf_hub_download(repo_id=args.hf_repo, filename=args.hf_checkpoint_file)
+
+    missing_keys, unexpected_keys = model.load_state_dict(get_checkpoint_weights(ckpt_path), strict=False)
+
+    if unexpected_keys:
+        print("\nERROR: Unexpected keys in checkpoint state_dict:")
+        for k in unexpected_keys:
+            print(f"  - {k}")
+
+    if missing_keys:
+        print("\nINFO: Missing keys in checkpoint state_dict:")
+        for k in missing_keys[:5]:
+            print(f"  - {k}")
+        if len(missing_keys) > 5:
+            print(f"  - ... and {len(missing_keys) - 5} more")
+
+    model.eval()
+
 def main():
     ensure_dependencies()
     args = parse_args()
+    sys.path.append(os.getcwd())
 
     # ------------- Setup ---------------
-
-    sys.path.append(os.getcwd())
 
     from demo.config import Config, eval_dict_leaf
     from demo.utils import _frame_from_video
@@ -226,7 +298,7 @@ def main():
     if args.mode == "lstm":
         use_spfs = False
         expected_rnn_type = "lstm"
-        args.checkpoint_file = "lstm_ckpt.pt"
+        args.hf_checkpoint_file = "lstm_ckpt.pt" # Download LSTM checkpoint from HF Repo
     else:
         use_spfs = args.mode in [
             "streammamba_spfs",
@@ -237,189 +309,132 @@ def main():
     current_rnn_type = config.model.streaming_vision_encoder.rnn_type
 
     if current_rnn_type != expected_rnn_type:
-        print(
-            f"Warning: Overriding RNN type from '{current_rnn_type}' to '{expected_rnn_type}'."
-        )
+        print(f"Warning: Overriding RNN type from '{current_rnn_type}' to '{expected_rnn_type}'.")
         config.model.streaming_vision_encoder.rnn_type = expected_rnn_type
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    # Helper for simplifying frame -> tensor conversion
+    def get_frame_tensor(frame):
+        frame_size = config.get("size_t", 224)
+        return frames2tensor([frame], fnum=1, target_size=(frame_size, frame_size), device=device)
+
     # -------- Data Preparation ---------
 
     if "peakframe-toolkit" not in os.listdir("."):
-        subprocess.check_call(
-            ["git", "clone", "https://github.com/cminst/peakframe-toolkit.git"]
-        )
+        subprocess.check_call(["git", "clone", "https://github.com/cminst/peakframe-toolkit.git"])
 
-    dataset = json_read(f"peakframe-toolkit/data/{args.dataset_name.uppercase()}.json")
-
-    # ---------- Model Loading ----------
-
-    intern_model = InternVideo2_CLIP_small(config)
-    intern_model.to(device)
-
-    ckpt_path = args.checkpoint
-    if ckpt_path is None:
-        print(f"Downloading {args.checkpoint_file} from Hugging Face...")
-        ckpt_path = hf_hub_download(repo_id=args.hf_repo, filename=args.checkpoint_file)
-
-    ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
-
-    if "model" in ckpt.keys():
-        state_dict = ckpt["model"]
-    elif "module" in ckpt.keys():
-        state_dict = ckpt["module"]
-    else:
-        print("ERROR: Checkpoint state_dict does not contain 'model' or 'module' keys.")
-        sys.exit(1)
-
-    missing_keys, unexpected_keys = intern_model.load_state_dict(
-        state_dict, strict=False
-    )
-
-    if unexpected_keys:
-        print("\nERROR: Unexpected keys in checkpoint state_dict:")
-        for k in unexpected_keys:
-            print(f"  - {k}")
-
-    if missing_keys:
-        print("\nINFO: Missing keys in checkpoint state_dict:")
-        for k in missing_keys[:5]:
-            print(f"  - {k}")
-        if len(missing_keys) > 5:
-            print(f"  - ... and {len(missing_keys) - 5} more")
-
-    print("\nCheckpoint loaded successfully.")
-
-    intern_model.eval()
-    print("Model set to evaluation mode.")
+    # Load dataset JSON
+    json_path = f"peakframe-toolkit/data/{args.dataset_name.upper().replace('-', '_')}.json"
+    dataset = normalize_dataset(args, json_read(json_path))
 
     # ----------- Prediction ------------
+
+    model = InternVideo2_CLIP_small(config).to(device)
+
+    load_checkpoint(args, model)
+
+    print("\nCheckpoint loaded.")
 
     logits = []
 
     preds = []
 
-    size_t = config.get("size_t", 224)
+    for entry in dataset:
+        # Unpack depending on dataset variant
+        if len(entry) >= 5:
+            video_path, phrase, gt_frames, seg_start, seg_end = entry[:5]
+        elif len(entry) == 3:
+            video_path, phrase, gt_frames = entry
+            seg_start, seg_end = None, None
+        else:
+            # Unexpected format, skip
+            continue
 
-    intern_model.to(device)
+        # Load frames from video
+        video_capture = cv2.VideoCapture("peakframe-toolkit/" + video_path)
+        all_frames = [x for x in _frame_from_video(video_capture)]
 
-    for video_path, phrase, frames in dataset:
-        frames = [
-            x
-            for x in _frame_from_video(
-                cv2.VideoCapture("peakframe-toolkit/" + video_path)
-            )
-        ]
+        # For FLASH dataset, crop to the [build_up, drop_off] segment
+        if seg_start is not None and seg_end is not None:
+            start_i = max(0, int(seg_start))
+            end_i = min(len(all_frames) - 1, int(seg_end))
 
-        logit_curr = []
-        pbar = tqdm(range(7, len(frames)))
+            frames = all_frames[start_i : end_i + 1]
+        else:
+            frames = all_frames
 
-        curr_hidden_state = intern_model.streaming_vision_encoder.init_hidden(
-            batch_size=1, device=device
-        )
+        # Need at least 8 frames to warm up and score
+        assert len(frames) >= 8, f"Video must have at least 8 frames, but only found {len(frames)}."
+
+        logits_list_curr = []
+        frame_progress_bar = tqdm(range(7, len(frames)))
+
+        curr_hidden_state = model.streaming_vision_encoder.init_hidden(batch_size=1, device=device)
 
         for frame_idx in range(7):
-            initial_frame_mc = (
-                frames2tensor(
-                    [frames[frame_idx]],
-                    fnum=1,
-                    target_size=(size_t, size_t),
-                    device=device,
-                )
-                .squeeze(0)
-                .to(device)
-            )
+            initial_frame_tensor = get_frame_tensor(frames[frame_idx]).squeeze(0).to(device)
 
-            _, curr_hidden_state, _ = intern_model.streaming_vision_encoder(
-                initial_frame_mc,
+            _, curr_hidden_state, _ = model.streaming_vision_encoder(
+                initial_frame_tensor,
                 curr_hidden_state,
                 confidence_threshold=1.0,
                 max_consecutive_skips=0,
             )
-            logit_curr.append(0.0)
 
-        for j in pbar:
-            force_skip = False
-            if args.mode == "streammamba_spfs_uniform":
-                sampling_rate = args.sampling_rate
-                if sampling_rate > 1:
-                    force_skip = (j - 7) % sampling_rate != (sampling_rate - 1)
-                else:
-                    force_skip = False
-            threshold = (
-                -1e6
-                if force_skip
-                else (
-                    args.confidence_threshold
-                    if use_spfs
-                    else 1.0
-                )
-            )
-            max_skip = (
-                1000 if force_skip else (args.max_consecutive_skips if use_spfs else 0)
-            )
+            logits_list_curr.append(0.0)
 
-            _, probs, curr_hidden_state, _ = retrieve_text_streaming_spfs(
-                frames[j],
+        for frame_idx in frame_progress_bar:
+            # Determine if the current frame should be skipped (forcefully) in uniform sampling mode
+            confidence_threshold, max_consecutive_skips = get_skip_parameters(frame_idx, args, use_spfs)
+
+            _, probs, curr_hidden_state, _ = forward_streaming_spfs(
+                get_frame_tensor(frames[frame_idx]),
                 [phrase],
-                intern_model,
-                curr_hidden_state,
-                topk=1,
-                config=config,
-                device=device,
-                confidence_threshold=threshold,
-                max_consecutive_skips=max_skip,
-                frames2tensor_func=frames2tensor,
+                model,
+                confidence_threshold=confidence_threshold,
+                max_consecutive_skips=max_consecutive_skips,
+                prev_hidden_state=curr_hidden_state,
             )
-            logit_curr.append(probs.item())
-            if len(logit_curr) > 0:
-                pbar.set_description(str(np.argmax(logit_curr) + 1))
 
-        preds.append(np.argmax(logit_curr) + 1)
-        logits.append(list(zip(logit_curr, range(1, len(logit_curr) + 1))))
+            logits_list_curr.append(float(probs.item()))
 
-    preds = [int(x) for x in preds]
+            frame_progress_bar.set_description(f"Current Best Frame: {np.argmax(logits_list_curr) + 1}")
 
-    reformatted_logits = [[(float(l[0]), l[1]) for l in x] for x in logits]
+        preds.append(int(np.argmax(logits_list_curr) + 1))
+        logits.append(zip(logits_list_curr, range(1, len(logits_list_curr) + 1)))
 
-    if args.mode == "streammamba_spfs_uniform":
-        root_folder = "results_uniform"
-    else:
-        root_folder = "results"
-
-    rnn_type = "lstm" if args.mode == "lstm" else ("mamba_spfs" if use_spfs else "mamba")
-    folder_name = f"{root_folder}/results_{rnn_type}_ct_{args.confidence_threshold}_mcs_{args.max_consecutive_skips}"
-
-    # Add sampling rate to folder name if using uniform mode
-    if "uniform" in args.mode:
-        folder_name += f"_sr_{args.sampling_rate}"
+    folder_name = get_output_folder(args, expected_rnn_type)
 
     logits_dir = os.path.join(folder_name, "logits")
+    logits_path = os.path.join(logits_dir, f"{args.dataset_name}.json")
+
     preds_dir = os.path.join(folder_name, "predictions", args.dataset_name)
+    preds_path = os.path.join(preds_dir, "8.json")
+
     metrics_file = os.path.join(folder_name, "metrics.json")
 
     os.makedirs(logits_dir, exist_ok=True)
     os.makedirs(preds_dir, exist_ok=True)
 
-    json_write(reformatted_logits, os.path.join(logits_dir, f"{args.dataset_name}.json"))
-    json_write(preds, os.path.join(preds_dir, "8.json"))
+    json_write(logits, logits_path)
+    json_write(preds, preds_path)
 
-    metrics = compute_accuracy(preds, dataset)
+    metrics = compute_frame_accuracy(preds, dataset)
 
     run_details = {
         "confidence_threshold": args.confidence_threshold,
         "max_consecutive_skips": args.max_consecutive_skips,
         "mode": args.mode,
-        "rnn_type": rnn_type,
+        "rnn_type": expected_rnn_type,
         "model_config_path": args.config_dir,
         "command": " ".join(sys.argv),
         "performance": metrics,
     }
     json_write(run_details, metrics_file)
 
-    print(f"Saved MAE results to {os.path.join(preds_dir, '8.json')}")
-    print(f"Saved logits to {os.path.join(logits_dir, f'{args.dataset_name}.json')}")
+    print(f"Saved MAE results to {preds_path}")
+    print(f"Saved logits to {logits_path}")
     print(f"Saved MAE metrics to {metrics_file}")
     print(f"Average MAE accuracy: {metrics['average']:.2f}")
 
