@@ -56,10 +56,6 @@ def main():
     # Initialize Pygame
     pygame.init()
 
-    # Enable key repeat:
-    # pygame.key.set_repeat(delay, interval)
-    # delay: time in milliseconds before the first KEYDOWN event is sent
-    # interval: time in milliseconds between subsequent KEYDOWN events
     pygame.key.set_repeat(250, 50)  # Wait 250ms, then repeat every 50ms
 
     # Load frames
