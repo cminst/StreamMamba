@@ -413,7 +413,7 @@ def main():
             frame_progress_bar.set_description(f"Current Best Frame: {np.argmax(logits_list_curr) + 1}")
 
         preds.append(int(np.argmax(logits_list_curr) + 1))
-        logits.append(zip(logits_list_curr, range(1, len(logits_list_curr) + 1)))
+        logits.append(list(zip(logits_list_curr, range(1, len(logits_list_curr) + 1))))
 
     folder_name = get_output_folder(args, expected_rnn_type)
 
