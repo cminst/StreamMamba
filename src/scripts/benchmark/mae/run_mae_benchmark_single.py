@@ -169,27 +169,22 @@ def forward_streaming_spfs(
     ret_texts = [texts[i] for i in idxs.long().cpu().numpy()[0].tolist()]
     return ret_texts, probs.float().cpu().numpy()[0], new_hidden_state, spfs_info
 
-
-# Normalize dataset entries into a common format:
-# For ACT75: expected as [video_path, phrase, gt_frames]
-# For FLASH: input format is [video_path, [peaks...]] per video.
-# We expand each peak into an entry:
-#   (video_path, caption, relative_gt_peak_frames, build_up, drop_off)
 def normalize_dataset(args, raw_dataset):
+    """
+    Normalize dataset entries into a common format:
+    For ACT75: expected as [video_path, phrase, gt_frames]
+    For FLASH: input format is [video_path, [peaks...]] per video.
+    We expand each peak into an entry:
+      (video_path, caption, relative_gt_peak_frames, build_up, drop_off)
+    """
     dataset = []
     if args.dataset_name.lower() == "flash":
         for item in raw_dataset:
             # Each item: [video_path, [ {build_up, peak_start, peak_end, drop_off, caption}, ... ]]
-            if not isinstance(item, (list, tuple)) or len(item) != 2:
-                continue
-
             video_path, peaks = item
 
             for peak in peaks:
-                build_up = peak["build_up"]
-                peak_start = peak["peak_start"]
-                peak_end = peak["peak_end"]
-                drop_off = peak["drop_off"]
+                build_up, peak_start, peak_end, drop_off = peak["build_up"], peak["peak_start"], peak["peak_end"], peak["drop_off"]
                 caption = str(peak.get("caption", "")).strip()
 
                 # Compute relative GT frames within [build_up, drop_off] inclusive
@@ -239,6 +234,15 @@ def get_output_folder(args, rnn_type):
         return spfs_template
 
 def get_checkpoint_weights(ckpt_path):
+    """
+    Load the checkpoint weights from a given file path.
+
+    Args:
+        ckpt_path (str): Path to the checkpoint file.
+
+    Returns:
+        dict: The state dictionary of the model weights.
+    """
     ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
 
     if "model" in ckpt.keys():
@@ -252,6 +256,16 @@ def get_checkpoint_weights(ckpt_path):
     return state_dict
 
 def load_checkpoint(args, model):
+    """
+    Load a model checkpoint from a specified file or download it from Hugging Face if not provided.
+
+    Args:
+        args: Parsed command-line arguments containing checkpoint information.
+        model: The model to load the checkpoint into.
+
+    This function handles downloading the checkpoint from Hugging Face if a local file is not provided.
+    It also checks for missing or unexpected keys in the checkpoint and prints relevant information.
+    """
     ckpt_path = args.checkpoint_file
     if ckpt_path is None:
         print(f"Downloading {args.hf_checkpoint_file} from Hugging Face...")
