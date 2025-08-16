@@ -415,17 +415,19 @@ def main():
             text_emb = txt_encoder.encode_text(model.tokenizer(phrase).to(device)).squeeze(0)
             text_emb = text_emb / (text_emb.norm() + 1e-12)
 
-            frame_progress_bar = tqdm(range(len(frames)), desc="Scoring frames (MobileCLIP)")
+            frame_progress_bar = tqdm(range(len(frames)), desc=f"Scoring frames ({args.mode})")
+
             for frame_idx in frame_progress_bar:
                 img_emb = vit.classifier(vit.extract_features(get_frame_tensor(frames[frame_idx]))[0]).squeeze(0)
                 img_emb = img_emb / (img_emb.norm() + 1e-12)
+
                 # Cosine similarity in [-1, 1]
                 sim = float(torch.dot(img_emb, text_emb).item())
                 logits_list_curr.append(sim)
                 frame_progress_bar.set_description(f"Best Frame: {np.argmax(logits_list_curr) + 1}")
         else:
             # StreamMamba and LSTM variants
-            frame_progress_bar = tqdm(range(7, len(frames)))
+            frame_progress_bar = tqdm(range(7, len(frames)), desc=f"Scoring frames ({args.mode})")
 
             curr_hidden_state = model.streaming_vision_encoder.init_hidden(batch_size=1, device=device)
 
@@ -456,7 +458,7 @@ def main():
 
                 logits_list_curr.append(float(probs.item()))
 
-                frame_progress_bar.set_description(f"Current Best Frame: {np.argmax(logits_list_curr) + 1}")
+                frame_progress_bar.set_description(f"Best Frame: {np.argmax(logits_list_curr) + 1}")
 
         preds.append(int(np.argmax(logits_list_curr) + 1))
         logits.append(list(zip(logits_list_curr, range(1, len(logits_list_curr) + 1))))
