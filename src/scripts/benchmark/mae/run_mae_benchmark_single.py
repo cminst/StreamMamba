@@ -8,7 +8,7 @@ from huggingface_hub import hf_hub_download
 
 def ensure_dependencies():
     """Ensure required packages are installed."""
-    required_packages = {"einops", "peft", "sentencepiece", "iv2-utils", "huggingface_hub"}
+    required_packages = {"einops", "peft", "sentencepiece", "iv2-utils", "huggingface_hub", "tqdm"}
 
     missing = []
     for package in required_packages:
@@ -64,6 +64,7 @@ def parse_args():
             "streammamba_spfs",
             "streammamba_spfs_uniform",
             "lstm",
+            "mobileclip",
         ],
         help="Streaming configuration variant",
     )
@@ -118,7 +119,7 @@ def offset_predictions(preds, data):
     best = find_best_offset(preds, data)
     return [p + best for p in preds]
 
-def compute_frame_accuracy(preds: list[int], dataset: list) -> dict:
+def compute_frame_accuracy(preds: list, dataset: list) -> dict:
     """Return accuracy percentages within various frame offset thresholds."""
     thresholds = [2, 4, 8, 16, 32]
     preds_adj = offset_predictions(preds, dataset)
@@ -217,6 +218,9 @@ def get_output_folder(args, rnn_type):
     """Generate output folder name based on configuration."""
     base = "results_uniform" if "uniform" in args.mode else "results"
 
+    if rnn_type == "mobileclip":
+        return f"{base}/results_mobileclip"
+
     spfs_template = f"{base}/results_{rnn_type}_ct_{args.confidence_threshold}_mcs_{args.max_consecutive_skips}"
     uniform_sampling_template = f"{base}/results_{rnn_type}_{args.sampling_rate}"
 
@@ -301,24 +305,48 @@ def main():
     config = Config.from_file(config_path)
     config = eval_dict_leaf(config)
 
-    if args.mode == "lstm":
-        use_spfs = False
-        expected_rnn_type = "lstm"
-        args.hf_checkpoint_file = "lstm_ckpt.pt" # Download LSTM checkpoint from HF Repo
-    else:
-        use_spfs = args.mode in [
-            "streammamba_spfs",
-            "streammamba_spfs_uniform",
-        ]
-        expected_rnn_type = "mamba_spfs" if use_spfs else "mamba"
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # Mode configurations (including SPFS and other settings)
+    mode_configs = {
+        "lstm": {
+            "use_spfs": False,
+            "rnn_type": "lstm",
+            "checkpoint": "lstm_ckpt.pt"
+        },
+        "streammamba_spfs": {
+            "use_spfs": True,
+            "rnn_type": "mamba_spfs"
+        },
+        "streammamba_spfs_uniform": {
+            "use_spfs": True,
+            "rnn_type": "mamba_spfs"
+        },
+        "streammamba_dense": {
+            "use_spfs": False,
+            "rnn_type": "mamba"
+        },
+        "mobileclip": {
+            "use_spfs": False,
+            "rnn_type": "mobileclip"
+        }
+    }
+
+    mode_config = mode_configs.get(args.mode, mode_configs["mobileclip"])
+
+    use_spfs, expected_rnn_type = mode_config["use_spfs"], mode_config["rnn_type"]
+
+    # Set checkpoint file if specified for this mode
+    if "checkpoint" in mode_config:
+        args.hf_checkpoint_file = mode_config["checkpoint"]
 
     current_rnn_type = config.model.streaming_vision_encoder.rnn_type
 
-    if current_rnn_type != expected_rnn_type:
-        print(f"Warning: Overriding RNN type from '{current_rnn_type}' to '{expected_rnn_type}'.")
-        config.model.streaming_vision_encoder.rnn_type = expected_rnn_type
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # Only override for RNN variants
+    if expected_rnn_type in ["lstm", "mamba", "mamba_spfs"]:
+        if current_rnn_type != expected_rnn_type:
+            print(f"Warning: Overriding RNN type from '{current_rnn_type}' to '{expected_rnn_type}'.")
+            config.model.streaming_vision_encoder.rnn_type = expected_rnn_type
 
     # Helper for simplifying frame -> tensor conversion
     def get_frame_tensor(frame):
@@ -375,42 +403,60 @@ def main():
         else:
             frames = all_frames
 
-        # Need at least 8 frames to warm up and score
-        assert len(frames) >= 8, f"Video must have at least 8 frames, but only found {len(frames)} ({len(all_frames)} total)."
+        # For StreamMamba variants we require ≥8 frames for warmup. For MobileCLIP baseline we do not.
+        if args.mode != "mobileclip":
+            assert len(frames) >= 8, f"Video must have at least 8 frames, but only found {len(frames)} ({len(all_frames)} total)."
 
         logits_list_curr = []
-        frame_progress_bar = tqdm(range(7, len(frames)))
+        if args.mode == "mobileclip":
+            vit = model.streaming_vision_encoder.vit_lite
+            txt_encoder = model.text_encoder
 
-        curr_hidden_state = model.streaming_vision_encoder.init_hidden(batch_size=1, device=device)
+            text_emb = txt_encoder.encode_text(model.tokenizer(phrase).to(device)).squeeze(0)
+            text_emb = text_emb / (text_emb.norm() + 1e-12)
 
-        for frame_idx in range(7):
-            initial_frame_tensor = get_frame_tensor(frames[frame_idx])
+            frame_progress_bar = tqdm(range(len(frames)), desc="Scoring frames (MobileCLIP)")
+            for frame_idx in frame_progress_bar:
+                img_emb = vit.classifier(vit.extract_features(get_frame_tensor(frames[frame_idx]))[0]).squeeze(0)
+                img_emb = img_emb / (img_emb.norm() + 1e-12)
+                # Cosine similarity in [-1, 1]
+                sim = float(torch.dot(img_emb, text_emb).item())
+                logits_list_curr.append(sim)
+                frame_progress_bar.set_description(f"Best Frame: {np.argmax(logits_list_curr) + 1}")
+        else:
+            # StreamMamba and LSTM variants
+            frame_progress_bar = tqdm(range(7, len(frames)))
 
-            _, curr_hidden_state, _ = model.streaming_vision_encoder(
-                initial_frame_tensor,
-                curr_hidden_state,
-                confidence_threshold=1.0,
-                max_consecutive_skips=0,
-            )
+            curr_hidden_state = model.streaming_vision_encoder.init_hidden(batch_size=1, device=device)
 
-            logits_list_curr.append(0.0)
+            for frame_idx in range(7):
+                initial_frame_tensor = get_frame_tensor(frames[frame_idx])
 
-        for frame_idx in frame_progress_bar:
-            # Determine if the current frame should be skipped (forcefully) in uniform sampling mode
-            confidence_threshold, max_consecutive_skips = get_skip_parameters(frame_idx, args, use_spfs)
+                _, curr_hidden_state, _ = model.streaming_vision_encoder(
+                    initial_frame_tensor,
+                    curr_hidden_state,
+                    confidence_threshold=1.0,
+                    max_consecutive_skips=0,
+                )
 
-            _, probs, curr_hidden_state, _ = forward_streaming_spfs(
-                get_frame_tensor(frames[frame_idx]),
-                [phrase],
-                model,
-                confidence_threshold=confidence_threshold,
-                max_consecutive_skips=max_consecutive_skips,
-                prev_hidden_state=curr_hidden_state,
-            )
+                logits_list_curr.append(0.0)
 
-            logits_list_curr.append(float(probs.item()))
+            for frame_idx in frame_progress_bar:
+                # Determine if the current frame should be skipped (forcefully) in uniform sampling mode
+                confidence_threshold, max_consecutive_skips = get_skip_parameters(frame_idx, args, use_spfs)
 
-            frame_progress_bar.set_description(f"Current Best Frame: {np.argmax(logits_list_curr) + 1}")
+                _, probs, curr_hidden_state, _ = forward_streaming_spfs(
+                    get_frame_tensor(frames[frame_idx]),
+                    [phrase],
+                    model,
+                    confidence_threshold=confidence_threshold,
+                    max_consecutive_skips=max_consecutive_skips,
+                    prev_hidden_state=curr_hidden_state,
+                )
+
+                logits_list_curr.append(float(probs.item()))
+
+                frame_progress_bar.set_description(f"Current Best Frame: {np.argmax(logits_list_curr) + 1}")
 
         preds.append(int(np.argmax(logits_list_curr) + 1))
         logits.append(list(zip(logits_list_curr, range(1, len(logits_list_curr) + 1))))
