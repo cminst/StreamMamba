@@ -65,6 +65,7 @@ def parse_args():
             "streammamba_spfs_uniform",
             "lstm",
             "mobileclip",
+            "internvideo2",
         ],
         help="Streaming configuration variant",
     )
@@ -218,6 +219,9 @@ def get_output_folder(args, rnn_type):
     """Generate output folder name based on configuration."""
     base = "results_uniform" if "uniform" in args.mode else "results"
 
+    if rnn_type == "internvideo2":
+        return f"{base}/results_internvideo2"
+
     if rnn_type == "mobileclip":
         return f"{base}/results_mobileclip"
 
@@ -292,6 +296,7 @@ def main():
 
     from demo.config import Config, eval_dict_leaf
     from demo.utils import _frame_from_video
+    from demo.utils import retrieve_text
     from demo.utils import frames2tensor
     from tqdm import tqdm
     from models.internvideo2_clip_small import InternVideo2_CLIP_small
@@ -329,6 +334,10 @@ def main():
         "mobileclip": {
             "use_spfs": False,
             "rnn_type": "mobileclip"
+        },
+        "internvideo2": {
+            "use_spfs": False,
+            "rnn_type": "internvideo2"
         }
     }
 
@@ -424,6 +433,27 @@ def main():
                 # Cosine similarity in [-1, 1]
                 sim = float(torch.dot(img_emb, text_emb).item())
                 logits_list_curr.append(sim)
+                frame_progress_bar.set_description(f"Best Frame: {np.argmax(logits_list_curr) + 1}")
+        elif args.mode == "internvideo2":
+            # Windowed InternVideo2 baseline: use last 8 frames for each step
+            frame_progress_bar = tqdm(range(len(frames)), desc=f"Scoring frames ({args.mode})")
+
+            for frame_idx in frame_progress_bar:
+                if frame_idx < 7:
+                    logits_list_curr.append(0.0)
+                    continue
+
+                window_frames = frames[frame_idx - 7 : frame_idx + 1]
+                _, probs = retrieve_text(
+                    window_frames,
+                    [phrase],
+                    model=model,
+                    topk=1,
+                    config=config,
+                    device=device,
+                )
+
+                logits_list_curr.append(float(probs[0]))
                 frame_progress_bar.set_description(f"Best Frame: {np.argmax(logits_list_curr) + 1}")
         else:
             # StreamMamba and LSTM variants
