@@ -84,6 +84,12 @@ def parse_args():
         ],
         help="Dataset to evaluate on",
     )
+    parser.add_argument(
+        "--fps",
+        type=float,
+        default=None,
+        help="Override evaluation FPS. If set, only evaluates approximately every (orig_fps/fps) frames and repeats the last logit for skipped frames.",
+    )
 
     return parser.parse_args()
 
@@ -227,6 +233,11 @@ def get_output_folder(args, rnn_type):
         spfs_template = f"{base}/results_{rnn_type}_ct_{args.confidence_threshold}_mcs_{args.max_consecutive_skips}"
         uniform_sampling_template = f"{base}/results_{rnn_type}_{args.sampling_rate}"
         folder = uniform_sampling_template if "uniform" in args.mode else spfs_template
+
+    # Append FPS to folder name if explicitly set
+    if args.fps is not None:
+        fps_str = str(int(args.fps)) if float(args.fps).is_integer() else str(args.fps)
+        folder = f"{folder}_fps_{fps_str}"
 
     return folder
 
@@ -400,6 +411,16 @@ def main():
         video_capture = cv2.VideoCapture(video_path)
         all_frames = [x for x in _frame_from_video(video_capture)]
 
+        # Determine stride for FPS override using original video FPS
+        stride = 1
+        if args.fps is not None:
+            try:
+                orig_fps = float(video_capture.get(cv2.CAP_PROP_FPS))
+            except Exception:
+                orig_fps = 0.0
+            if orig_fps and orig_fps > 0 and args.fps > 0:
+                stride = max(1, int(round(orig_fps / float(args.fps))))
+
         # For FLASH dataset, crop to the [build_up, drop_off] segment
         if seg_start is not None and seg_end is not None:
             start_i = max(0, int(seg_start))
@@ -408,6 +429,9 @@ def main():
             frames = all_frames[start_i : end_i + 1]
         else:
             frames = all_frames
+
+        # Build evaluation indices for the (possibly cropped) frame list
+        eval_indices = set(range(len(frames))) if args.fps is None else set(range(0, len(frames), stride))
 
         # For StreamMamba variants we require ≥8 frames for warmup. For MobileCLIP baseline we do not.
         if args.mode != "mobileclip":
@@ -422,35 +446,47 @@ def main():
             text_emb = text_emb / (text_emb.norm() + 1e-12)
 
             frame_progress_bar = tqdm(range(len(frames)), desc=f"Scoring frames ({args.mode})")
+            last_sim = 0.0
 
             for frame_idx in frame_progress_bar:
-                img_emb = vit.classifier(vit.extract_features(get_frame_tensor(frames[frame_idx]))[0]).squeeze(0)
-                img_emb = img_emb / (img_emb.norm() + 1e-12)
+                # FPS override: only evaluate at selected indices, repeat last logit otherwise
+                if args.fps is not None and frame_idx not in eval_indices:
+                    logits_list_curr.append(last_sim)
+                else:
+                    img_emb = vit.classifier(vit.extract_features(get_frame_tensor(frames[frame_idx]))[0]).squeeze(0)
+                    img_emb = img_emb / (img_emb.norm() + 1e-12)
 
-                # Cosine similarity in [-1, 1]
-                sim = float(torch.dot(img_emb, text_emb).item())
-                logits_list_curr.append(sim)
+                    # Cosine similarity in [-1, 1]
+                    sim = float(torch.dot(img_emb, text_emb).item())
+                    last_sim = sim
+                    logits_list_curr.append(sim)
                 frame_progress_bar.set_description(f"Best Frame: {np.argmax(logits_list_curr) + 1}")
         elif args.mode == "internvideo2":
             # Windowed InternVideo2 baseline: use last 8 frames for each step
             frame_progress_bar = tqdm(range(len(frames)), desc=f"Scoring frames ({args.mode})")
+            last_logit = 0.0
 
             for frame_idx in frame_progress_bar:
                 if frame_idx < 7:
                     logits_list_curr.append(0.0)
                     continue
 
-                window_frames = frames[frame_idx - 7 : frame_idx + 1]
-                _, probs = retrieve_text(
-                    window_frames,
-                    [phrase],
-                    model=model,
-                    topk=1,
-                    config=config,
-                    device=device,
-                )
+                if args.fps is not None and frame_idx not in eval_indices:
+                    # Step function: repeat last evaluated logit
+                    logits_list_curr.append(last_logit)
+                else:
+                    window_frames = frames[frame_idx - 7 : frame_idx + 1]
+                    _, probs = retrieve_text(
+                        window_frames,
+                        [phrase],
+                        model=model,
+                        topk=1,
+                        config=config,
+                        device=device,
+                    )
 
-                logits_list_curr.append(float(probs[0]))
+                    last_logit = float(probs[0])
+                    logits_list_curr.append(last_logit)
                 frame_progress_bar.set_description(f"Best Frame: {np.argmax(logits_list_curr) + 1}")
         else:
             # StreamMamba and LSTM variants
@@ -470,20 +506,27 @@ def main():
 
                 logits_list_curr.append(0.0)
 
+            last_logit = 0.0
+
             for frame_idx in frame_progress_bar:
-                # Determine if the current frame should be skipped (forcefully) in uniform sampling mode
-                confidence_threshold, max_consecutive_skips = get_skip_parameters(frame_idx, args, use_spfs)
+                # FPS override: if this frame isn't selected, repeat last logit without updating the model state
+                if args.fps is not None and frame_idx not in eval_indices:
+                    logits_list_curr.append(last_logit)
+                else:
+                    # Determine if the current frame should be skipped (forcefully) in uniform sampling mode
+                    confidence_threshold, max_consecutive_skips = get_skip_parameters(frame_idx, args, use_spfs)
 
-                _, probs, curr_hidden_state, _ = forward_streaming_spfs(
-                    get_frame_tensor(frames[frame_idx]),
-                    [phrase],
-                    model,
-                    confidence_threshold=confidence_threshold,
-                    max_consecutive_skips=max_consecutive_skips,
-                    prev_hidden_state=curr_hidden_state,
-                )
+                    _, probs, curr_hidden_state, _ = forward_streaming_spfs(
+                        get_frame_tensor(frames[frame_idx]),
+                        [phrase],
+                        model,
+                        confidence_threshold=confidence_threshold,
+                        max_consecutive_skips=max_consecutive_skips,
+                        prev_hidden_state=curr_hidden_state,
+                    )
 
-                logits_list_curr.append(float(probs.item()))
+                    last_logit = float(probs.item())
+                    logits_list_curr.append(last_logit)
 
                 frame_progress_bar.set_description(f"Best Frame: {np.argmax(logits_list_curr) + 1}")
 
@@ -516,6 +559,7 @@ def main():
         "model_config_path": args.config_dir,
         "command": " ".join(sys.argv),
         "performance": metrics,
+        "fps": args.fps,
     }
     json_write(run_details, metrics_file)
 
