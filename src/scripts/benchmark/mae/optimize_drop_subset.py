@@ -2,6 +2,8 @@ import argparse
 import json
 import os
 from typing import List, Tuple, Dict, Any
+from multiprocessing import Pool, cpu_count
+from functools import partial
 
 
 def parse_args():
@@ -52,6 +54,12 @@ def parse_args():
         "--out",
         default=None,
         help="Optional output JSON path to save summary",
+    )
+    parser.add_argument(
+        "--num-workers",
+        type=int,
+        default=None,
+        help="Number of parallel workers (default: number of CPU cores)",
     )
     return parser.parse_args()
 
@@ -189,6 +197,21 @@ def evaluate_objective(
     return score, {"max": m_max, "min": m_min}
 
 
+def evaluate_single_drop(
+    idx: int,
+    keep: List[int],
+    preds_max: List[int],
+    preds_min: List[int],
+    dataset: List[Tuple],
+    search_range: Tuple[int, int],
+    objective: str,
+) -> Tuple[int, float, Dict[str, Any]]:
+    """Evaluate dropping a single index and return (idx, score, metrics)"""
+    trial_keep = [i for i in keep if i != idx]
+    score, metrics = evaluate_objective(trial_keep, preds_max, preds_min, dataset, search_range, objective)
+    return idx, score, metrics
+
+
 def greedy_optimize(
     preds_max: List[int],
     preds_min: List[int],
@@ -196,7 +219,11 @@ def greedy_optimize(
     max_drop: int,
     search_range: Tuple[int, int],
     objective: str,
+    num_workers: int | None = None,
 ):
+    if num_workers is None:
+        num_workers = cpu_count()
+    
     n = len(dataset)
     keep = list(range(n))
     best_score, best_metrics = evaluate_objective(keep, preds_max, preds_min, dataset, search_range, objective)
@@ -204,15 +231,34 @@ def greedy_optimize(
     dropped: List[int] = []
     history: List[Dict[str, Any]] = []
 
+    print(f"Using {num_workers} parallel workers for optimization...")
+
     for step in range(max_drop):
+        if len(keep) == 0:
+            break
+            
+        # Create a partial function with fixed arguments
+        eval_func = partial(
+            evaluate_single_drop,
+            keep=keep,
+            preds_max=preds_max,
+            preds_min=preds_min,
+            dataset=dataset,
+            search_range=search_range,
+            objective=objective,
+        )
+        
+        # Parallel evaluation of all candidates
+        with Pool(num_workers) as pool:
+            results = pool.map(eval_func, keep)
+        
+        # Find the best drop from all results
         improved = False
         candidate_best = best_score
         candidate_drop = None
         candidate_metrics = None
-
-        for idx in keep:
-            trial_keep = [i for i in keep if i != idx]
-            score, metrics = evaluate_objective(trial_keep, preds_max, preds_min, dataset, search_range, objective)
+        
+        for idx, score, metrics in results:
             if score > candidate_best + 1e-12:
                 improved = True
                 candidate_best = score
@@ -236,6 +282,8 @@ def greedy_optimize(
                 "metrics": best_metrics,
             }
         )
+        
+        print(f"  Step {step + 1}/{max_drop}: dropped index {candidate_drop}, score={best_score:.4f}")
 
     # If no drop performed, compute final metrics on full set
     if not history:
@@ -290,6 +338,7 @@ def main():
         args.max_num_samples,
         search_range,
         args.objective,
+        args.num_workers,
     )
 
     print("\nOptimized result:")
