@@ -220,18 +220,15 @@ def get_output_folder(args, rnn_type):
     base = "results_uniform" if "uniform" in args.mode else "results"
 
     if rnn_type == "internvideo2":
-        return f"{base}/results_internvideo2"
-
-    if rnn_type == "mobileclip":
-        return f"{base}/results_mobileclip"
-
-    spfs_template = f"{base}/results_{rnn_type}_ct_{args.confidence_threshold}_mcs_{args.max_consecutive_skips}"
-    uniform_sampling_template = f"{base}/results_{rnn_type}_{args.sampling_rate}"
-
-    if "uniform" in args.mode:
-        return uniform_sampling_template
+        folder = f"{base}/results_internvideo2"
+    elif rnn_type == "mobileclip":
+        folder = f"{base}/results_mobileclip"
     else:
-        return spfs_template
+        spfs_template = f"{base}/results_{rnn_type}_ct_{args.confidence_threshold}_mcs_{args.max_consecutive_skips}"
+        uniform_sampling_template = f"{base}/results_{rnn_type}_{args.sampling_rate}"
+        folder = uniform_sampling_template if "uniform" in args.mode else spfs_template
+
+    return folder
 
 def get_checkpoint_weights(ckpt_path):
     """
