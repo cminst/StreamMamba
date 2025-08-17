@@ -438,42 +438,40 @@ def main():
             assert len(frames) >= 8, f"Video must have at least 8 frames, but only found {len(frames)} ({len(all_frames)} total)."
 
         logits_list_curr = []
+
+        last_value = 0.0  # for FPS skipping
+
         if args.mode == "mobileclip":
             vit = model.streaming_vision_encoder.vit_lite
             txt_encoder = model.text_encoder
-
             text_emb = txt_encoder.encode_text(model.tokenizer(phrase).to(device)).squeeze(0)
             text_emb = text_emb / (text_emb.norm() + 1e-12)
+        elif args.mode != "internvideo2": # StreamMamba / LSTM
+            curr_hidden_state = model.streaming_vision_encoder.init_hidden(batch_size=1, device=device)
 
-            frame_progress_bar = tqdm(range(len(frames)), desc=f"Scoring frames ({args.mode})")
-            last_sim = 0.0
+        frame_progress_bar = tqdm(
+            range(len(frames)),
+            desc=f"Scoring frames ({args.mode})",
+            unit="frame",
+        )
 
-            for frame_idx in frame_progress_bar:
-                # FPS override: only evaluate at selected indices, repeat last logit otherwise
-                if args.fps is not None and frame_idx not in eval_indices:
-                    logits_list_curr.append(last_sim)
+        for frame_idx in frame_progress_bar:
+            skip_for_fps = args.fps is not None and frame_idx not in eval_indices
+
+            if args.mode == "mobileclip":
+                if skip_for_fps:
+                    logit = last_value
                 else:
-                    img_emb = vit.classifier(vit.extract_features(get_frame_tensor(frames[frame_idx]))[0]).squeeze(0)
+                    raw_feat, _ = vit.extract_features(get_frame_tensor(frames[frame_idx]))
+                    img_emb = vit.classifier(raw_feat).squeeze(0)
                     img_emb = img_emb / (img_emb.norm() + 1e-12)
+                    logit = float(torch.dot(img_emb, text_emb).item())
 
-                    # Cosine similarity in [-1, 1]
-                    sim = float(torch.dot(img_emb, text_emb).item())
-                    last_sim = sim
-                    logits_list_curr.append(sim)
-                frame_progress_bar.set_description(f"Best Frame: {np.argmax(logits_list_curr) + 1}")
-        elif args.mode == "internvideo2":
-            # Windowed InternVideo2 baseline: use last 8 frames for each step
-            frame_progress_bar = tqdm(range(len(frames)), desc=f"Scoring frames ({args.mode})")
-            last_logit = 0.0
-
-            for frame_idx in frame_progress_bar:
+            elif args.mode == "internvideo2":
                 if frame_idx < 7:
-                    logits_list_curr.append(0.0)
-                    continue
-
-                if args.fps is not None and frame_idx not in eval_indices:
-                    # Step function: repeat last evaluated logit
-                    logits_list_curr.append(last_logit)
+                    logit = 0.0
+                elif skip_for_fps:
+                    logit = last_value
                 else:
                     window_frames = frames[frame_idx - 7 : frame_idx + 1]
                     _, probs = retrieve_text(
@@ -484,38 +482,22 @@ def main():
                         config=config,
                         device=device,
                     )
+                    logit = float(probs[0])
 
-                    last_logit = float(probs[0])
-                    logits_list_curr.append(last_logit)
-                frame_progress_bar.set_description(f"Best Frame: {np.argmax(logits_list_curr) + 1}")
-        else:
-            # StreamMamba and LSTM variants
-            frame_progress_bar = tqdm(range(7, len(frames)), desc=f"Scoring frames ({args.mode})")
-
-            curr_hidden_state = model.streaming_vision_encoder.init_hidden(batch_size=1, device=device)
-
-            for frame_idx in range(7):
-                initial_frame_tensor = get_frame_tensor(frames[frame_idx])
-
-                _, curr_hidden_state, _ = model.streaming_vision_encoder(
-                    initial_frame_tensor,
-                    curr_hidden_state,
-                    confidence_threshold=1.0,
-                    max_consecutive_skips=0,
-                )
-
-                logits_list_curr.append(0.0)
-
-            last_logit = 0.0
-
-            for frame_idx in frame_progress_bar:
-                # FPS override: if this frame isn't selected, repeat last logit without updating the model state
-                if args.fps is not None and frame_idx not in eval_indices:
-                    logits_list_curr.append(last_logit)
+            else:
+                if frame_idx < 7:
+                    initial_frame_tensor = get_frame_tensor(frames[frame_idx])
+                    _, curr_hidden_state, _ = model.streaming_vision_encoder(
+                        initial_frame_tensor,
+                        curr_hidden_state,
+                        confidence_threshold=1.0,
+                        max_consecutive_skips=0,
+                    )
+                    logit = 0.0
+                elif skip_for_fps:
+                    logit = last_value
                 else:
-                    # Determine if the current frame should be skipped (forcefully) in uniform sampling mode
                     confidence_threshold, max_consecutive_skips = get_skip_parameters(frame_idx, args, use_spfs)
-
                     _, probs, curr_hidden_state, _ = forward_streaming_spfs(
                         get_frame_tensor(frames[frame_idx]),
                         [phrase],
@@ -524,11 +506,12 @@ def main():
                         max_consecutive_skips=max_consecutive_skips,
                         prev_hidden_state=curr_hidden_state,
                     )
+                    logit = float(probs.item())
 
-                    last_logit = float(probs.item())
-                    logits_list_curr.append(last_logit)
+            logits_list_curr.append(logit)
+            last_value = logit
 
-                frame_progress_bar.set_description(f"Best Frame: {np.argmax(logits_list_curr) + 1}")
+            frame_progress_bar.set_postfix_str(f"best={np.argmax(logits_list_curr) + 1}")
 
         preds.append(int(np.argmax(logits_list_curr) + 1))
         logits.append(list(zip(logits_list_curr, range(1, len(logits_list_curr) + 1))))
