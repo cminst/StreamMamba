@@ -72,7 +72,6 @@ class InternVideo2_CLIP_small(nn.Module):
         # Initialize temperature parameter
         self.temp = nn.parameter.Parameter(torch.ones([]) * config.model.temp)
         self.temp_min = config.model.temp_min
-        self.cache_txt = {}
 
         # Freeze model parameters if specified in the config
         if self.config.model.freeze_vision:
@@ -297,8 +296,6 @@ class InternVideo2_CLIP_small(nn.Module):
     def get_txt_feat(self,
                      text: str):
         """get the text features for the given text."""
-        if text in self.cache_txt:
-            return self.cache_txt[text]
         t_original = text
         with torch.no_grad():
             text = self.tokenizer(
@@ -310,7 +307,6 @@ class InternVideo2_CLIP_small(nn.Module):
             tfeat = self.encode_text(text)
             # tfeat = self.text_proj(tfeat)
             tfeat /= tfeat.norm(dim=-1, keepdim=True)
-        self.cache_txt[t_original] = tfeat
         return tfeat
 
     def build_vision_encoder(self):
