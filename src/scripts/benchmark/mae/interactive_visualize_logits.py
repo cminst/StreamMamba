@@ -402,7 +402,7 @@ def main():
         sys.exit(1)
 
     entry = dataset[args.index]
-    video_rel, caption, gt_frames, seg_start, seg_end = (entry + [None, None])[:5]
+    video_rel, caption, gt_frames, seg_start, seg_end = (list(entry) + [None, None])[:5]
     video_path = os.path.join(args.video_root, video_rel)
     args.video_path_internal = video_path # For FPS calculation
 
