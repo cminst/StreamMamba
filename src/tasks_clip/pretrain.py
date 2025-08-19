@@ -44,7 +44,8 @@ from utils.basic_utils import (
     SmoothedValue,
     setup_seed,
     info_nce_loss,
-    cosine_sim_loss
+    cosine_sim_loss,
+    normalize_embedding
 )
 from utils.config_utils import setup_main
 from utils.distributed import get_rank, is_main_process
@@ -239,17 +240,17 @@ def evaluate_streaming_similarity(
         return avg_similarity
 
     with torch.autocast("cuda", dtype=torch.bfloat16), torch.no_grad():
-        curr_hidden_state_streaming = model.streaming_vision_encoder.init_hidden(batch_size=1, device=device)
+        curr_hidden_state = model.streaming_vision_encoder.init_hidden(batch_size=1, device=device)
 
         logger.info(f"Warming up streaming model for evaluation with first {model_max_frames - 1} frames...")
 
         for i in range(model_max_frames - 1):
             frame_data = all_frames_raw[i]
             frame_tensor_batch = preprocess_frame(frame_data, streaming_transform, device)
-            frame_tensor_streaming_input = frame_tensor_batch.unsqueeze(2)
-            _, curr_hidden_state_streaming, _ = model.streaming_vision_encoder(
-                frame_tensor_streaming_input,
-                curr_hidden_state_streaming
+            frame = frame_tensor_batch.unsqueeze(2)
+            _, curr_hidden_state, _ = model.streaming_vision_encoder(
+                frame,
+                curr_hidden_state
             )
 
         logger.info("Warm-up complete for evaluation.")
@@ -257,36 +258,29 @@ def evaluate_streaming_similarity(
         logger.info(f"Processing and comparing from frame {model_max_frames - 1} onwards...")
 
         for frame_idx in range(model_max_frames - 1, len(all_frames_raw)):
-            current_frame_data_streaming = all_frames_raw[frame_idx]
+            current_frame_raw = all_frames_raw[frame_idx]
 
-            frame_tensor_batch = preprocess_frame(current_frame_data_streaming, streaming_transform, device)
+            frame_tensor_batch = preprocess_frame(current_frame_raw, streaming_transform, device)
 
-            frame_tensor_streaming_input = frame_tensor_batch.unsqueeze(2)
+            frame = frame_tensor_batch.unsqueeze(2)
 
-            raw_stream_embedding, new_hidden_state, _ = model.streaming_vision_encoder(
-                frame_tensor_streaming_input,
-                curr_hidden_state_streaming
-            )
-
+            stream_embedding, curr_hidden_state, _ = model.streaming_vision_encoder(frame, curr_hidden_state)
             if config.model.use_streaming_vision_align:
-                aligned_stream_embedding = model.streaming_vision_align(raw_stream_embedding)
+                stream_embedding = model.streaming_vision_align(stream_embedding)
             else:
-                aligned_stream_embedding = model.vision_align(raw_stream_embedding)
-            stream_embedding = aligned_stream_embedding / (aligned_stream_embedding.norm(dim=-1, keepdim=True) + 1e-9)
-
-            curr_hidden_state_streaming = new_hidden_state
+                stream_embedding = model.vision_align(stream_embedding)
+            stream_embedding = normalize_embedding(stream_embedding)
 
             window_start_idx = frame_idx - model_max_frames + 1
             window_end_idx = frame_idx + 1
             current_window_frames_data = all_frames_raw[window_start_idx : window_end_idx] # List of BGR numpy arrays
 
-            list_of_frame_tensors = [preprocess_frame(f, regular_transform, device) for f in current_window_frames_data]
-            window_tensor_full = torch.stack(list_of_frame_tensors, dim=2) # Shape: [B=1, C, T, H, W]
+            frame_tensors = [preprocess_frame(f, regular_transform, device) for f in current_window_frames_data]
+            window_tensor_full = torch.stack(frame_tensors, dim=2) # Shape: [B=1, C, T, H, W]
 
-            raw_target_embedding = model.vision_encoder(window_tensor_full)
-
-            aligned_target_embedding = model.vision_align(raw_target_embedding)
-            target_embedding = aligned_target_embedding / (aligned_target_embedding.norm(dim=-1, keepdim=True) + 1e-9)
+            target_embedding = model.vision_encoder(window_tensor_full)
+            target_embedding = model.vision_align(target_embedding)
+            target_embedding = normalize_embedding(target_embedding)
 
             similarity = torch.nn.functional.cosine_similarity(stream_embedding, target_embedding, dim=1)
 
@@ -456,7 +450,7 @@ def train(
 
             num_windows = T - (MODEL_MAX_FRAMES - 1)
 
-            assert num_windows >= 1, "Number of sliding windows must be at least 1."
+            assert num_windows > 0, "Number of sliding windows must be at least 1."
 
             # Initialize accumulators for the entire batch item
             total_loss_for_item = 0.0
@@ -471,7 +465,7 @@ def train(
                 # Get stream embedding
                 stream_embedding, new_hidden_state, _ = model.streaming_vision_encoder(curr_frame, curr_hidden_state)
                 stream_embedding = vision_align(stream_embedding)
-                stream_embedding = stream_embedding / (stream_embedding.norm(dim=-1, keepdim=True) + 1e-9)
+                stream_embedding = normalize_embedding(stream_embedding)
 
                 # Get target embedding
                 window_start = frame_idx - MODEL_MAX_FRAMES + 1
@@ -484,7 +478,7 @@ def train(
                     else:
                         target_embedding = model_without_ddp.vision_encoder(current_window_frames_orig)
                         target_embedding = model_without_ddp.vision_align(target_embedding)
-                        target_embedding = target_embedding / (target_embedding.norm(dim=-1, keepdim=True) + 1e-9)
+                        target_embedding = normalize_embedding(target_embedding)
 
                 # Calculate loss for this step
                 cosine_loss_val = cosine_sim_loss(stream_embedding, target_embedding)

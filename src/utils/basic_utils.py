@@ -345,3 +345,6 @@ def cosine_sim_loss(student_embedding, teacher_embedding):
     B = student_embedding.shape[0]
     target = torch.ones(B, dtype=student_embedding.dtype, device=student_embedding.device)
     return CosineEmbeddingLoss(student_embedding, teacher_embedding, target)
+
+def normalize_embedding(embedding):
+    return embedding / (embedding.norm(dim=-1, keepdim=True) + 1e-9)
