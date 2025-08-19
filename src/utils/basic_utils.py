@@ -342,9 +342,10 @@ def info_nce_loss(query, key, captions, temperature=0.07):
     return F.cross_entropy(logits, targets)
 
 def cosine_sim_loss(student_embedding, teacher_embedding):
-    B = student_embedding.shape[0]
-    target = torch.ones(B, dtype=student_embedding.dtype, device=student_embedding.device)
-    return CosineEmbeddingLoss(student_embedding, teacher_embedding, target)
+    # Cosine similarity ranges from -1 to 1, so we negate it to make it a loss
+    # (higher similarity = lower loss)
+    cos_sim = F.cosine_similarity(student_embedding, teacher_embedding)
+    return -cos_sim.mean()
 
 def normalize_embedding(embedding):
     return embedding / (embedding.norm(dim=-1, keepdim=True) + 1e-9)
