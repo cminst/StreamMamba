@@ -187,5 +187,5 @@ class StreamMamba(nn.Module):
 
         if self.rnn_type == 'mamba_spfs':
             self.last_output = student_embedding
-
+        #print(spfs_info)
         return student_embedding, current_hidden_state, spfs_info

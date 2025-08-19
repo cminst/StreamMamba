@@ -402,7 +402,7 @@ def main():
         sys.exit(1)
 
     entry = dataset[args.index]
-    video_rel, caption, gt_frames, seg_start, seg_end = (entry + [None, None])[:5]
+    video_rel, caption, gt_frames, seg_start, seg_end = (list(entry) + [None, None])[:5]
     video_path = os.path.join(args.video_root, video_rel)
     args.video_path_internal = video_path # For FPS calculation
 
@@ -438,6 +438,7 @@ def main():
     disp_w, disp_h = int(f_w * scale), int(f_h * scale)
     screen_w, screen_h = disp_w * 2, disp_h
     screen = pygame.display.set_mode((screen_w, screen_h))
+    pygame.key.set_repeat(250, 50)  # Wait 250ms, then repeat every 50ms
     pygame.display.set_caption(f"'{active_prompt}' - {os.path.basename(video_path)} [{args.dataset_name}] (#{args.index})")
     try: font = pygame.font.Font(None, 36)
     except: font = pygame.font.SysFont("sans", 30)
