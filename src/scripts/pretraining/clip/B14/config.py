@@ -137,7 +137,7 @@ mode = "pt"
 
 # ========================= others ==========================
 output_dir = './train_outputs_pretrain/'  # output dir
-resume = True  # if True, load optimizer and scheduler states as well
+resume = False  # if True, load optimizer and scheduler states as well
 debug = False
 log_freq = 1
 seed = 42
