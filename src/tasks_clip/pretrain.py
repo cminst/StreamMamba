@@ -456,80 +456,86 @@ def train(
 
             num_sliding_windows = T - (MODEL_MAX_FRAMES - 1)
 
-            assert num_sliding_windows >= 1, "Number of sliding windows must be at least 1 for loss calculation."
+            assert num_sliding_windows >= 1, "Number of sliding windows must be at least 1."
 
-            batch_total_loss = 0.0
-            batch_total_nce = 0.0
-            batch_total_sim = 0.0
+            # Initialize accumulators for the entire batch item
+            total_loss_for_item = 0.0
+            batch_total_cosine_loss_item = 0.0
+            batch_total_nce_loss_item = 0.0
+            batch_total_sim_item = 0.0
 
             for window_idx in range(num_sliding_windows):
                 frame_idx = (MODEL_MAX_FRAMES - 1) + window_idx
-
-                # Stream Embedding Calculation
                 curr_frame = image[:, :, frame_idx, :, :].unsqueeze(2)
 
+                # Get stream embedding
                 stream_embedding, new_hidden_state, _ = model.streaming_vision_encoder(curr_frame, curr_hidden_state)
                 stream_embedding = vision_align(stream_embedding)
                 stream_embedding = stream_embedding / (stream_embedding.norm(dim=-1, keepdim=True) + 1e-9)
 
-                # Target Embedding Calculation (using original image and full encoder)
+                # Get target embedding
                 window_start = frame_idx - MODEL_MAX_FRAMES + 1
                 window_end = frame_idx + 1
                 current_window_frames_orig = image[:, :, window_start:window_end, :, :]
 
-                if precomputed_emb is not None:
-                    target_embedding = precomputed_emb[:, window_idx, :].to(device)
-                else:
-                    with torch.no_grad():
+                with torch.no_grad(): # Target is always detached
+                    if precomputed_emb is not None:
+                        target_embedding = precomputed_emb[:, window_idx, :].to(device)
+                    else:
                         target_embedding = model_without_ddp.vision_encoder(current_window_frames_orig)
                         target_embedding = model_without_ddp.vision_align(target_embedding)
                         target_embedding = target_embedding / (target_embedding.norm(dim=-1, keepdim=True) + 1e-9)
 
-                # Loss for this sliding window step
+                # Calculate loss for this step
                 cosine_loss_val = cosine_sim_loss(stream_embedding, target_embedding)
                 info_nce_val = info_nce_loss(
-                    stream_embedding,
-                    stream_embedding.detach(),
-                    text,
-                    temperature=config.get('contrastive_temperature', 0.07),
+                    stream_embedding, stream_embedding.detach(), text,
+                    temperature=config.get('contrastive_temperature', 0.07)
                 ) if nce_lambda > 0 else torch.tensor(0.0, device=device)
 
-                loss = cosine_loss_val + nce_lambda * info_nce_val
+                step_loss = cosine_loss_val + nce_lambda * info_nce_val
 
-                current_sim = F.cosine_similarity(stream_embedding.detach(), target_embedding.detach(), dim=1).mean()
+                # Accumulate the loss tensor
+                total_loss_for_item += step_loss
 
-                # Accumulate loss and similarity for batch-level logging
-                batch_total_loss += cosine_loss_val.item()
-                batch_total_nce += info_nce_val.item()
-                batch_total_sim += current_sim.item()
+                # Accumulate for logging
+                with torch.no_grad():
+                    current_sim = F.cosine_similarity(stream_embedding, target_embedding, dim=1).mean()
+                    batch_total_cosine_loss_item += cosine_loss_val.item()
+                    batch_total_nce_loss_item += info_nce_val.item()
+                    batch_total_sim_item += current_sim.item()
 
-                # Backprop & optimization
-                if hasattr(config, "deepspeed") and config.deepspeed.enable:
-                    model.backward(loss)
-                    model.step()
-                else:
-                    optimizer.zero_grad()
-                    if config.use_half_precision:
-                        scaler.scale(loss).backward()
-                        if config.optimizer.max_grad_norm > 0:
-                            scaler.unscale_(optimizer)
-                            torch.nn.utils.clip_grad_norm_(model.parameters(), config.optimizer.max_grad_norm)
-                        scaler.step(optimizer)
-                        scaler.update()
-                    else:
-                        loss.backward()
-                        if config.optimizer.max_grad_norm > 0:
-                            torch.nn.utils.clip_grad_norm_(model.parameters(), config.optimizer.max_grad_norm)
-                        optimizer.step()
+                # Update state without detaching
+                curr_hidden_state = new_hidden_state
 
-                    scheduler.step()
+            # Average the loss over the number of steps
+            final_loss = total_loss_for_item / num_sliding_windows
 
-                curr_hidden_state = tuple(h.detach().clone() for h in new_hidden_state)
+        # Single backward pass and optimizer step for the whole sequence
+        if hasattr(config, "deepspeed") and config.deepspeed.enable:
+            model.backward(final_loss)
+            model.step()
+        else:
+            optimizer.zero_grad()
+            if config.use_half_precision:
+                scaler.scale(final_loss).backward()
+                if config.optimizer.max_grad_norm > 0:
+                    scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), config.optimizer.max_grad_norm)
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                final_loss.backward()
+                if config.optimizer.max_grad_norm > 0:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), config.optimizer.max_grad_norm)
+                optimizer.step()
+
+            scheduler.step()
 
         # Averages for logging
-        final_batch_cosine_loss = batch_total_loss / num_sliding_windows
-        final_batch_nce_loss = batch_total_nce / num_sliding_windows
-        average_cosine_sim = batch_total_sim / num_sliding_windows
+        final_batch_cosine_loss = batch_total_cosine_loss_item / num_sliding_windows
+        final_batch_nce_loss = batch_total_nce_loss_item / num_sliding_windows
+        average_cosine_sim = batch_total_sim_item / num_sliding_windows
 
         learning_rate = optimizer.param_groups[0]["lr"]
 
