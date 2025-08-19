@@ -4,7 +4,9 @@ import io
 import os
 import json
 import logging
+import torch.nn.functional as F
 import random
+from torch.nn import CosineEmbeddingLoss
 import time
 from collections import defaultdict, deque
 import datetime
@@ -317,3 +319,29 @@ def merge_state_dicts(state_dicts, override=True):
                 continue
             merged[key] = value
     return merged
+
+def info_nce_loss(query, key, captions, temperature=0.07):
+    """Compute InfoNCE loss using in-batch negatives with caption masking."""
+    # query, key: [B, D]
+    query = F.normalize(query, dim=1)
+    key = F.normalize(key, dim=1)
+    logits = query @ key.t() / temperature
+
+    B = logits.size(0)
+    if isinstance(captions, (list, tuple)):
+        captions_tensor = [str(c) for c in captions]
+    else:
+        captions_tensor = [str(c) for c in captions]
+    same_caption = torch.zeros((B, B), dtype=torch.bool, device=logits.device)
+    for i in range(B):
+        for j in range(B):
+            if i != j and captions_tensor[i] == captions_tensor[j]:
+                same_caption[i, j] = True
+    logits = logits.masked_fill(same_caption, float('-inf'))
+    targets = torch.arange(B, device=logits.device)
+    return F.cross_entropy(logits, targets)
+
+def cosine_sim_loss(student_embedding, teacher_embedding):
+    B = student_embedding.shape[0]
+    target = torch.ones(B, dtype=student_embedding.dtype, device=student_embedding.device)
+    return CosineEmbeddingLoss(student_embedding, teacher_embedding, target)

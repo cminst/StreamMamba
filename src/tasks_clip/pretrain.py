@@ -23,7 +23,6 @@ import torch.distributed as dist
 import wandb
 from huggingface_hub import hf_hub_download
 from PIL import Image
-from torch.nn import CosineEmbeddingLoss
 from torch.utils.data._utils.collate import default_collate
 from torchvision import transforms
 from torchvision.transforms.functional import InterpolationMode
@@ -36,10 +35,17 @@ from dataset import (
     create_stateful_sampler,
     add_precomputed_embeddings,
 )
+import torch.nn.functional as F
 from dataset.serialize import local_broadcast_process_authkey
 from models import *
 from tasks_clip.shared_utils import get_media_types, setup_model
-from utils.basic_utils import MetricLogger, SmoothedValue, setup_seed
+from utils.basic_utils import (
+    MetricLogger,
+    SmoothedValue,
+    setup_seed,
+    info_nce_loss,
+    cosine_sim_loss
+)
 from utils.config_utils import setup_main
 from utils.distributed import get_rank, is_main_process
 from utils.logger import log_dict_to_wandb, setup_wandb
@@ -48,6 +54,7 @@ from utils.optimizer import (
     create_optimizer_params_group,
     extend_optimizer_with_param_groups,
 )
+from easydict import EasyDict as edict
 
 logger = logging.getLogger(__name__)
 
@@ -244,7 +251,8 @@ def evaluate_streaming_similarity(
                 frame_tensor_streaming_input,
                 curr_hidden_state_streaming
             )
-        logger.info(f"Warm-up complete for evaluation.")
+
+        logger.info("Warm-up complete for evaluation.")
 
         logger.info(f"Processing and comparing from frame {model_max_frames - 1} onwards...")
 
@@ -315,7 +323,6 @@ def evaluate_streaming_similarity(
         else:
             logger.warning("No cosine similarities were calculated during evaluation.")
 
-
     # Set model back to training mode
     model.train()
     logger.info("Evaluation complete. Model set back to train() mode.")
@@ -328,7 +335,6 @@ def train(
     model,
     train_loaders,
     optimizer,
-    tokenizer,
     epoch,
     global_step,
     device,
@@ -336,8 +342,7 @@ def train(
     scaler,
     config,
     data_type,
-    skip_num=0,
-    log_debug=False,
+    skip_num=0
 ):
     """
     Performs one epoch of training with periodic evaluation.
@@ -367,8 +372,10 @@ def train(
     metric_logger.add_meter("lr", SmoothedValue(window=1, fmt="{value:.6f}"))
     metric_logger.add_meter("different_lr", SmoothedValue(window=1, fmt="{value:.6f}"))
     metric_logger.add_meter("temperature", SmoothedValue(window=1, fmt="{value:.4f}"))
-    metric_logger.add_meter("video-stream-nce-loss", SmoothedValue(window=1, fmt="{value:.4f}"))
-    metric_logger.add_meter("eval_avg_sim", SmoothedValue(window=1, fmt="{value:.4f}")) # For periodic eval
+    metric_logger.add_meter("video_stream_target_loss", SmoothedValue(window=1, fmt="{value:.4f}"))
+    metric_logger.add_meter("video_stream_target_sim", SmoothedValue(window=1, fmt="{value:.4f}"))
+    metric_logger.add_meter("video_stream_nce_loss", SmoothedValue(window=1, fmt="{value:.4f}"))
+    metric_logger.add_meter("eval_avg_sim", SmoothedValue(window=1, fmt="{value:.4f}"))
 
     header = f"Training: [Epoch {epoch}]"
     log_freq = config.log_freq
@@ -376,7 +383,8 @@ def train(
     media_types = get_media_types(train_loaders) # Defined here for use in MetaLoader_rs
 
     if config.distributed:
-        for loader in train_loaders: loader.sampler.set_epoch(epoch)
+        for loader in train_loaders:
+            loader.sampler.set_epoch(epoch)
 
     # Aggregate loaders
     seed = config.seed + epoch
@@ -388,12 +396,16 @@ def train(
 
     num_batches_train = len(train_loader_agg)
     logger.info(f"Training loader set up, {num_batches_train} batches.")
-    enable_mobileclip_ft = getattr(config, "enable_mobileclip_ft", False)
+    enable_mobileclip_ft = config.get("enable_mobileclip_ft", False)
     unfreeze_step = 0
+
     if enable_mobileclip_ft:
-        unfreeze_ratio = getattr(config, "unfreeze_mobileclip_pct", None)
-        if unfreeze_ratio is not None:
-            unfreeze_step = int(num_batches_train * unfreeze_ratio)
+        unfreeze_step = int(num_batches_train * config.unfreeze_mobileclip_pct)
+
+    if config.model.use_streaming_vision_align:
+        vision_align = model_without_ddp.streaming_vision_align
+    else:
+        vision_align = model_without_ddp.vision_align
 
     progress_bar = tqdm(
         train_loader_agg,
@@ -402,35 +414,7 @@ def train(
         disable=not is_main_process()
     )
 
-
     MODEL_MAX_FRAMES = config.num_frames
-    cosine_loss_base_fn = CosineEmbeddingLoss()
-
-    def cosine_sim_loss(student_embedding, teacher_embedding):
-        B = student_embedding.shape[0]
-        target = torch.ones(B, dtype=student_embedding.dtype, device=student_embedding.device)
-        return cosine_loss_base_fn(student_embedding, teacher_embedding, target)
-
-    def info_nce_loss(query, key, captions, temperature=0.07):
-        """Compute InfoNCE loss using in-batch negatives with caption masking."""
-        # query, key: [B, D]
-        query = torch.nn.functional.normalize(query, dim=1)
-        key = torch.nn.functional.normalize(key, dim=1)
-        logits = query @ key.t() / temperature
-
-        B = logits.size(0)
-        if isinstance(captions, (list, tuple)):
-            captions_tensor = [str(c) for c in captions]
-        else:
-            captions_tensor = [str(c) for c in captions]
-        same_caption = torch.zeros((B, B), dtype=torch.bool, device=logits.device)
-        for i in range(B):
-            for j in range(B):
-                if i != j and captions_tensor[i] == captions_tensor[j]:
-                    same_caption[i, j] = True
-        logits = logits.masked_fill(same_caption, float('-inf'))
-        targets = torch.arange(B, device=logits.device)
-        return torch.nn.functional.cross_entropy(logits, targets)
 
     for i, data_pair in enumerate(progress_bar):
         if (
@@ -439,95 +423,67 @@ def train(
             and i >= unfreeze_step
             and config.model.freeze_mobileclip_vision
         ):
-            unfreeze_mobileclip_vision(
-                model_without_ddp, optimizer, scheduler, config
-            )
+            unfreeze_mobileclip_vision(model_without_ddp, optimizer, scheduler, config)
 
         batch = data_pair[1]
         if len(batch) == 4:
-            image, text, _, teacher_emb = batch
+            image, text, _, precomputed_emb = batch
         else:
             image, text, _ = batch
-            teacher_emb = None
+            precomputed_emb = None
 
         image = image.to(device, non_blocking=True)
 
-        if getattr(config, 'enable_contrastive_distillation', False):
-            nce_start = int(num_batches_train * getattr(config, 'contrastive_warmup_pct', 0.0))
-            if i >= nce_start:
-                ramp = min((i - nce_start) / float(getattr(config, 'contrastive_ramp_iters', 1)), 1.0)
-                nce_lambda = getattr(config, 'contrastive_lambda', 0.0) * ramp
-            else:
-                nce_lambda = 0.0
-        else:
-            nce_lambda = 0.0
+        nce_lambda = 0.0
 
-        if log_debug and i == 0 :
-            logger.info(f"Original data: image shape: {image.shape}, text: {text}")
+        if config.get('enable_contrastive_distillation', False):
+            nce_start = int(num_batches_train * config.contrastive_warmup_pct)
+            if i >= nce_start:
+                ramp = min((i - nce_start) / float(config.contrastive_ramp_iters), 1.0)
+                nce_lambda = config.contrastive_lambda * ramp
 
         with torch.cuda.amp.autocast(enabled=config.use_half_precision, dtype=data_type):
-            gamma = beta = None
-            if getattr(model.streaming_vision_encoder, "rnn_type", "") == "cross_mamba_film":
-                text_input = tokenizer(
-                    text,
-                    padding="max_length",
-                    truncation=True,
-                    max_length=config.max_txt_l,
-                    return_tensors="pt",
-                ).to(device)
-                with torch.no_grad():
-                    prompt_vec = model_without_ddp.encode_text(text_input)
-                gamma, beta = model.streaming_vision_encoder.rnn.prepare_prompt(prompt_vec)
             image = image.permute(0, 2, 1, 3, 4)
             B, C, T, H, W = image.shape
 
-            mc_image = image
-
-            assert T >= MODEL_MAX_FRAMES, f"Video (orig) has {T} frames, needs {MODEL_MAX_FRAMES}."
+            assert T >= MODEL_MAX_FRAMES, f"Video has {T} frames, needs {MODEL_MAX_FRAMES}."
 
             curr_hidden_state = model.streaming_vision_encoder.init_hidden(batch_size=B, device=device)
             with torch.no_grad(): # Warm-up phase does not require gradients
                 for frame_idx in range(MODEL_MAX_FRAMES - 1):
-                    initial_frame_mc = mc_image[:, :, frame_idx, :, :].unsqueeze(2)
-                    _, curr_hidden_state, _ = model.streaming_vision_encoder(initial_frame_mc, curr_hidden_state, gamma, beta)
+                    initial_frame_mc = image[:, :, frame_idx, :, :].unsqueeze(2)
+                    _, curr_hidden_state, _ = model.streaming_vision_encoder(initial_frame_mc, curr_hidden_state)
 
             num_sliding_windows = T - (MODEL_MAX_FRAMES - 1)
 
             assert num_sliding_windows >= 1, "Number of sliding windows must be at least 1 for loss calculation."
 
-            batch_total_loss_for_logging = 0.0
-            batch_total_nce_for_logging = 0.0
-            batch_total_sim_for_logging = 0.0
+            batch_total_loss = 0.0
+            batch_total_nce = 0.0
+            batch_total_sim = 0.0
 
-            for frame_window_step_idx in range(num_sliding_windows):
-                current_frame_in_video_idx = (MODEL_MAX_FRAMES - 1) + frame_window_step_idx
+            for window_idx in range(num_sliding_windows):
+                frame_idx = (MODEL_MAX_FRAMES - 1) + window_idx
 
-                # Store hidden state that was input to the streaming_vision_encoder for this step (for debug saving)
-                hidden_state_fed_to_encoder_this_step = curr_hidden_state
+                # Stream Embedding Calculation
+                curr_frame = image[:, :, frame_idx, :, :].unsqueeze(2)
 
-                # Stream Embedding Calculation (using mc_image and streaming encoder)
-                current_streaming_frame_mc = mc_image[:, :, current_frame_in_video_idx, :, :].unsqueeze(2)
-                raw_stream_emb_mc, new_hidden_state_mc_updated, _ = model.streaming_vision_encoder(
-                    current_streaming_frame_mc, hidden_state_fed_to_encoder_this_step, gamma, beta
-                )
-                if config.model.use_streaming_vision_align:
-                    aligned_stream_emb_mc = model_without_ddp.streaming_vision_align(raw_stream_emb_mc)
-                else:
-                    aligned_stream_emb_mc = model_without_ddp.vision_align(raw_stream_emb_mc)
-                stream_embedding = aligned_stream_emb_mc / (aligned_stream_emb_mc.norm(dim=-1, keepdim=True) + 1e-9)
+                stream_embedding, new_hidden_state, _ = model.streaming_vision_encoder(curr_frame, curr_hidden_state)
+                stream_embedding = vision_align(stream_embedding)
+                stream_embedding = stream_embedding / (stream_embedding.norm(dim=-1, keepdim=True) + 1e-9)
 
                 # Target Embedding Calculation (using original image and full encoder)
-                window_start_idx = current_frame_in_video_idx - MODEL_MAX_FRAMES + 1
-                window_end_idx = current_frame_in_video_idx + 1
-                current_window_frames_orig = image[:, :, window_start_idx:window_end_idx, :, :]
+                window_start = frame_idx - MODEL_MAX_FRAMES + 1
+                window_end = frame_idx + 1
+                current_window_frames_orig = image[:, :, window_start:window_end, :, :]
 
-                if teacher_emb is not None:
-                    target_embedding = teacher_emb[:, frame_window_step_idx, :].to(device)
+                if precomputed_emb is not None:
+                    target_embedding = precomputed_emb[:, window_idx, :].to(device)
                 else:
                     with torch.no_grad():
-                        raw_target_emb_orig = model_without_ddp.vision_encoder(current_window_frames_orig)
-                        aligned_target_emb_orig = model_without_ddp.vision_align(raw_target_emb_orig)
-                        target_embedding = aligned_target_emb_orig / (aligned_target_emb_orig.norm(dim=-1, keepdim=True) + 1e-9)
+                        target_embedding = model_without_ddp.vision_encoder(current_window_frames_orig)
+                        target_embedding = model_without_ddp.vision_align(target_embedding)
+                        target_embedding = target_embedding / (target_embedding.norm(dim=-1, keepdim=True) + 1e-9)
 
                 # Loss for this sliding window step
                 cosine_loss_val = cosine_sim_loss(stream_embedding, target_embedding)
@@ -535,18 +491,17 @@ def train(
                     stream_embedding,
                     stream_embedding.detach(),
                     text,
-                    temperature=getattr(config, 'contrastive_temperature', 0.07),
+                    temperature=config.get('contrastive_temperature', 0.07),
                 ) if nce_lambda > 0 else torch.tensor(0.0, device=device)
 
                 loss = cosine_loss_val + nce_lambda * info_nce_val
 
+                current_sim = F.cosine_similarity(stream_embedding.detach(), target_embedding.detach(), dim=1).mean()
+
                 # Accumulate loss and similarity for batch-level logging
-                batch_total_loss_for_logging += cosine_loss_val.item()
-                batch_total_nce_for_logging += info_nce_val.item()
-                current_sim_for_logging = torch.nn.functional.cosine_similarity(
-                    stream_embedding.detach(), target_embedding.detach(), dim=1
-                ).mean().item()
-                batch_total_sim_for_logging += current_sim_for_logging
+                batch_total_loss += cosine_loss_val.item()
+                batch_total_nce += info_nce_val.item()
+                batch_total_sim += current_sim.item()
 
                 # Backprop & optimization
                 if hasattr(config, "deepspeed") and config.deepspeed.enable:
@@ -569,47 +524,34 @@ def train(
 
                     scheduler.step()
 
-                curr_hidden_state = tuple(h.detach().clone() for h in new_hidden_state_mc_updated)
-                if log_debug and i == 0 and frame_window_step_idx == 0 :
-                     logger.info(f"Saving debug data at (batch-wise) global step {global_step}, frame index {current_frame_in_video_idx}")
-                     logger.info(f"Saving to {config.output_dir}")
-                     save_debug_step_data(
-                        output_dir=config.output_dir, global_step=global_step, frame_idx=current_frame_in_video_idx,
-                        new_frame_input=current_streaming_frame_mc[0].cpu(),
-                        current_hidden_state_input=tuple(h[0].detach().cpu() for h in hidden_state_fed_to_encoder_this_step),
-                        actual_window_input=current_window_frames_orig[0].cpu(),
-                        stream_embedding_output=stream_embedding[0].cpu(),
-                        target_embedding_output=target_embedding[0].cpu(),
-                        model_state_dict=model_without_ddp.state_dict()
-                    )
+                curr_hidden_state = tuple(h.detach().clone() for h in new_hidden_state)
 
         # Averages for logging
-        final_batch_cosine_loss_for_logging = batch_total_loss_for_logging / num_sliding_windows
-        final_batch_nce_loss_for_logging = batch_total_nce_for_logging / num_sliding_windows
-        average_cosine_sim_for_logging = batch_total_sim_for_logging / num_sliding_windows
+        final_batch_cosine_loss = batch_total_loss / num_sliding_windows
+        final_batch_nce_loss = batch_total_nce / num_sliding_windows
+        average_cosine_sim = batch_total_sim / num_sliding_windows
 
-        metric_logger.update(**{'video-stream-target-loss': final_batch_cosine_loss_for_logging})
-        metric_logger.update(**{'video-stream-nce-loss': final_batch_nce_loss_for_logging})
-        metric_logger.update(**{'video-stream-target-sim': average_cosine_sim_for_logging})
-        metric_logger.update(lr=optimizer.param_groups[0]["lr"])
+        learning_rate = optimizer.param_groups[0]["lr"]
 
-        different_lr_value = None
-        for pg in optimizer.param_groups:
-            if pg.get("different_lr", False):
-                different_lr_value = pg["lr"]
-                break
+        # Search for different LR values in the parameter groups
+        different_lr_value = next((pg["lr"] for pg in optimizer.param_groups if pg.get("different_lr", False)), learning_rate)
 
-        if different_lr_value is not None:
-            metric_logger.update(different_lr=different_lr_value)
-        else:
-            metric_logger.update(different_lr=optimizer.param_groups[0]["lr"])
+        temperature = model_without_ddp.temp.item() if hasattr(model_without_ddp, 'temp') else None
 
-        if hasattr(model_without_ddp, 'temp'):
-            metric_logger.update(temperature=model_without_ddp.temp.item())
+        log_update_dict = edict(
+            video_stream_target_loss=final_batch_cosine_loss,
+            video_stream_nce_loss=final_batch_nce_loss,
+            video_stream_target_sim=average_cosine_sim,
+            lr=learning_rate,
+            different_lr=different_lr_value,
+            temperature=temperature,
+        )
+
+        metric_logger.update(**log_update_dict)
 
         global_step += 1
         if global_step % EVAL_FREQ_STEPS == 0 and is_main_process():
-            logger.info(f"Performing periodic evaluation at global step {global_step}...")
+            logger.info(f"Performing evaluation at global step {global_step}...")
             avg_sim = evaluate_streaming_similarity(
                 model=model_without_ddp, device=device, streaming_transform=mobileclip_transform,
                 video_path=EVAL_VIDEO_PATH, model_max_frames=MODEL_MAX_FRAMES, output_dir=config.output_dir,
@@ -617,23 +559,15 @@ def train(
             )
             metric_logger.update(eval_avg_sim=avg_sim)
             logger.info(f"Evaluation at step {global_step} complete. Avg Sim: {avg_sim:.4f}")
-            model.train() # Ensure model is back in training mode
+            model.train()
 
         # Log to console and W&B
         if i % log_freq == 0:
-            log_payload = {
-                "lr": optimizer.param_groups[0]["lr"],
-                "different_lr": different_lr_value,
-                "video-stream-target-loss": final_batch_cosine_loss_for_logging,
-                "video-stream-nce-loss": final_batch_nce_loss_for_logging,
-                "video-stream-target-sim": average_cosine_sim_for_logging
-            }
-            if hasattr(model_without_ddp, 'temp'): log_payload["temp"] = model_without_ddp.temp.item()
-            if global_step > 0 and global_step % EVAL_FREQ_STEPS == 0 and is_main_process(): # Matches original logic
+            if global_step > 0 and global_step % EVAL_FREQ_STEPS == 0 and is_main_process():
                 if 'eval_avg_sim' in metric_logger.meters and hasattr(metric_logger.meters['eval_avg_sim'], 'value'): # Check if eval was run
-                    log_payload["eval_sim"] = metric_logger.meters['eval_avg_sim'].value
+                    log_update_dict["eval_sim"] = metric_logger.meters['eval_avg_sim'].value
 
-            progress_bar.set_postfix(**log_payload)
+            progress_bar.set_postfix(**log_update_dict)
 
             if is_main_process():
                 logger.info(f"{header} [Step {i}] {metric_logger}")
@@ -669,9 +603,9 @@ def train(
                 logger.info(f"Saved iteration checkpoint to {config.output_dir}")
 
         # Debugging
-        if config.debug and global_step >= 20: # Adjusted for batch-level global_step
+        if config.debug and global_step >= 20:
             logger.info("Debug mode: breaking training loop early.")
-            break # Break outer batch loop
+            break
 
     metric_logger.synchronize_between_processes()
     logger.info(f"Averaged stats for Epoch [{epoch}]: {metric_logger.global_avg()}")
@@ -696,10 +630,11 @@ def clone_collate_fn(batch):
     batch = [clone_item(sample) for sample in batch]
     return default_collate(batch)
 
+
 def setup_dataloaders(config, mode="pt"):
     logger.info(f"Creating dataset for {mode}")
     train_datasets = create_dataset(f"{mode}_train", config)
-    train_datasets = add_precomputed_embeddings(train_datasets, getattr(config, "teacher_embedding_dir", None))
+    train_datasets = add_precomputed_embeddings(train_datasets, config.get("teacher_embedding_dir", None))
     media_types = get_media_types(train_datasets)
 
     if not config.distributed:
@@ -796,7 +731,6 @@ def main(config):
                 model,
                 train_loaders,
                 optimizer,
-                tokenizer,
                 epoch,
                 global_step,
                 device,
@@ -804,8 +738,7 @@ def main(config):
                 scaler,
                 config,
                 data_type,
-                skip_num = global_step - start_step,
-                log_debug = True
+                skip_num = global_step - start_step
             )
 
         # Save checkpoint before next epoch
