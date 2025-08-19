@@ -454,17 +454,17 @@ def train(
                     initial_frame_mc = image[:, :, frame_idx, :, :].unsqueeze(2)
                     _, curr_hidden_state, _ = model.streaming_vision_encoder(initial_frame_mc, curr_hidden_state)
 
-            num_sliding_windows = T - (MODEL_MAX_FRAMES - 1)
+            num_windows = T - (MODEL_MAX_FRAMES - 1)
 
-            assert num_sliding_windows >= 1, "Number of sliding windows must be at least 1."
+            assert num_windows >= 1, "Number of sliding windows must be at least 1."
 
             # Initialize accumulators for the entire batch item
             total_loss_for_item = 0.0
-            batch_total_cosine_loss_item = 0.0
-            batch_total_nce_loss_item = 0.0
+            batch_total_cosine_loss = 0.0
+            batch_total_nce_loss = 0.0
             batch_total_sim_item = 0.0
 
-            for window_idx in range(num_sliding_windows):
+            for window_idx in range(num_windows):
                 frame_idx = (MODEL_MAX_FRAMES - 1) + window_idx
                 curr_frame = image[:, :, frame_idx, :, :].unsqueeze(2)
 
@@ -501,15 +501,15 @@ def train(
                 # Accumulate for logging
                 with torch.no_grad():
                     current_sim = F.cosine_similarity(stream_embedding, target_embedding, dim=1).mean()
-                    batch_total_cosine_loss_item += cosine_loss_val.item()
-                    batch_total_nce_loss_item += info_nce_val.item()
+                    batch_total_cosine_loss += cosine_loss_val.item()
+                    batch_total_nce_loss += info_nce_val.item()
                     batch_total_sim_item += current_sim.item()
 
                 # Update state without detaching
                 curr_hidden_state = new_hidden_state
 
             # Average the loss over the number of steps
-            final_loss = total_loss_for_item / num_sliding_windows
+            final_loss = total_loss_for_item / num_windows
 
         # Single backward pass and optimizer step for the whole sequence
         if hasattr(config, "deepspeed") and config.deepspeed.enable:
@@ -533,9 +533,9 @@ def train(
             scheduler.step()
 
         # Averages for logging
-        final_batch_cosine_loss = batch_total_cosine_loss_item / num_sliding_windows
-        final_batch_nce_loss = batch_total_nce_loss_item / num_sliding_windows
-        average_cosine_sim = batch_total_sim_item / num_sliding_windows
+        final_batch_cosine_loss = batch_total_cosine_loss / num_windows
+        final_batch_nce_loss = batch_total_nce_loss / num_windows
+        average_cosine_sim = batch_total_sim_item / num_windows
 
         learning_rate = optimizer.param_groups[0]["lr"]
 
