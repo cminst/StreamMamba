@@ -692,6 +692,7 @@ def main(config):
     cudnn.benchmark = len(train_media_types) == 1
 
     model_cls = eval(config.model.get('model_cls', 'InternVideo2_CLIP'))
+
     (
         model,
         model_without_ddp,
