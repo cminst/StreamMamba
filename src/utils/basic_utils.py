@@ -349,3 +349,9 @@ def cosine_sim_loss(student_embedding, teacher_embedding):
 
 def normalize_embedding(embedding):
     return embedding / (embedding.norm(dim=-1, keepdim=True) + 1e-9)
+
+def get_data_type(config):
+    return torch.bfloat16 if config.get('use_bf16', True) else torch.float16
+
+def get_ckpt_filename(config, epoch):
+    return "ckpt_latest.pth" if config.get("save_latest", False) else f"ckpt_{epoch:02d}.pth"

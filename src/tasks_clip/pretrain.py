@@ -45,7 +45,9 @@ from utils.basic_utils import (
     setup_seed,
     info_nce_loss,
     cosine_sim_loss,
-    normalize_embedding
+    normalize_embedding,
+    get_data_type,
+    get_ckpt_filename,
 )
 from utils.config_utils import setup_main
 from utils.distributed import get_rank, is_main_process
@@ -674,7 +676,7 @@ def main(config):
 
     is_pretrain = config.mode == "pt"
 
-    logger.info(f"train_file: {config.train_file}")
+    logger.info(f"Training data file: {config.train_file}")
 
     setup_seed(config.seed + get_rank())
     device = torch.device(config.device)
@@ -682,7 +684,8 @@ def main(config):
     train_loaders, test_name2loaders, train_media_types = setup_dataloaders(
         config, mode=config.mode
     )
-    num_steps_per_epoch = sum(len(d) for d in train_loaders) * 247 # Using each individual frame for training
+
+    num_steps_per_epoch = sum(len(d) for d in train_loaders)
 
     config.scheduler.num_training_steps = num_steps_per_epoch * config.scheduler.epochs
     config.scheduler.num_warmup_steps = num_steps_per_epoch * config.scheduler.warmup_epochs
@@ -712,15 +715,13 @@ def main(config):
             set_rng_state(ckpt.get("rng_state"))
         except Exception as e:
             logger.warning(f"Failed to load RNG state from checkpoint: {e}")
+
     if is_main_process() and config.wandb.enable:
         wandb.watch(model)
 
-    if config.get('use_bf16', True):
-        data_type = torch.bfloat16
-    else:
-        data_type = torch.float16
+    data_type = get_data_type(config)
 
-    logger.info("Start training")
+    logger.info("===== Start Training =====")
     logger.info(f"Epoch: {start_epoch}")
     start_time = time.time()
     start_step = start_epoch * num_steps_per_epoch
@@ -741,25 +742,15 @@ def main(config):
                 skip_num = global_step - start_step
             )
 
+        ckpt_filename = get_ckpt_filename(config, epoch)
+
         # Save checkpoint before next epoch
         if hasattr(config, "deepspeed") and config.deepspeed.enable:
-            if config.get("save_latest", False):
-                tag = "ckpt_latest.pth"
-            else:
-                tag = f"ckpt_{epoch:02d}.pth"
-            model.save_checkpoint(config.output_dir, tag=tag, save_latest=False, exclude_frozen_parameters=True)
+            model.save_checkpoint(config.output_dir, tag=ckpt_filename, save_latest=False, exclude_frozen_parameters=True)
 
         elif is_main_process():
-            state_dict = model_without_ddp.state_dict()
-            param_grad_dict = {
-                k: v.requires_grad for (k, v) in model_without_ddp.named_parameters()
-            }
-            for k in list(state_dict.keys()):
-                if k in param_grad_dict.keys() and not param_grad_dict[k]:
-                    del state_dict[k]
-
             save_obj = {
-                "model": state_dict,
+                "model": model_without_ddp.state_dict(),
                 "optimizer": optimizer.state_dict(),
                 "scheduler": scheduler.state_dict(),
                 "scaler": scaler.state_dict(),
@@ -768,10 +759,8 @@ def main(config):
                 "global_step": global_step,
                 "rng_state": get_rng_state(),
             }
-            if config.get("save_latest", False):
-                torch.save(save_obj, join(config.output_dir, "ckpt_latest.pth"))
-            else:
-                torch.save(save_obj, join(config.output_dir, f"ckpt_{epoch:02d}.pth"))
+
+            torch.save(save_obj, join(config.output_dir, ckpt_filename))
 
         start_step = global_step
         dist.barrier()
