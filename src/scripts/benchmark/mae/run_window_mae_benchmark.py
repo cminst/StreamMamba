@@ -68,7 +68,7 @@ def parse_args():
     )
     parser.add_argument(
         "--hf-repo",
-        default="qingy2024/InternVideo2-B14",
+        default="cminst/StreamMamba",
         help="HuggingFace repo to download checkpoint from",
     )
     parser.add_argument(

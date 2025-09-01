@@ -35,7 +35,7 @@ inputs = dict(
 )
 
 # ========================= model ==========================
-model_repo = "qingy2024/InternVideo2-B14"
+model_repo = "cminst/StreamMamba"
 
 model = dict(
     model_cls="InternVideo2_CLIP_small",

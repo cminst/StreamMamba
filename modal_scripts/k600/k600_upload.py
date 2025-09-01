@@ -53,7 +53,7 @@ def upload_k600():
     if use_hf_large_folder:
         os.chdir("/root/k600/")
 
-        subprocess.run(["huggingface-cli","upload-large-folder","qingy2024/Slim_K600","--repo-type=dataset",".","--num-workers=16"], check=True)
+        subprocess.run(["huggingface-cli","upload-large-folder","cminst/Slim-Kinetics-2","--repo-type=dataset",".","--num-workers=16"], check=True)
     else:
         os.chdir("/root/k600/kinetics-dataset/k600/train/train")
         subprocess.run("python upload_slim_kinetics_mp.py".split(), check=True)

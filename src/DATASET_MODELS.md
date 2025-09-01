@@ -2,10 +2,10 @@
 
 ## Kinetics-600 Subset (Slim-Kinetics-2)
 
-The `slim_kinetics` dataset can be downloaded from [qingy2024/Slim-Kinetics-2](https://huggingface.co/datasets/qingy2024/Slim-Kinetics-2) on HuggingFace:
+The `slim_kinetics` dataset can be downloaded from [cminst/Slim-Kinetics-2](https://huggingface.co/datasets/cminst/Slim-Kinetics-2) on HuggingFace:
 
 ```
-huggingface-cli download qingy2024/Slim-Kinetics-2 --local-dir $DATASET_ROOT --repo-type=dataset
+huggingface-cli download cminst/Slim-Kinetics-2 --local-dir $DATASET_ROOT --repo-type=dataset
 ```
 
 ## Adding Custom Datasets
@@ -18,7 +18,7 @@ To add your own custom dataset, follow these steps:
    - `anno_path`: Path to your annotation file (JSON format)
    - `data_root`: Root directory containing your media files
    - `media_type`: Either "image" or "video"
-   
+
 Example for a custom video dataset:
 ```python
 custom_video_dataset=dict(
@@ -42,4 +42,4 @@ custom_image_dataset=dict(
 
 # Model Preparation
 
-Model files can be found at [qingy2024/InternVideo2-B14](https://huggingface.co/qingy2024/InternVideo2-B14/tree/main), although the model checkpoints are automatically downloaded in the training scripts.
+Model files can be found at [cminst/InternVideo2-B14](https://huggingface.co/cminst/InternVideo2-B14/tree/main), although the model checkpoints are automatically downloaded in the training scripts.

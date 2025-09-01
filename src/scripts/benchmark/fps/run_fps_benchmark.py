@@ -111,10 +111,10 @@ def main():
 
     if args.mamba_weights is None:
         print("Downloading mamba_mobileclip_ckpt.pt from Hugging Face...")
-        args.mamba_weights = hf_hub_download(repo_id="qingy2024/InternVideo2-B14", filename="mamba_mobileclip_ckpt.pt")
+        args.mamba_weights = hf_hub_download(repo_id="cminst/StreamMamba", filename="mamba_mobileclip_ckpt.pt")
     if args.spfs_weights is None:
         print("Downloading spfs_ckpt.pt from Hugging Face...")
-        args.spfs_weights = hf_hub_download(repo_id="qingy2024/InternVideo2-B14", filename="spfs_ckpt.pt")
+        args.spfs_weights = hf_hub_download(repo_id="cminst/StreamMamba", filename="spfs_ckpt.pt")
 
     intern_model = InternVideo2_CLIP_small(config)
     intern_model.to(device)
